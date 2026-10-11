@@ -1,0 +1,4 @@
+sim/scenarios
+sim/long_run
+sim/weather_change
+*.o
