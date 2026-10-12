@@ -46,3 +46,10 @@ After an alarm:
 
 The Conditions card shows waves, wind and tide, and picks CALM / MODERATE /
 ROUGH automatically. Tap a sea state to override it, or AUTO to go back.
+
+The header shows running time: **ON** (since power on), **ARMED** (since the
+rod was last armed) and **TOTAL** (all hours ever, saved every 10 minutes).
+
+**⚙ SETTINGS** opens live sliders (knock limit, repeated bite, sharp strike,
+pull angle, pull time, drop-back and knock beep on/off). Changes work
+immediately; **SAVE** keeps them after power off.

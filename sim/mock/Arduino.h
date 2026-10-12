@@ -23,6 +23,7 @@ public:
   String& operator+=(const char* o){ s+=o; return *this;}
   bool operator==(const char* o) const { return s==o; }
   const char* c_str() const { return s.c_str(); }
+  float toFloat() const { return atof(s.c_str()); }
 };
 struct SerialT {
   bool quiet=false;

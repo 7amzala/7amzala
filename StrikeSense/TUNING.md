@@ -1,7 +1,31 @@
 # StrikeSense tuning guide
 
-All numbers are in the **TUNING** section at the top of `StrikeSense.ino`.
-Change one number at a time, test, then change the next.
+## Start with the live settings
+
+Tap **⚙ SETTINGS** on the dashboard. Changes work immediately; the panel
+shows the live knock and tilt next to their limits, and the dashed lines on
+the graph move as you slide. Press **SAVE** to keep them after power off,
+**DEFAULT** to go back.
+
+| Problem | Slider | Move it |
+|---|---|---|
+| A small drag of the line gives SLOW PULL | **Pull angle** and/or **Pull time** | right (e.g. 1.0° → 1.5°, 2 s → 3 s) |
+| Real slow pulls detected too late / missed | **Pull angle** / **Pull time** | left |
+| Knock beeps with no fish | **Knock limit** | right (stricter) |
+| Small knocks missed | **Knock limit** | left (more sensitive) |
+| REPEATED BITE too easy / too hard | **Repeated bite** (count, seconds) | more knocks or fewer seconds = harder |
+| SHARP STRIKE from hits that aren't fish / missed real strikes | **Sharp strike** | right = harder hit needed / left |
+| Drop-back alarms not wanted | **Drop-back alarm** | OFF |
+| Single knock beeps annoying | **Single knock beep** | OFF (the KNOCK box still flashes) |
+
+How to test a slider: watch **TILT / PULL LINE** in the panel while you
+drag the line. The alarm needs the tilt to stay above the pull line for
+the pull time.
+
+## Deeper tuning in the code
+
+The other numbers are in the **TUNING** section at the top of
+`StrikeSense.ino`. Change one number at a time, test, then change the next.
 
 ## Before you tune: use the replay
 
@@ -25,18 +49,13 @@ dashed lines.
 | | `KNOCK_FLOOR` | lower (0.010 → 0.007) |
 | Wind gusts give knock beeps | `GUST_NOISE_MUL` | higher (1.0 → 1.5) |
 | Knock beeps with no fish, even when still | `knockDev` and `KNOCK_CONFIRM` | higher (3 → 4) |
-| Repeated bite alarm too easy | `REPEAT_COUNT` | 3 → 4 |
-| | `REPEAT_WINDOW_MS` | 4000 → 3000 |
-| Sharp strike not detected | `SHARP_ABS_G` | lower (0.10 → 0.08) |
-| | `sharpAlone` (6th number) | lower |
-| Sharp strike false alarms | `SHARP_ABS_G` | higher |
+| Sharp strike not detected (besides the slider) | `sharpAlone` (6th number) | lower |
 | False SLOW PULL / DROP-BACK in waves | `bucketMul` (3rd number) | higher (2.2 → 2.6) |
 | | `allowMul` (2nd number) | higher (0.6 → 0.7) |
 | | `SUSTAIN_PERIOD_PART` | higher (0.6 → 0.7) |
 | Slow pulls detected too late / missed | `bucketMul` | lower (2.2 → 1.9) |
 | | `allowMul` | lower |
-| Slow pulls missed in calm water | `PULL_MIN_ALLOW` | lower (0.40 → 0.30) |
-| | `BUCKET_MIN` | lower (0.80 → 0.6) |
+| Pull time feels longer in rough sea | `holdMul` (4th number) | lower (1.5 → 1.2) |
 | Alarm after a slow tide change | `BASELINE_TAU` | lower (60 → 40) |
 | Pull test is too hard in waves | `PULLTEST_MIN_DEG` | lower, or press SKIP |
 | Sea state label changes too often | `SEA_STATE_HOLD` | higher |
@@ -44,7 +63,7 @@ dashed lines.
 | Wind shows Strong while the sensor is still | changed sensor board? set `FORGET_SAVED_NOISE` to `true`, upload, then back to `false` | |
 
 Profile order in `SEA_PROFILES`:
-`knockDev, allowMul, bucketMul, holdMin, noDirAllowMul, sharpAlone, sharpWithPull`
+`knockDev, allowMul, bucketMul, holdMul, noDirAllowMul, sharpAlone, sharpWithPull`
 for CALM, MODERATE and ROUGH. Only the row for the current sea state is used.
 
 ## Sensor noise
@@ -62,12 +81,14 @@ noise, so a still sensor shows Calm.
 
 ## How the slow-pull "bucket" works
 
-- When the tip leans toward the water by more than the **allowance**, the
-  bucket fills. When it leans less, it drains.
+- When the tip leans toward the water by more than the **allowance** (the
+  **Pull angle** setting, or more in waves), the bucket fills. When it leans
+  less, it drains.
 - Waves fill it a little and drain it again. The code measures how full the
   waves alone get it, and makes the bucket **`bucketMul` times bigger** than that.
-- An alarm needs a **full bucket** that has also **stayed filled longer than a
-  wave can keep it filled** (`SUSTAIN_PERIOD_PART` × wave period).
+- An alarm needs a **full bucket** that has also stayed filled for the
+  **Pull time** setting, and in waves longer than a wave can keep it filled
+  (`SUSTAIN_PERIOD_PART` × wave period).
 - Drop-back is the same bucket in the other direction.
 
 ## Simulator results (before testing at sea)
@@ -79,10 +100,14 @@ These are simulated results, not real-world ones.
 
 | Sea | False alarms, 2 h without fish (×3 runs) | Knocks / repeated / sharp | Slow pull | Drop-back |
 |---|---|---|---|---|
-| Still / calm (±0.15°) | 0 (0–1 knock beeps) | 0.06 g knocks detected | 1.5° pull: ~4 s | ~4 s |
+| Still / calm (±0.15°) | 0 (0–1 knock beeps) | 0.06 g knocks detected | 2° pull: ~6 s | ~6 s |
 | Moderate (±1°, 6 s) | 0 | 0.06 g knocks detected | 3° pull: ~6 s | ~4–5 s |
 | Rough (±2.5°, 8 s) | 0 | 0.06 g knocks partly; 0.3 g hit detected | 5° pull: ~9 s | 5°: ~9 s |
 | Very rough (±4°, 10 s) | 0 | 0.3 g hit detected | 6° pull: missed | 6°: missed |
+
+Small drags with the default settings (calm): 0.8° for 1 s, 1.0° for 1.5 s
+and 1.5° for 1 s give **no alarm**; 1.5° held 4 s, 2° and 3° pulls alarm
+after 4 s.
 
 Known limits:
 

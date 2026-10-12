@@ -50,15 +50,14 @@ const float KNOCK_RELEASE = 0.50;        // knock ends halfway between normal no
 const int KNOCK_CONFIRM = 3;             // readings in a row above threshold (30 ms)
 const unsigned long KNOCK_MAX_MS = 800;  // longer than this = wind / handling
 const unsigned long KNOCK_GAP_MS = 150;  // dead time after each knock
-const unsigned long REPEAT_WINDOW_MS = 4000;
-const int REPEAT_COUNT = 3;
+// Repeated-bite count/window, sharp level, pull angle/time, drop-back
+// and knock beep are LIVE SETTINGS (dashboard -> SETTINGS). The
+// defaults are in DEFAULT_SETTINGS below.
 const unsigned long SHARP_PULL_WINDOW_MS = 600;
 const float SHARP_PULL_MIN_DEG = 1.0;    // plus: faster than a wave can move the tip
-const float SHARP_ABS_G = 0.08;          // knock energy (g) that is always a sharp strike (~0.27 g hit)
 
 // ---------- Slow pull / drop-back bucket ----------
 
-const float PULL_MIN_ALLOW = 0.40;       // deg, smallest wave allowance
 const float BUCKET_MIN = 0.80;           // deg*s, smallest bucket size
 const float DEFAULT_WAVE_PERIOD = 6.0;   // s, used until the real period is measured
 const float WAVE_FILL_TAU = 300.0;       // s, how long a big wave is remembered
@@ -111,7 +110,7 @@ struct SeaProfile
   float knockDev;        // knock threshold = noise + knockDev * spread
   float allowMul;        // pull allowance = allowMul * wave swing
   float bucketMul;       // bucket = bucketMul x the most the waves filled it
-  float holdMin;         // s, minimum pull time to fill the bucket
+  float holdMul;         // pull time setting x this (rougher sea = a bit longer)
   float noDirAllowMul;   // allowance when the pull direction is not known
   float sharpAlone;      // knock this strong = sharp strike on its own
   float sharpWithPull;   // knock this strong + fast tip pull = sharp strike
@@ -120,16 +119,67 @@ struct SeaProfile
 const SeaProfile SEA_PROFILES[3] =
 {
   // CALM
-  { 6.0, 0.50, 2.0, 1.2, 1.0, 6.0, 2.5 },
+  { 6.0, 0.50, 2.0, 1.0, 1.0, 6.0, 2.5 },
 
   // MODERATE
-  { 7.0, 0.60, 2.2, 1.6, 1.2, 6.5, 2.5 },
+  { 7.0, 0.60, 2.2, 1.2, 1.2, 6.5, 2.5 },
 
   // ROUGH
-  { 8.0, 0.70, 2.5, 2.2, 1.5, 7.0, 3.0 }
+  { 8.0, 0.70, 2.5, 1.5, 1.5, 7.0, 3.0 }
 };
 
 const char* SEA_NAMES[3] = { "calm", "mod", "rough" };
+
+// ---------- Live settings (changed from the dashboard) ----------
+
+struct UserSettings
+{
+  float knockMul;        // knock limit x this (below 1 = more sensitive)
+  float pullDeg;         // deg, tip must lean at least this far to count as a pull
+  float pullTime;        // s, a pull must last at least this long
+  float repeatCount;     // knocks for a REPEATED BITE
+  float repeatWindow;    // s, within this time
+  float sharpG;          // knock energy (g) that is always a SHARP STRIKE (~3x = hit size)
+  float dropOn;          // 1 = drop-back alarm on
+  float knockBeep;       // 1 = single knock beep on
+};
+
+const UserSettings DEFAULT_SETTINGS =
+{
+  1.0,    // knockMul
+  1.0,    // pullDeg
+  2.0,    // pullTime
+  3,      // repeatCount
+  4.0,    // repeatWindow
+  0.08,   // sharpG
+  1,      // dropOn
+  1       // knockBeep
+};
+
+struct SettingInfo
+{
+  const char* key;
+  float UserSettings::* field;
+  float low;
+  float high;
+};
+
+const SettingInfo SETTING_INFO[] =
+{
+  { "kmul",  &UserSettings::knockMul,     0.5,  2.5 },
+  { "pdeg",  &UserSettings::pullDeg,      0.4,  5.0 },
+  { "ptime", &UserSettings::pullTime,     0.5,  8.0 },
+  { "rcnt",  &UserSettings::repeatCount,  2,    5 },
+  { "rwin",  &UserSettings::repeatWindow, 2.0,  8.0 },
+  { "sharp", &UserSettings::sharpG,       0.03, 0.30 },
+  { "drop",  &UserSettings::dropOn,       0,    1 },
+  { "kbeep", &UserSettings::knockBeep,    0,    1 }
+};
+
+const int SETTING_COUNT = sizeof(SETTING_INFO) / sizeof(SETTING_INFO[0]);
+
+UserSettings settings = DEFAULT_SETTINGS;
+UserSettings savedSettings = DEFAULT_SETTINGS;
 
 // =====================================================
 // VECTOR HELPERS
@@ -219,6 +269,12 @@ enum RodState
 };
 
 RodState rodState = ST_LEARNING;
+
+// Running time: since power on, since armed, and all-time total
+unsigned long armedSince = 0;            // 0 = not armed
+unsigned long totalSecondsSaved = 0;     // all-time seconds saved in flash
+unsigned long totalSavedAtMs = 0;        // millis() when it was loaded/saved
+const unsigned long TOTAL_SAVE_MS = 600000; // save every 10 min (flash wears out)
 
 bool strikeActive = false;
 
@@ -344,7 +400,7 @@ float sharpPendingTilt = 0;
 // SLOW PULL / DROP-BACK
 // =====================================================
 
-float pullAllow = PULL_MIN_ALLOW;
+float pullAllow = 1.0;
 float bucketSize = BUCKET_MIN;
 
 float pullBucket = 0;
@@ -699,6 +755,83 @@ void updateSensorFloor(float level)
   }
 }
 
+// ---------- Live settings in flash ----------
+
+void loadSettings()
+{
+  prefs.begin("strikesense", true);
+
+  for(int i = 0; i < SETTING_COUNT; i++)
+  {
+    const SettingInfo& info = SETTING_INFO[i];
+
+    settings.*(info.field) =
+      clampFloat(
+        prefs.getFloat(info.key, DEFAULT_SETTINGS.*(info.field)),
+        info.low,
+        info.high
+      );
+  }
+
+  prefs.end();
+
+  savedSettings = settings;
+}
+
+void saveSettings()
+{
+  prefs.begin("strikesense", false);
+
+  for(int i = 0; i < SETTING_COUNT; i++)
+    prefs.putFloat(SETTING_INFO[i].key, settings.*(SETTING_INFO[i].field));
+
+  prefs.end();
+
+  savedSettings = settings;
+
+  Serial.println("SETTINGS SAVED");
+}
+
+bool settingsSaved()
+{
+  for(int i = 0; i < SETTING_COUNT; i++)
+  {
+    if(settings.*(SETTING_INFO[i].field) != savedSettings.*(SETTING_INFO[i].field))
+      return false;
+  }
+
+  return true;
+}
+
+// ---------- All-time running hours in flash ----------
+
+void loadTotalTime()
+{
+  prefs.begin("strikesense", true);
+  totalSecondsSaved = prefs.getULong("total", 0);
+  prefs.end();
+
+  totalSavedAtMs = millis();
+}
+
+unsigned long totalSeconds()
+{
+  return totalSecondsSaved + (millis() - totalSavedAtMs) / 1000;
+}
+
+void maybeSaveTotalTime()
+{
+  if(millis() - totalSavedAtMs < TOTAL_SAVE_MS)
+    return;
+
+  totalSecondsSaved = totalSeconds();
+  totalSavedAtMs = millis();
+
+  prefs.begin("strikesense", false);
+  prefs.putULong("total", totalSecondsSaved);
+  prefs.end();
+}
+
 void saveStoredDirection()
 {
   prefs.begin("strikesense", false);
@@ -723,7 +856,7 @@ const SeaProfile& profile()
 void updateKnockThreshold()
 {
   float thr =
-    knockMean + profile().knockDev * knockSpread;
+    knockMean + profile().knockDev * knockSpread * settings.knockMul;
 
   // A wind gust raises the vibration for a few seconds above
   // normal: raise the limit by the same ratio, so knocks must
@@ -1151,6 +1284,9 @@ void goMonitoring()
 
   settlingConfidence = 100;
 
+  if(armedSince == 0)
+    armedSince = millis();
+
   Serial.println("MONITORING");
 }
 
@@ -1194,6 +1330,8 @@ void startSettling(bool fromReady)
 void startEnvironmentLearning()
 {
   rodState = ST_LEARNING;
+
+  armedSince = 0;
 
   clearStrike();
   resetDetectors();
@@ -1494,7 +1632,7 @@ int recentKnockCount()
   {
     if(
       knockTimes[i] != 0 &&
-      now - knockTimes[i] <= REPEAT_WINDOW_MS
+      now - knockTimes[i] <= settings.repeatWindow * 1000.0
     )
     {
       count++;
@@ -1514,7 +1652,7 @@ void onKnock(bool settlingMode)
     if(millis() < settleGraceUntil)
       return;
 
-    if(lastKnockStrength >= p.sharpAlone || knockPeak >= SHARP_ABS_G)
+    if(lastKnockStrength >= p.sharpAlone || knockPeak >= settings.sharpG)
     {
       startStrike("SHARP STRIKE");
       return;
@@ -1524,13 +1662,13 @@ void onKnock(bool settlingMode)
     return;
   }
 
-  if(lastKnockStrength >= p.sharpAlone || knockPeak >= SHARP_ABS_G)
+  if(lastKnockStrength >= p.sharpAlone || knockPeak >= settings.sharpG)
   {
     startStrike("SHARP STRIKE");
     return;
   }
 
-  if(recentKnockCount() >= REPEAT_COUNT)
+  if(recentKnockCount() >= (int)settings.repeatCount)
   {
     startStrike("REPEATED BITE");
     return;
@@ -1555,8 +1693,8 @@ bool checkViolentShake()
 
   float level = profile().sharpAlone * knockThreshold;
 
-  if(level > SHARP_ABS_G)
-    level = SHARP_ABS_G;
+  if(level > settings.sharpG)
+    level = settings.sharpG;
 
   if(knockEnergy < level)
     return false;
@@ -1655,11 +1793,14 @@ void updatePullBuckets()
     bucketSize = 0;
   }
 
-  if(pullAllow < PULL_MIN_ALLOW)
-    pullAllow = PULL_MIN_ALLOW;
+  if(pullAllow < settings.pullDeg)
+    pullAllow = settings.pullDeg;
 
-  if(bucketSize < pullAllow * p.holdMin)
-    bucketSize = pullAllow * p.holdMin;
+  float pullTime = settings.pullTime * p.holdMul;
+
+  // A pull of 1.5x the allowance fills it in the pull time
+  if(bucketSize < pullAllow * pullTime * 0.5)
+    bucketSize = pullAllow * pullTime * 0.5;
 
   if(bucketSize < BUCKET_MIN)
     bucketSize = BUCKET_MIN;
@@ -1667,7 +1808,7 @@ void updatePullBuckets()
   // A wave fills the bucket and empties it again within about half
   // a wave period. A fish keeps it filled. When there are waves,
   // the bucket must stay filled longer than a wave can manage.
-  sustainNeed = p.holdMin * 0.5;
+  sustainNeed = pullTime;
 
   if(waveSwing > WAVE_SMALL)
   {
@@ -1712,7 +1853,7 @@ void updatePullBuckets()
 
   // ---------- Away from water ----------
 
-  if(!haveDir)
+  if(!haveDir || settings.dropOn < 0.5)
   {
     dropBucket = 0;
     dropEpisodeStart = 0;
@@ -1864,6 +2005,9 @@ void settlingStep()
       if(pullLevel < SETTLE_PULL_MIN)
         pullLevel = SETTLE_PULL_MIN;
 
+      if(pullLevel < settings.pullDeg * 1.5)
+        pullLevel = settings.pullDeg * 1.5;
+
       if(moved > pullLevel)
       {
         if(!settlePullCandidate)
@@ -1888,8 +2032,11 @@ void settlingStep()
     now - settlePullStart >= SETTLE_PULL_TIME
   )
   {
-    startStrike(settlePullAway ? "DROP-BACK" : "SLOW PULL");
-    return;
+    if(!settlePullAway || settings.dropOn > 0.5)
+    {
+      startStrike(settlePullAway ? "DROP-BACK" : "SLOW PULL");
+      return;
+    }
   }
 
   // ---------- Taking too long (fish still active, big waves) ----------
@@ -2591,6 +2738,193 @@ body.strikeFlash {
   100% { box-shadow:inset 0 0 0 0 rgba(255,40,40,0); }
 }
 
+/* RUNNING TIME */
+
+.uptime {
+  display:flex;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:4px;
+  margin-top:6px;
+}
+
+.timeChip {
+  display:flex;
+  align-items:baseline;
+  gap:5px;
+  padding:4px 8px;
+  border-radius:8px;
+  background:#0a120e;
+  border:1px solid #1a2a22;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.8px;
+  color:#62766b;
+}
+
+.timeChip b {
+  color:#edf5f1;
+  font-size:12px;
+  letter-spacing:0;
+  font-variant-numeric:tabular-nums;
+}
+
+.timeChip.armed b {
+  color:#4cf294;
+}
+
+/* SETTINGS DRAWER */
+
+.drawer {
+  position:fixed;
+  top:0;
+  right:0;
+  bottom:0;
+  width:360px;
+  max-width:100%;
+  z-index:20;
+  background:rgba(8,14,11,.97);
+  border-left:1px solid rgba(120,180,145,.18);
+  box-shadow:-20px 0 50px rgba(0,0,0,.5);
+  padding:14px;
+  overflow-y:auto;
+  transform:translateX(105%);
+  transition:transform .25s ease;
+}
+
+.drawer.open {
+  transform:translateX(0);
+}
+
+.drawerHead {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:10px;
+}
+
+.drawerTitle {
+  font-size:17px;
+  font-weight:900;
+}
+
+.closeBtn {
+  border:1px solid #294036;
+  background:#101a15;
+  color:#c2cec8;
+  border-radius:8px;
+  width:32px;
+  height:32px;
+  font-size:16px;
+  cursor:pointer;
+}
+
+.liveBox {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+  margin-bottom:10px;
+}
+
+.liveItem {
+  background:#070d0a;
+  border:1px solid #142019;
+  border-radius:9px;
+  padding:7px 9px;
+}
+
+.liveItem .gLabel {
+  margin-bottom:2px;
+}
+
+.liveItem b {
+  font-size:14px;
+}
+
+.setGroup {
+  color:#82968b;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:1.5px;
+  margin:14px 0 6px;
+}
+
+.setRow {
+  background:#070d0a;
+  border:1px solid #142019;
+  border-radius:10px;
+  padding:9px 10px;
+  margin-bottom:6px;
+}
+
+.setTop {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  font-size:12px;
+  font-weight:800;
+}
+
+.setTop strong {
+  color:#4cf294;
+  font-size:14px;
+  font-variant-numeric:tabular-nums;
+}
+
+.setHelp {
+  color:#60756a;
+  font-size:10px;
+  margin-top:3px;
+  line-height:1.35;
+}
+
+.setRow input[type=range] {
+  width:100%;
+  margin:8px 0 2px;
+  accent-color:#45e98a;
+}
+
+.setEnds {
+  display:flex;
+  justify-content:space-between;
+  color:#4f6358;
+  font-size:9px;
+}
+
+.switchRow {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.switch {
+  border:1px solid #294036;
+  background:#101a15;
+  color:#c2cec8;
+  border-radius:20px;
+  padding:5px 12px;
+  font-size:10px;
+  font-weight:900;
+  cursor:pointer;
+  min-width:52px;
+}
+
+.switch.on {
+  color:#001b0c;
+  background:#45e98a;
+  border-color:#45e98a;
+}
+
+.saveState {
+  font-size:10px;
+  color:#ffba52;
+  margin:12px 0 6px;
+}
+
+.saveState.saved {
+  color:#4cf294;
+}
+
 /* MOBILE */
 
 @media(max-width:850px) {
@@ -2617,6 +2951,24 @@ body.strikeFlash {
 }
 
 @media(max-width:600px) {
+
+  .uptime {
+    justify-content:center;
+  }
+
+  .drawer {
+    top:auto;
+    width:100%;
+    height:62vh;
+    border-left:0;
+    border-top:1px solid rgba(120,180,145,.18);
+    border-radius:16px 16px 0 0;
+    transform:translateY(105%);
+  }
+
+  .drawer.open {
+    transform:translateY(0);
+  }
 
   .header {
     grid-template-columns:1fr;
@@ -2677,6 +3029,13 @@ AUDIO: <span id="audioStatus">OFF</span>
 <button id="soundButton" class="soundButton" onclick="enableSound()">ENABLE SOUND</button>
 <button class="soundButton" onclick="testSharpSound()">TEST SHARP</button>
 <button class="soundButton" onclick="testSlowSound()">TEST SLOW</button>
+<button class="soundButton" onclick="openSettings()">&#9881; SETTINGS</button>
+</div>
+
+<div class="uptime">
+<span class="timeChip">&#9201; ON <b id="upTime">0:00:00</b></span>
+<span class="timeChip armed">ARMED <b id="armedTime">&ndash;</b></span>
+<span class="timeChip">TOTAL <b id="totalTime">0h</b></span>
 </div>
 
 </div>
@@ -3507,6 +3866,131 @@ async function skipPull()
   await fetch("/skippull");
 }
 
+// =====================================================
+// LIVE SETTINGS
+// =====================================================
+
+let settings = null;
+let slideTimer = null;
+
+function showSettings(st)
+{
+  settings = st;
+
+  for(const k of ["kmul", "pdeg", "ptime", "rcnt", "rwin", "sharp"])
+    el("s_" + k).value = st[k];
+
+  el("v_kmul").innerText = "\u00D7" + st.kmul.toFixed(2);
+  el("v_rep").innerText = Math.round(st.rcnt) + " in " + st.rwin.toFixed(1) + " s";
+  el("v_sharp").innerText = st.sharp.toFixed(2) + " g (~" + (st.sharp / 0.3).toFixed(2) + " g hit)";
+  el("v_pdeg").innerText = st.pdeg.toFixed(1) + "\u00B0";
+  el("v_ptime").innerText = st.ptime.toFixed(1) + " s";
+
+  for(const k of ["kbeep", "drop"])
+  {
+    el("t_" + k).classList.toggle("on", st[k] > 0.5);
+    el("t_" + k).innerText = st[k] > 0.5 ? "ON" : "OFF";
+  }
+
+  el("saveState").innerText = st.saved
+    ? "\u2713 Saved \u2013 kept after power off"
+    : "Changed \u2013 press SAVE to keep after power off";
+  el("saveState").classList.toggle("saved", st.saved);
+}
+
+async function settingsCall(url)
+{
+  try
+  {
+    const response = await fetch(url);
+    showSettings(await response.json());
+  }
+  catch(e)
+  {
+  }
+}
+
+function openSettings()
+{
+  el("drawer").classList.add("open");
+  settingsCall("/settings");
+}
+
+function closeSettings()
+{
+  el("drawer").classList.remove("open");
+}
+
+// Send while sliding, but not more than ~6 times a second
+function slide(k)
+{
+  const v = parseFloat(el("s_" + k).value);
+
+  if(settings)
+  {
+    settings[k] = v;
+    settings.saved = false;
+    showSettings(settings);
+  }
+
+  clearTimeout(slideTimer);
+  slideTimer = setTimeout(() => settingsCall("/set?k=" + k + "&v=" + v), 150);
+}
+
+function toggle(k)
+{
+  const v = settings && settings[k] > 0.5 ? 0 : 1;
+  settingsCall("/set?k=" + k + "&v=" + v);
+}
+
+function saveSettings()
+{
+  settingsCall("/savesettings");
+}
+
+function defaultSettings()
+{
+  settingsCall("/defaultsettings");
+}
+
+function showLiveInDrawer(d)
+{
+  if(!el("drawer").classList.contains("open"))
+    return;
+
+  el("lvKnock").innerText = d.energy.toFixed(3) + " / " + d.knockthr.toFixed(3);
+  el("lvTilt").innerText = (d.tilt >= 0 && d.dir ? "+" : "") + d.tilt.toFixed(1) + "\u00B0 / " + d.allow.toFixed(1) + "\u00B0";
+  el("lvSlow").innerText = Math.max(d.bucket, d.drop) + "%";
+  el("lvKnocks").innerText = d.knocks;
+}
+
+// =====================================================
+// RUNNING TIME
+// =====================================================
+
+function clock(sec)
+{
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor(sec / 60) % 60;
+  const s = sec % 60;
+
+  return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+function hours(sec)
+{
+  const h = sec / 3600;
+
+  return h < 10 ? h.toFixed(1) + "h" : Math.round(h) + "h";
+}
+
+function showTimes(d)
+{
+  el("upTime").innerText = clock(d.up);
+  el("armedTime").innerText = d.armed >= 0 ? clock(d.armed) : "\u2013";
+  el("totalTime").innerText = hours(d.total);
+}
+
 async function setSea(mode)
 {
   await fetch("/sea?m=" + mode);
@@ -3714,12 +4198,16 @@ async function updateData()
     showConditions(d);
     showState(d);
     showButtons(d);
+    showTimes(d);
+    showLiveInDrawer(d);
 
     // ---------- Single knock pre-alert ----------
 
     if(lastKnockID >= 0 && d.knockid !== lastKnockID && !d.strike)
     {
-      knockPattern();
+      if(d.kbeep)
+        knockPattern();
+
       flashKnock();
     }
 
@@ -3788,6 +4276,84 @@ pollLoop();
 
 </script>
 
+<!-- SETTINGS DRAWER -->
+
+<div class="drawer" id="drawer">
+
+<div class="drawerHead">
+<div class="drawerTitle">&#9881; LIVE SETTINGS</div>
+<button class="closeBtn" onclick="closeSettings()">&times;</button>
+</div>
+
+<div class="setHelp">Changes work immediately. Watch the live values and the dashed lines on the graph.</div>
+
+<div class="setGroup">LIVE NOW</div>
+
+<div class="liveBox">
+<div class="liveItem"><div class="gLabel">KNOCK / LIMIT</div><b id="lvKnock">&ndash;</b></div>
+<div class="liveItem"><div class="gLabel">TILT / PULL LINE</div><b id="lvTilt">&ndash;</b></div>
+<div class="liveItem"><div class="gLabel">SLOW PULL</div><b id="lvSlow">&ndash;</b></div>
+<div class="liveItem"><div class="gLabel">KNOCKS</div><b id="lvKnocks">&ndash;</b></div>
+</div>
+
+<div class="setGroup">KNOCKS</div>
+
+<div class="setRow">
+<div class="setTop"><span>Knock limit</span><strong id="v_kmul"></strong></div>
+<input type="range" id="s_kmul" min="0.5" max="2.5" step="0.05" oninput="slide('kmul')">
+<div class="setEnds"><span>more sensitive</span><span>stricter</span></div>
+<div class="setHelp">How far above the normal noise a knock must be.</div>
+</div>
+
+<div class="setRow">
+<div class="setTop"><span>Repeated bite</span><strong id="v_rep"></strong></div>
+<input type="range" id="s_rcnt" min="2" max="5" step="1" oninput="slide('rcnt')">
+<input type="range" id="s_rwin" min="2" max="8" step="0.5" oninput="slide('rwin')">
+<div class="setHelp">Top: how many knocks. Bottom: within how many seconds.</div>
+</div>
+
+<div class="setRow">
+<div class="setTop"><span>Sharp strike</span><strong id="v_sharp"></strong></div>
+<input type="range" id="s_sharp" min="0.03" max="0.30" step="0.01" oninput="slide('sharp')">
+<div class="setEnds"><span>lighter hit</span><span>harder hit</span></div>
+<div class="setHelp">A single hit this hard is always a strike.</div>
+</div>
+
+<div class="setRow switchRow">
+<div><div class="setTop"><span>Single knock beep</span></div><div class="setHelp">Short beep for one knock.</div></div>
+<button class="switch" id="t_kbeep" onclick="toggle('kbeep')">ON</button>
+</div>
+
+<div class="setGroup">PULLS</div>
+
+<div class="setRow">
+<div class="setTop"><span>Pull angle</span><strong id="v_pdeg"></strong></div>
+<input type="range" id="s_pdeg" min="0.4" max="5" step="0.1" oninput="slide('pdeg')">
+<div class="setEnds"><span>more sensitive</span><span>stricter</span></div>
+<div class="setHelp">The tip must lean at least this far. In waves the line goes higher by itself.</div>
+</div>
+
+<div class="setRow">
+<div class="setTop"><span>Pull time</span><strong id="v_ptime"></strong></div>
+<input type="range" id="s_ptime" min="0.5" max="8" step="0.1" oninput="slide('ptime')">
+<div class="setEnds"><span>faster alarm</span><span>slower alarm</span></div>
+<div class="setHelp">How long the pull must last before the alarm.</div>
+</div>
+
+<div class="setRow switchRow">
+<div><div class="setTop"><span>Drop-back alarm</span></div><div class="setHelp">Tip springs back, line goes slack.</div></div>
+<button class="switch" id="t_drop" onclick="toggle('drop')">ON</button>
+</div>
+
+<div class="saveState" id="saveState">&ndash;</div>
+
+<div class="controls">
+<button class="action ready" onclick="saveSettings()">SAVE</button>
+<button class="action skip" onclick="defaultSettings()">DEFAULT</button>
+</div>
+
+</div>
+
 </body>
 
 </html>
@@ -3818,6 +4384,8 @@ void handleReelIn()
   clearStrike();
 
   rodState = ST_PAUSED;
+
+  armedSince = 0;
 
   resetSettleWindow();
   resetSettleRing();
@@ -3885,6 +4453,68 @@ void handleSea()
   }
 
   server.send(200, "text/plain", "OK");
+}
+
+// ---------- Live settings over the web ----------
+
+void sendSettings()
+{
+  String json = "{";
+
+  for(int i = 0; i < SETTING_COUNT; i++)
+  {
+    if(i > 0) json += ",";
+
+    json += "\"";
+    json += SETTING_INFO[i].key;
+    json += "\":";
+    json += String(settings.*(SETTING_INFO[i].field), 3);
+  }
+
+  json += ",\"saved\":";
+  json += settingsSaved() ? "true" : "false";
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void handleSettings()
+{
+  sendSettings();
+}
+
+// /set?k=pdeg&v=1.5  - takes effect immediately
+void handleSet()
+{
+  String k = server.arg("k");
+  float v = server.arg("v").toFloat();
+
+  for(int i = 0; i < SETTING_COUNT; i++)
+  {
+    const SettingInfo& info = SETTING_INFO[i];
+
+    if(k == info.key)
+      settings.*(info.field) = clampFloat(v, info.low, info.high);
+  }
+
+  updateKnockThreshold();
+
+  sendSettings();
+}
+
+void handleSaveSettings()
+{
+  saveSettings();
+  sendSettings();
+}
+
+void handleDefaultSettings()
+{
+  settings = DEFAULT_SETTINGS;
+
+  updateKnockThreshold();
+
+  sendSettings();
 }
 
 const char* stateName()
@@ -3991,6 +4621,11 @@ void handleData()
   addField(json, "tide", (long)tideLevel);
   addField(json, "tiderate", tideRate, 2);
 
+  addField(json, "up", (long)(millis() / 1000));
+  addField(json, "armed", armedSince == 0 ? -1L : (long)((millis() - armedSince) / 1000));
+  addField(json, "total", (long)totalSeconds());
+  addField(json, "kbeep", settings.knockBeep > 0.5);
+
   addField(json, "peakenergy", strikePeakEnergy, 4);
   addField(json, "peaktilt", strikePeakTilt, 2);
 
@@ -4066,6 +4701,8 @@ void setup()
 
   loadStoredDirection();
   loadSensorFloor();
+  loadSettings();
+  loadTotalTime();
 
   if(haveSensorFloor)
   {
@@ -4091,6 +4728,10 @@ void setup()
   server.on("/skippull", handleSkipPull);
   server.on("/sea", handleSea);
   server.on("/strike", handleStrike);
+  server.on("/settings", handleSettings);
+  server.on("/set", handleSet);
+  server.on("/savesettings", handleSaveSettings);
+  server.on("/defaultsettings", handleDefaultSettings);
 
   server.begin();
 
@@ -4111,6 +4752,8 @@ void loop()
   server.handleClient();
 
   oversample();
+
+  maybeSaveTotalTime();
 
   unsigned long now = millis();
 

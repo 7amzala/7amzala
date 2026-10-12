@@ -168,7 +168,7 @@ int main(int argc, char** argv)
   Serial.quiet = argc < 2; verbose = argc > 2;
   setup();
   Env calm; calm.waveA = 0.15; calm.waveP = 5; calm.windA = 1;
-  scenario("CALM, pull 1.5 deg", calm, true, 1.5, 20);
+  scenario("CALM, pull 2 deg", calm, true, 2.0, 20);
   Env mod; mod.waveA = 1.0; mod.waveP = 6; mod.windA = 5; mod.windVib = 0.01; mod.tideRate = 0.5;
   scenario("MODERATE, pull 3 deg", mod, true, 3, 20);
   Env rough; rough.waveA = 2.5; rough.waveP = 8; rough.windA = 12; rough.windVib = 0.02; rough.tideRate = 1.0;
