@@ -23,7 +23,8 @@ dashed lines.
 | Single knock beeps from wind / rain | `knockDev` in `SEA_PROFILES` (1st number) | higher (e.g. 6 → 7) |
 | Small knocks are missed | `knockDev` | lower (e.g. 6 → 5) |
 | | `KNOCK_FLOOR` | lower (0.010 → 0.007) |
-| Wind gusts give knock beeps | `GUST_NOISE_MUL` | higher (3.0 → 3.5) |
+| Wind gusts give knock beeps | `GUST_NOISE_MUL` | higher (1.0 → 1.5) |
+| Knock beeps with no fish, even when still | `knockDev` and `KNOCK_CONFIRM` | higher (3 → 4) |
 | Repeated bite alarm too easy | `REPEAT_COUNT` | 3 → 4 |
 | | `REPEAT_WINDOW_MS` | 4000 → 3000 |
 | Sharp strike not detected | `SHARP_ABS_G` | lower (0.10 → 0.08) |
@@ -40,10 +41,24 @@ dashed lines.
 | Pull test is too hard in waves | `PULLTEST_MIN_DEG` | lower, or press SKIP |
 | Sea state label changes too often | `SEA_STATE_HOLD` | higher |
 | Labels (Small / Medium / Big …) feel wrong | `WAVE_*`, `WIND_*`, `TIDE_*` | adjust to what you see |
+| Wind shows Strong while the sensor is still | changed sensor board? set `FORGET_SAVED_NOISE` to `true`, upload, then back to `false` | |
 
 Profile order in `SEA_PROFILES`:
 `knockDev, allowMul, bucketMul, holdMin, noDirAllowMul, sharpAlone, sharpWithPull`
 for CALM, MODERATE and ROUGH. Only the row for the current sea state is used.
+
+## Sensor noise
+
+The bottom line of the Conditions card shows **sensor noise** (the quietest
+vibration level ever measured, saved on the ESP32) and whether the LIS3DH
+**high-res** mode is on. The wind label only counts vibration *above* this
+noise, so a still sensor shows Calm.
+
+- **high-res OFF:** the sensor stayed in its noisier mode. Tell me; the
+  Serial monitor at startup prints `CTRL_REG1` and `CTRL_REG4` for checking.
+- The knock limit is set from the noise, so lower noise = smaller knocks
+  detected. With 0.011 g noise the limit is about 0.017 g, which means hits
+  of roughly 0.06 g at the tip.
 
 ## How the slow-pull "bucket" works
 
@@ -57,15 +72,17 @@ for CALM, MODERATE and ROUGH. Only the row for the current sea state is used.
 
 ## Simulator results (before testing at sea)
 
-The sketch was run in a PC simulator with simulated waves, wind, tide and fish.
+The sketch was run in a PC simulator with simulated waves, wind, tide and
+fish, using the **real sensor noise measured on your LIS3DH** (0.0146 g
+with the old settings, 0.011 g with the new averaging).
 These are simulated results, not real-world ones.
 
 | Sea | False alarms, 2 h without fish (×3 runs) | Knocks / repeated / sharp | Slow pull | Drop-back |
 |---|---|---|---|---|
-| Calm (±0.15°) | 0 | detected | 1.5° pull: ~4 s | ~4 s |
-| Moderate (±1°, 6 s) | 0 | detected | 3° pull: ~5 s | ~5 s |
-| Rough (±2.5°, 8 s) | 0 | 0.06 g knocks only partly; others detected | 5° pull: ~8–10 s | 5°: detected; 3.5°: missed |
-| Very rough (±4°, 10 s) | 0 | detected | 6° pull: missed | 6°: missed |
+| Still / calm (±0.15°) | 0 (0–1 knock beeps) | 0.06 g knocks detected | 1.5° pull: ~4 s | ~4 s |
+| Moderate (±1°, 6 s) | 0 | 0.06 g knocks detected | 3° pull: ~6 s | ~4–5 s |
+| Rough (±2.5°, 8 s) | 0 | 0.06 g knocks partly; 0.3 g hit detected | 5° pull: ~9 s | 5°: ~9 s |
+| Very rough (±4°, 10 s) | 0 | 0.3 g hit detected | 6° pull: missed | 6°: missed |
 
 Known limits:
 

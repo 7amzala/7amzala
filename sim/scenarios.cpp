@@ -22,7 +22,7 @@ WiFiT WiFi; WireT Wire;
 
 // ---------------- environment model ----------------
 struct Env {
-  float waveA = 0, waveP = 6, windA = 0, tideRate = 0, noise = 0.0015, windVib = 0;
+  float waveA = 0, waveP = 6, windA = 0, tideRate = 0, windVib = 0;
 };
 Env env;
 std::mt19937 rng(42);
@@ -32,6 +32,7 @@ struct Event { float t0; int kind; float a, b, c; }; // kind 0 knock(K), 1 pull(
 std::vector<Event> events;
 
 float windState = 0;
+float cleanAX = 0, cleanAY = 0, cleanAZ = 1;
 
 void computeSensor(double t)
 {
@@ -69,10 +70,22 @@ void computeSensor(double t)
   float x1 = gx * cos(p) + gz * sin(p), z1 = -gx * sin(p) + gz * cos(p), y1 = gy;
   // roll about x
   float y2 = y1 * cos(r) - z1 * sin(r), z2 = y1 * sin(r) + z1 * cos(r);
-  float nz = env.noise + env.windVib * fabs(windState);
-  simAX = x1 + vib[0] + N(rng) * nz;
-  simAY = y2 + vib[1] + N(rng) * nz;
-  simAZ = z2 + vib[2] + N(rng) * nz;
+  float nz = env.windVib * fabs(windState);
+  cleanAX = x1 + vib[0] + N(rng) * nz;
+  cleanAY = y2 + vib[1] + N(rng) * nz;
+  cleanAZ = z2 + vib[2] + N(rng) * nz;
+}
+
+// Sensor's own noise, fresh for every reading. Calibrated so the old
+// sketch settings (200 Hz, no averaging) give the 0.017 g noise seen
+// on the real LIS3DH lying still. At 400 Hz the noise per reading is
+// about 1.4x higher (wider bandwidth).
+float sensorSigma = 0.0141;
+void simRead()
+{
+  simAX = cleanAX + N(rng) * sensorSigma;
+  simAY = cleanAY + N(rng) * sensorSigma;
+  simAZ = cleanAZ + N(rng) * sensorSigma;
 }
 
 struct Strike { double t; std::string type; };

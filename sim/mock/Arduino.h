@@ -8,6 +8,8 @@ using std::sqrt; using std::fabs; using std::acos; using std::atan2;
 #define PROGMEM
 extern unsigned long simMillis;
 inline unsigned long millis(){ return simMillis; }
+inline unsigned long micros(){ return simMillis * 1000UL; }
+#define HEX 16
 inline void delay(unsigned long){}
 class String {
 public:
@@ -26,7 +28,7 @@ struct SerialT {
   bool quiet=false;
   template<class T> void print(T v){ if(!quiet) out(v); }
   template<class T> void println(T v){ if(!quiet){ out(v); printf("\n");} }
-  void print(float v,int d){ if(!quiet) printf("%.*f",d,v);} void println(float v,int d){ if(!quiet) printf("%.*f\n",d,v);} 
+  void print(float v,int d){ if(!quiet) printf("%.*f",d,v);} void print(uint8_t v,int b){ if(!quiet) printf(b==16?"%X":"%d",v);} void println(float v,int d){ if(!quiet) printf("%.*f\n",d,v);} 
   void println(){ if(!quiet) printf("\n"); }
   void begin(int){}
   void out(const char* c){ printf("[%7.1fs] %s", simMillis/1000.0, c);} void out(const String& s){ printf("%s", s.c_str()); }

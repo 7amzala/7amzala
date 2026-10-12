@@ -20,21 +20,23 @@ const char* apPassword = "12345678";
 
 // ---------- Sampling ----------
 
-const unsigned long SAMPLE_MS = 10;      // 100 readings per second
+const unsigned long SAMPLE_MS = 10;      // 100 processed readings per second
 const float DT = 0.010;                  // seconds per reading
+const int SENSOR_RATE = 400;             // Hz, sensor output rate
+const unsigned long OVERSAMPLE_US = 2500; // read every 2.5 ms, average ~4 per step (less noise)
 
 // ---------- Signal filters ----------
 
 const float GRAVITY_TAU = 0.30;          // s, rod angle smoothing
 const float VIBRATION_TAU = 0.04;        // s, only shaking faster than ~4 Hz counts as vibration
-const float ENERGY_TAU = 0.04;           // s, knock energy smoothing
+const float ENERGY_TAU = 0.08;           // s, knock energy smoothing (smoother noise, knocks last 200+ ms)
 
 // ---------- Environment ----------
 
 const unsigned long LEARN_TIME = 15000;  // quick start learning (covers 1-2 waves)
 const float NOISE_TAU = 30.0;            // s, background vibration tracking
 const float GUST_NOISE_TAU = 3.0;        // s, fast vibration level (wind gusts)
-const float GUST_NOISE_MUL = 3.0;        // knock must be 3x the last few seconds' level
+const float GUST_NOISE_MUL = 1.0;        // limit rises this much with a gust (1 = same ratio as the gust)
 const float WAVE_TAU = 20.0;             // s, wave size tracking
 const float WIND_TAU = 20.0;             // s, sideways sway tracking
 const float BASELINE_TAU = 60.0;         // s, rest position follows tide
@@ -44,15 +46,15 @@ const unsigned long SEA_STATE_HOLD = 30000; // auto sea state must hold this lon
 
 const float KNOCK_FLOOR = 0.010;         // g, threshold never goes below this
 const float KNOCK_CEIL = 0.250;          // g, threshold never goes above this
-const float KNOCK_RELEASE = 0.60;        // knock ends below 60% of threshold
-const int KNOCK_CONFIRM = 2;             // readings in a row above threshold
-const unsigned long KNOCK_MAX_MS = 500;  // longer than this = wind / handling
+const float KNOCK_RELEASE = 0.50;        // knock ends halfway between normal noise and the limit
+const int KNOCK_CONFIRM = 3;             // readings in a row above threshold (30 ms)
+const unsigned long KNOCK_MAX_MS = 800;  // longer than this = wind / handling
 const unsigned long KNOCK_GAP_MS = 150;  // dead time after each knock
 const unsigned long REPEAT_WINDOW_MS = 4000;
 const int REPEAT_COUNT = 3;
 const unsigned long SHARP_PULL_WINDOW_MS = 600;
 const float SHARP_PULL_MIN_DEG = 1.0;    // plus: faster than a wave can move the tip
-const float SHARP_ABS_G = 0.10;          // knock energy (g) that is always a sharp strike (~0.3 g hit)
+const float SHARP_ABS_G = 0.08;          // knock energy (g) that is always a sharp strike (~0.27 g hit)
 
 // ---------- Slow pull / drop-back bucket ----------
 
@@ -93,9 +95,11 @@ const float WIND_NORMAL = 0.30;          // deg sideways swing
 const float WIND_STRONG = 1.00;
 const float WIND_VSTRONG = 2.50;
 
-const float WINDVIB_NORMAL = 0.004;      // g background vibration
-const float WINDVIB_STRONG = 0.008;
-const float WINDVIB_VSTRONG = 0.016;
+const float WINDVIB_NORMAL = 0.005;      // g vibration ABOVE the sensor's own noise
+const float WINDVIB_STRONG = 0.010;
+const float WINDVIB_VSTRONG = 0.020;
+const float SENSOR_FLOOR_DEFAULT = 0.015; // g, sensor's own noise until measured
+const bool FORGET_SAVED_NOISE = false;   // set true once after changing the sensor board
 
 const float TIDE_SLOW = 0.30;            // deg per minute
 const float TIDE_FAST = 1.50;
@@ -116,13 +120,13 @@ struct SeaProfile
 const SeaProfile SEA_PROFILES[3] =
 {
   // CALM
-  { 5.0, 0.50, 2.0, 1.2, 1.0, 7.0, 2.5 },
+  { 6.0, 0.50, 2.0, 1.2, 1.0, 6.0, 2.5 },
 
   // MODERATE
-  { 6.0, 0.60, 2.2, 1.6, 1.2, 8.0, 2.5 },
+  { 7.0, 0.60, 2.2, 1.6, 1.2, 6.5, 2.5 },
 
   // ROUGH
-  { 7.0, 0.70, 2.5, 2.2, 1.5, 9.0, 3.0 }
+  { 8.0, 0.70, 2.5, 2.2, 1.5, 7.0, 3.0 }
 };
 
 const char* SEA_NAMES[3] = { "calm", "mod", "rough" };
@@ -259,6 +263,14 @@ unsigned long dirLearnedAt = 0;
 
 float knockMean = 0.005;
 float knockSpread = 0.002;
+
+// The sensor's own noise (quietest vibration level ever seen),
+// saved so that a still sensor always reads "Calm"
+float sensorFloor = SENSOR_FLOOR_DEFAULT;
+bool haveSensorFloor = false;
+float savedSensorFloor = 0;
+unsigned long sensorFloorSavedAt = 0;
+float windVib = 0;               // vibration above the sensor's own noise
 float knockThreshold = KNOCK_FLOOR;
 
 float gustNoise = 0.005;         // vibration level over the last few seconds
@@ -440,22 +452,77 @@ float recordEnergyMax = 0;
 // SENSOR
 // =====================================================
 
-void readSensor()
+// Several sensor readings are averaged into each 10 ms step.
+// Random noise shrinks, knocks (5-15 Hz) are not affected.
+Vec3 oversampleSum = { 0, 0, 0 };
+int oversampleCount = 0;
+unsigned long lastOversample = 0;
+
+bool sensorHighRes = false;
+uint8_t sensorReg1 = 0;
+uint8_t sensorReg4 = 0;
+
+void readOnce(Vec3& out)
 {
-  rawAccel.x = myIMU.readFloatAccelX();
-  rawAccel.y = myIMU.readFloatAccelY();
-  rawAccel.z = myIMU.readFloatAccelZ();
+  out.x = myIMU.readFloatAccelX();
+  out.y = myIMU.readFloatAccelY();
+  out.z = myIMU.readFloatAccelZ();
 }
 
+void oversample()
+{
+  if(micros() - lastOversample < OVERSAMPLE_US)
+    return;
+
+  lastOversample = micros();
+
+  Vec3 a;
+  readOnce(a);
+
+  oversampleSum = vAdd(oversampleSum, a);
+  oversampleCount++;
+}
+
+void readSensor()
+{
+  if(oversampleCount == 0)
+  {
+    readOnce(rawAccel);
+    return;
+  }
+
+  rawAccel = vScale(oversampleSum, 1.0 / oversampleCount);
+
+  oversampleSum = vec(0, 0, 0);
+  oversampleCount = 0;
+}
+
+// High resolution (12 bit) mode: HR bit on, low-power bit off.
+// Read back so we can see that it really worked.
 void enableHighResolution()
 {
   uint8_t reg = 0;
 
+  myIMU.readRegister(&reg, LIS3DH_CTRL_REG1);
+  reg &= ~0x08;  // LPen off
+  myIMU.writeRegister(LIS3DH_CTRL_REG1, reg);
+
   myIMU.readRegister(&reg, LIS3DH_CTRL_REG4);
-
-  reg |= 0x08;   // HR bit
-
+  reg |= 0x08;   // HR on
   myIMU.writeRegister(LIS3DH_CTRL_REG4, reg);
+
+  myIMU.readRegister(&sensorReg1, LIS3DH_CTRL_REG1);
+  myIMU.readRegister(&sensorReg4, LIS3DH_CTRL_REG4);
+
+  sensorHighRes =
+    (sensorReg4 & 0x08) &&
+    !(sensorReg1 & 0x08);
+
+  Serial.print("CTRL_REG1=0x");
+  Serial.print(sensorReg1, HEX);
+  Serial.print(" CTRL_REG4=0x");
+  Serial.print(sensorReg4, HEX);
+  Serial.println(sensorHighRes ? "  HIGH RESOLUTION ON" : "  HIGH RESOLUTION FAILED");
 }
 
 // =====================================================
@@ -586,6 +653,52 @@ void loadStoredDirection()
     haveStoredDir = false;
 }
 
+void loadSensorFloor()
+{
+  prefs.begin("strikesense", true);
+
+  haveSensorFloor = !FORGET_SAVED_NOISE && prefs.getBool("hasfloor", false);
+  savedSensorFloor = prefs.getFloat("floor", SENSOR_FLOOR_DEFAULT);
+
+  prefs.end();
+
+  if(haveSensorFloor)
+    sensorFloor = savedSensorFloor;
+}
+
+// Flash wears out with many writes: only save a clearly lower
+// value, and not more than once a minute
+void maybeSaveSensorFloor()
+{
+  if(haveSensorFloor && sensorFloor > savedSensorFloor * 0.9)
+    return;
+
+  if(sensorFloorSavedAt != 0 && millis() - sensorFloorSavedAt < 60000)
+    return;
+
+  prefs.begin("strikesense", false);
+  prefs.putBool("hasfloor", true);
+  prefs.putFloat("floor", sensorFloor);
+  prefs.end();
+
+  haveSensorFloor = true;
+  savedSensorFloor = sensorFloor;
+  sensorFloorSavedAt = millis();
+
+  Serial.print("Sensor noise saved (g): ");
+  Serial.println(sensorFloor, 4);
+}
+
+// Lower the sensor noise estimate whenever it is quieter than ever
+void updateSensorFloor(float level)
+{
+  if(!haveSensorFloor || level < sensorFloor)
+  {
+    sensorFloor = level;
+    maybeSaveSensorFloor();
+  }
+}
+
 void saveStoredDirection()
 {
   prefs.begin("strikesense", false);
@@ -612,10 +725,11 @@ void updateKnockThreshold()
   float thr =
     knockMean + profile().knockDev * knockSpread;
 
-  // A wind gust raises the vibration for a few seconds:
-  // knocks must stand out from that too
-  if(gustNoise * GUST_NOISE_MUL > thr)
-    thr = gustNoise * GUST_NOISE_MUL;
+  // A wind gust raises the vibration for a few seconds above
+  // normal: raise the limit by the same ratio, so knocks must
+  // stand out from the gust too
+  if(gustNoise > knockMean && knockMean > 0)
+    thr *= 1.0 + GUST_NOISE_MUL * (gustNoise / knockMean - 1.0);
 
   knockThreshold =
     clampFloat(thr, KNOCK_FLOOR, KNOCK_CEIL);
@@ -660,6 +774,9 @@ void updateKnockNoise()
     (fabs(knockEnergy - knockMean) - knockSpread) * a;
 
   updateKnockThreshold();
+
+  if(rodState == ST_MONITORING)
+    updateSensorFloor(knockMean);
 }
 
 void updateWaveWindTide()
@@ -792,8 +909,14 @@ void updateConditions(bool immediate)
   waveLevel =
     levelFor(waveSwing, WAVE_SMALL, WAVE_MEDIUM, WAVE_BIG);
 
+  // Noise adds up like the sides of a right triangle, so remove
+  // the sensor's own noise that way
+  float extra = knockMean * knockMean - sensorFloor * sensorFloor;
+
+  windVib = extra > 0 ? sqrt(extra) : 0;
+
   int vibLevel =
-    levelFor(knockMean, WINDVIB_NORMAL, WINDVIB_STRONG, WINDVIB_VSTRONG);
+    levelFor(windVib, WINDVIB_NORMAL, WINDVIB_STRONG, WINDVIB_VSTRONG);
 
   windLevel = vibLevel;
 
@@ -1147,6 +1270,8 @@ void learningStep()
 
   knockMean = p50;
   gustNoise = p50;
+
+  updateSensorFloor(p50);
   knockSpread = (p95 - p50) / 2.0;
 
   if(knockSpread < 0.0005)
@@ -1296,8 +1421,9 @@ bool updateKnockDetector()
 {
   unsigned long now = millis();
 
+  // Must stay above the normal noise, or a knock never ends
   float releaseLevel =
-    knockThreshold * KNOCK_RELEASE;
+    knockMean + (knockThreshold - knockMean) * KNOCK_RELEASE;
 
   if(!knockActive)
   {
@@ -1787,7 +1913,7 @@ void settlingStep()
   // ---------- Learn new rest position ----------
 
   bool calm =
-    knockEnergy < knockThreshold * 0.8 &&
+    knockEnergy < knockMean + (knockThreshold - knockMean) * 0.75 &&
     !knockActive;
 
   if(!calm)
@@ -2224,6 +2350,7 @@ body {
 }
 
 .details {
+  white-space:pre-line;
   margin-top:9px;
   color:#5d7066;
   font-size:9px;
@@ -3458,7 +3585,8 @@ function showConditions(d)
   setCondition("tide", TIDE_NAMES[d.tide], d.tiderate.toFixed(1) + "°/min", d.tiderate / 3.0 * 100, d.tide);
 
   el("details").innerText =
-    "knock limit " + d.knockthr.toFixed(3) + " g · pull allow " + d.allow.toFixed(1) + "°";
+    "knock limit " + d.knockthr.toFixed(3) + " g · pull allow " + d.allow.toFixed(1) + "°" +
+    "\nsensor noise " + d.noise.toFixed(3) + " g · " + (d.hr ? "high-res ✓" : "high-res OFF");
 }
 
 function showButtons(d)
@@ -3857,7 +3985,9 @@ void handleData()
   addField(json, "period", wavePeriod, 1);
   addField(json, "wind", (long)windLevel);
   addField(json, "windswing", windSwing, 2);
-  addField(json, "windvib", knockMean, 4);
+  addField(json, "windvib", windVib, 4);
+  addField(json, "noise", sensorFloor, 4);
+  addField(json, "hr", sensorHighRes);
   addField(json, "tide", (long)tideLevel);
   addField(json, "tiderate", tideRate, 2);
 
@@ -3917,7 +4047,7 @@ void setup()
 
   Wire.begin();
 
-  myIMU.settings.accelSampleRate = 200;   // sensor runs faster than we read
+  myIMU.settings.accelSampleRate = SENSOR_RATE;
   myIMU.settings.accelRange = 2;          // most sensitive range
 
   if(myIMU.begin() != 0)
@@ -3927,11 +4057,21 @@ void setup()
     while(1);
   }
 
-  enableHighResolution();
+  // After begin(), which may reset the bus speed
+  Wire.setClock(400000);
 
   Serial.println("LIS3DH CONNECTED");
 
+  enableHighResolution();
+
   loadStoredDirection();
+  loadSensorFloor();
+
+  if(haveSensorFloor)
+  {
+    Serial.print("Sensor noise loaded (g): ");
+    Serial.println(sensorFloor, 4);
+  }
 
   if(haveStoredDir)
     Serial.println("Stored pull direction loaded");
@@ -3962,13 +4102,15 @@ void setup()
 // =====================================================
 // LOOP
 //
-// Readings happen at a fixed 100 per second.
-// The web server is served in between.
+// The sensor is read every 2.5 ms, averaged, and processed at a
+// fixed 100 steps per second. The web server is served in between.
 // =====================================================
 
 void loop()
 {
   server.handleClient();
+
+  oversample();
 
   unsigned long now = millis();
 
