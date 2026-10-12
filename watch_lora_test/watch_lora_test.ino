@@ -36,7 +36,8 @@
 // Own SPI bus (SPI3), so it never conflicts with the display later
 SPIClass loraSPI(HSPI);
 
-SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RESET, LORA_BUSY, loraSPI);
+SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RESET, LORA_BUSY, loraSPI,
+                          SPISettings(1000000, MSBFIRST, SPI_MODE0));   // 1 MHz: safe with hand-soldered wires
 
 volatile bool packetFlag = false;
 

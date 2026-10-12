@@ -33,7 +33,8 @@
 // The display already uses SPI2 (FSPI). LoRa gets its own bus: SPI3 (HSPI).
 static SPIClass loraSPI(HSPI);
 
-static SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RESET, LORA_BUSY, loraSPI);
+static SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RESET, LORA_BUSY, loraSPI,
+                          SPISettings(1000000, MSBFIRST, SPI_MODE0));   // 1 MHz: safe with hand-soldered wires
 
 static volatile bool packetFlag = false;
 
