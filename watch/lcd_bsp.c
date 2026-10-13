@@ -4,6 +4,8 @@
 #include "lcd_config.h"
 #include "FT3168.h"
 #include "read_lcd_id_bsp.h"
+#include "lora_link.h"
+#include <string.h>
 static SemaphoreHandle_t lvgl_mux = NULL; //mutex semaphores
 #define LCD_HOST    SPI2_HOST
 
@@ -24,19 +26,21 @@ static uint8_t READ_LCD_ID = 0x00;
 #define FONT_BIG      (&lv_font_montserrat_20)
 
 //
-// This is still a DISPLAY/TOUCH simulation.
-// Later the fake connection, RSSI, rod battery and graph values
-// will be replaced by real SX1262 LoRa packets and flex-sensor data.
+// Real LoRa link to the rod (see lora_link.h / strikesense_protocol.h):
+//   ROD   -> WATCH: HEARTBEAT every second (state, tilt, strike...),
+//                   STRIKE repeated until the watch confirms
+//   WATCH -> ROD  : LEARN, WATCHING, REELIN, READY, RESUME, SKIPPULL,
+//                   repeated until the rod confirms
 //
-// Suggested future LoRa protocol:
-//   WATCH -> ROD : HELLO, START_LEARN, CAST_MODE, PAUSE, RESUME
-//   ROD   -> WATCH: HELLO_ACK, HEARTBEAT, SENSOR_SAMPLE,
-//                  LEARN_DONE, BATTERY, STRIKE
-//
-// A HEARTBEAT every ~1 second lets the watch detect link loss.
+// The rod decides; the watch follows the rod's state.
+// "SIM STRIKE" still runs a local demo without the rod.
 // =====================================================
 
-#define DEMO_AUTO_CONNECT 1
+// No heartbeat for this long = link lost
+#define LINK_LOST_MS          15000UL
+
+// Tilt (degrees) -> chart value: 20 units per degree around baseline
+#define TILT_SCALE            20.0f
 
 // Set to 1 only when you want short timers while developing.
 // Default 0 gives the real requested 2-minute learn + 50-second cast.
@@ -46,7 +50,7 @@ static uint8_t READ_LCD_ID = 0x00;
   #define LEARN_DURATION_MS   12000UL
   #define CAST_DURATION_MS    10000UL
 #else
-  #define LEARN_DURATION_MS   20000UL
+  #define LEARN_DURATION_MS   15000UL   // the rod learns for 15 s
   #define CAST_DURATION_MS    50000UL
 #endif
 
@@ -68,6 +72,7 @@ typedef enum
   APP_CAST_READY,
   APP_CAST_COUNTDOWN,
   APP_SETTLING,
+  APP_PULLTEST,
   APP_MONITORING,
   APP_STRIKE,
   APP_REEL_PAUSED,
@@ -86,7 +91,8 @@ typedef enum
   ACT_REEL_IN,
   ACT_HISTORY_BACK,
   ACT_ADJUST_ROD,
-  ACT_ADJUST_READY
+  ACT_ADJUST_READY,
+  ACT_SKIP_PULL
 } app_action_t;
 
 static lv_obj_t *app_screen;
@@ -172,6 +178,39 @@ static uint32_t app_now_ms(void)
 static uint32_t app_elapsed_ms(void)
 {
   return app_now_ms() - state_started_ms;
+}
+
+// ---- Real rod data ----
+static uint32_t ui_last_hb_count = 0;
+static uint16_t ui_last_strike_id = 0;
+static uint8_t ui_strike_type = STRIKE_NONE;   // STRIKE_NONE = SIM STRIKE demo
+
+// Last tilt values (one per heartbeat) for the strike history chart
+static int tilt_ring[STRIKE_HISTORY_SAMPLES];
+static int tilt_ring_count = 0;
+
+static int tilt_to_value(float tilt)
+{
+  return baseline_value + (int)(tilt * TILT_SCALE);
+}
+
+static const char *link_quality(uint8_t bars)
+{
+  if (bars >= 4) return "GOOD";
+  if (bars == 3) return "FAIR";
+  if (bars == 2) return "WEAK";
+  if (bars == 1) return "POOR";
+  return "NO SIGNAL";
+}
+
+static void rod_battery_text(char *buf, size_t len)
+{
+  lora_link_status_t link = lora_link_get_status();
+
+  if (!link.connected || link.rod_battery > 100)
+    snprintf(buf, len, "ROD --");
+  else
+    snprintf(buf, len, "ROD %u%%", (unsigned)link.rod_battery);
 }
 
 static void app_set_state(app_state_t new_state);
@@ -283,7 +322,10 @@ set_label_font(label, FONT_UI);
 
 static void add_connected_batteries(void)
 {
-  rod_batt_box = make_battery_chip("ROD 92%", -88, false);
+  char rod_text[16];
+  rod_battery_text(rod_text, sizeof(rod_text));
+
+  rod_batt_box = make_battery_chip(rod_text, -88, false);
   watch_batt_box = make_battery_chip("WATCH 86%", 88, false);
 }
 
@@ -457,7 +499,7 @@ static void update_monitor_values(void)
   char buf[32];
 
   if (value_label != NULL) {
-    snprintf(buf, sizeof(buf), "%d", current_value);
+    snprintf(buf, sizeof(buf), "%+.1f deg", (current_value - baseline_value) / TILT_SCALE);
     lv_label_set_text(value_label, buf);
   }
 
@@ -578,9 +620,13 @@ static void render_connect_failed(void)
     false
   );
 
+  lora_link_status_t link = lora_link_get_status();
+
   add_center_message(
     "NO LINK",
-    "Check that the rod unit is powered on and nearby.",
+    link.radio_ok
+      ? "Check that the rod unit is powered on and nearby."
+      : "Watch LoRa module not responding.\nCheck its wiring.",
     0xEF4444,
     0xD8A5A5
   );
@@ -610,9 +656,15 @@ static void render_connected(void)
     true
   );
 
+  lora_link_status_t link = lora_link_get_status();
+  char detail[64];
+
+  snprintf(detail, sizeof(detail), "Signal %s\nRSSI %d dBm",
+           link_quality(lora_link_signal_bars()), (int)link.last_rssi);
+
   add_center_message(
     "CONNECTED",
-    "Signal GOOD\nRod battery 92%",
+    detail,
     0x4ADE80,
     0xC7F7D7
   );
@@ -690,7 +742,7 @@ static void render_learning(void)
 
 
   set_label_font(big_label, FONT_BIG);
-  lv_label_set_text(big_label, "0:20");
+  lv_label_set_text(big_label, "0:15");
   lv_obj_set_style_text_color(big_label, lv_color_hex(0xF5F7FA), 0);
   lv_obj_align(big_label, LV_ALIGN_BOTTOM_MID, 0, -69);
 
@@ -828,10 +880,44 @@ static void render_settling(void)
   );
 
   add_center_message(
-    "3",
+    "SETTLING",
     "Measuring the resting bend after this cast.",
     0xFFFFFF,
     0xAAB3BE
+  );
+
+  add_gesture_handler();
+}
+
+static void render_pulltest(void)
+{
+  lv_obj_clean(app_screen);
+  set_screen_bg(0x071019);
+
+  add_header(
+    "PULL TEST",
+    "Shows the rod which way is the water",
+    0xFFFFFF,
+    0x38BDF8,
+    true
+  );
+
+  add_center_message(
+    "PULL GENTLY",
+    "Pull the line toward the water once, then let go.",
+    0x38BDF8,
+    0xAAB3BE
+  );
+
+  make_button(
+    "SKIP",
+    0,
+    -38,
+    160,
+    50,
+    0x303742,
+    0xFFFFFF,
+    ACT_SKIP_PULL
   );
 
   add_gesture_handler();
@@ -859,6 +945,81 @@ static void strike_history_add(int value)
     strike_history[strike_history_count++] = value;
 }
 
+// Called on every rod heartbeat (once per second)
+static void push_graph_value(int value)
+{
+  current_value = value;
+
+  if (main_chart != NULL && main_series != NULL) {
+    lv_chart_set_next_value(main_chart, main_series, current_value);
+  }
+
+  update_monitor_values();
+}
+
+static void on_rod_heartbeat(const lora_link_status_t *link)
+{
+  int v = tilt_to_value(link->tilt);
+
+  // Keep the last values for the strike history
+  if (tilt_ring_count < STRIKE_HISTORY_SAMPLES) {
+    tilt_ring[tilt_ring_count++] = v;
+  }
+  else {
+    memmove(tilt_ring, tilt_ring + 1, (STRIKE_HISTORY_SAMPLES - 1) * sizeof(int));
+    tilt_ring[STRIKE_HISTORY_SAMPLES - 1] = v;
+  }
+
+  // A real strike being recorded: keep adding until the chart is full
+  if (strike_history_valid && !strike_event_complete && strike_sim_step < 0) {
+    strike_history_add(v);
+
+    if (v - baseline_value > strike_peak_delta)
+      strike_peak_delta = v - baseline_value;
+
+    if (strike_history_count >= STRIKE_HISTORY_SAMPLES) {
+      strike_event_complete = true;
+      strike_duration_ms = millis() - strike_event_started_ms;
+    }
+  }
+
+  // Live graph (not while the SIM STRIKE demo is drawing)
+  if (!signal_page_visible && strike_sim_step < 0 &&
+      (app_state == APP_MONITORING ||
+       app_state == APP_STRIKE ||
+       app_state == APP_LEARNING)) {
+    push_graph_value(v);
+  }
+}
+
+static void start_real_strike(const lora_link_status_t *link)
+{
+  strike_history_count = 0;
+  strike_history_valid = true;
+  strike_event_complete = false;
+  strike_peak_count = 0;
+  strike_peak_delta = 0;
+  strike_duration_ms = 0;
+  strike_event_started_ms = millis();
+  last_strike_ms = millis();
+  strike_sim_step = -1;
+  strike_running = false;
+
+  ui_strike_type = link->strike_type;
+
+  // The last ~36 s before the strike
+  int pre = (tilt_ring_count < STRIKE_HISTORY_SAMPLES / 2) ? tilt_ring_count : STRIKE_HISTORY_SAMPLES / 2;
+
+  for (int i = tilt_ring_count - pre; i < tilt_ring_count; i++) {
+    strike_history_add(tilt_ring[i]);
+
+    if (tilt_ring[i] - baseline_value > strike_peak_delta)
+      strike_peak_delta = tilt_ring[i] - baseline_value;
+  }
+
+  app_set_state(APP_STRIKE);
+}
+
 static void start_strike_recording(void)
 {
   strike_history_count = 0;
@@ -870,6 +1031,7 @@ static void start_strike_recording(void)
   strike_event_started_ms = millis();
   last_strike_ms = millis();
   strike_sim_step = 0;
+  ui_strike_type = STRIKE_NONE;
 
   // Save a little pre-strike baseline context.
   for (int i = 0; i < 18; i++) {
@@ -923,7 +1085,13 @@ static void render_strike_history(void)
   }
 
   char details[96];
-  if (strike_history_valid) {
+  if (strike_history_valid && ui_strike_type != STRIKE_NONE) {
+    snprintf(details, sizeof(details),
+             "%s   peak %+.1f deg",
+             lora_link_strike_name(ui_strike_type),
+             strike_peak_delta / TILT_SCALE);
+  }
+  else if (strike_history_valid) {
     snprintf(details, sizeof(details),
              "%d PEAKS   +%d peak   %.1f sec",
              strike_peak_count,
@@ -971,9 +1139,18 @@ static void render_monitoring(void)
 
   lv_obj_t *panel = make_panel(app_screen, 352, 224, 28, 0x0D1117, 0x253040, 24);
 
+  lora_link_status_t link = lora_link_get_status();
+  uint8_t bars = lora_link_signal_bars();
+  char info[40];
+
+  if (link.rod_battery <= 100)
+    snprintf(info, sizeof(info), "ROD 1   %u%%   %s", (unsigned)link.rod_battery, link_quality(bars));
+  else
+    snprintf(info, sizeof(info), "ROD 1   %s", link_quality(bars));
+
   lv_obj_t *rodinfo = lv_label_create(panel);
   set_label_font(rodinfo, FONT_TITLE);
-  lv_label_set_text(rodinfo, "ROD 1   92%   GOOD");
+  lv_label_set_text(rodinfo, info);
   lv_obj_set_style_text_color(rodinfo, lv_color_hex(0x38BDF8), 0);
   lv_obj_align(rodinfo, LV_ALIGN_TOP_LEFT, 16, 12);
 
@@ -985,14 +1162,14 @@ static void render_monitoring(void)
     lv_obj_set_style_radius(bar, 2, 0);
     lv_obj_set_style_border_width(bar, 0, 0);
     lv_obj_set_style_pad_all(bar, 0, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x38BDF8), 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(i < bars ? 0x38BDF8 : 0x252B35), 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
   }
 
   value_label = lv_label_create(panel);
   set_label_font(value_label, FONT_UI);
   char vbuf[20];
-  snprintf(vbuf, sizeof(vbuf), "%d", current_value);
+  snprintf(vbuf, sizeof(vbuf), "%+.1f deg", (current_value - baseline_value) / TILT_SCALE);
   lv_label_set_text(value_label, vbuf);
   lv_obj_set_style_text_color(value_label, lv_color_hex(0xFFFFFF), 0);
   lv_obj_align(value_label, LV_ALIGN_TOP_RIGHT, -14, 45);
@@ -1037,7 +1214,9 @@ static void render_strike(void)
 
   subtitle_label = lv_label_create(app_screen);
   set_label_font(subtitle_label, FONT_UI);
-  lv_label_set_text(subtitle_label, "ROD 1  •  CONFIRM ACTION");
+  char strike_sub[48];
+  snprintf(strike_sub, sizeof(strike_sub), "ROD 1  -  %s", lora_link_strike_name(ui_strike_type));
+  lv_label_set_text(subtitle_label, strike_sub);
   lv_obj_set_style_text_color(subtitle_label, lv_color_hex(0xFFB7B7), 0);
   lv_obj_align(subtitle_label, LV_ALIGN_TOP_MID, 0, 106);
 
@@ -1062,9 +1241,12 @@ static void render_strike(void)
 
   detail_label = lv_label_create(panel);
   set_label_font(detail_label, FONT_UI);
-  lv_label_set_text(detail_label,
-                    strike_event_complete ? "3 peaks recorded • event saved"
-                                          : "Recording strike pattern...");
+  if (ui_strike_type != STRIKE_NONE)
+    lv_label_set_text(detail_label, "Tilt before and after the strike");
+  else
+    lv_label_set_text(detail_label,
+                      strike_event_complete ? "3 peaks recorded - event saved"
+                                            : "Recording strike pattern...");
   lv_obj_set_style_text_color(detail_label, lv_color_hex(0xFFD2D2), 0);
   lv_obj_align(detail_label, LV_ALIGN_BOTTOM_MID, 0, -14);
 
@@ -1144,24 +1326,25 @@ static void render_adjust(void)
 
 static void update_signal_visuals(void)
 {
+  lora_link_status_t link = lora_link_get_status();
+
   uint32_t active_color = 0x4ADE80;
-  const char *quality = "GOOD";
-  const char *rssi = "RSSI  -65 dBm";
+  const char *quality = link_quality(signal_level);
+  char rssi[48];
+
+  if (signal_level == 0)
+    snprintf(rssi, sizeof(rssi), "No packets from the rod");
+  else
+    snprintf(rssi, sizeof(rssi), "RSSI  %d dBm   SNR %.1f dB", (int)link.last_rssi, link.last_snr);
 
   if (signal_level <= 1) {
     active_color = 0xEF4444;
-    quality = "POOR";
-    rssi = "RSSI  -115 dBm";
   }
   else if (signal_level == 2) {
     active_color = 0xF59E0B;
-    quality = "WEAK";
-    rssi = "RSSI  -100 dBm";
   }
   else if (signal_level == 3) {
     active_color = 0xEAB308;
-    quality = "FAIR";
-    rssi = "RSSI  -82 dBm";
   }
 
   for (int i = 0; i < 4; i++) {
@@ -1261,6 +1444,7 @@ set_label_font(hint, FONT_UI);
     NULL
   );
 
+  signal_level = lora_link_signal_bars();
   update_signal_visuals();
 }
 
@@ -1321,6 +1505,10 @@ static void app_render_current(void)
       render_settling();
       break;
 
+    case APP_PULLTEST:
+      render_pulltest();
+      break;
+
     case APP_MONITORING:
       render_monitoring();
       break;
@@ -1366,6 +1554,7 @@ static void app_button_event(lv_event_t *e)
       break;
 
     case ACT_START_LEARN:
+      lora_link_send_command(CMD_LEARN);
       app_set_state(APP_LEARNING);
       break;
 
@@ -1374,6 +1563,7 @@ static void app_button_event(lv_event_t *e)
       break;
 
     case ACT_READY_NOW:
+      lora_link_send_command(CMD_READY);
       app_set_state(APP_SETTLING);
       break;
 
@@ -1385,10 +1575,13 @@ static void app_button_event(lv_event_t *e)
       break;
 
     case ACT_WATCHING:
+      if (ui_strike_type != STRIKE_NONE)
+        lora_link_send_command(CMD_WATCHING);
       app_set_state(APP_MONITORING);
       break;
 
     case ACT_REEL_IN:
+      lora_link_send_command(CMD_REELIN);
       app_set_state(APP_REEL_PAUSED);
       break;
 
@@ -1398,11 +1591,17 @@ static void app_button_event(lv_event_t *e)
       break;
 
     case ACT_ADJUST_ROD:
+      lora_link_send_command(CMD_REELIN);
       app_set_state(APP_ADJUST);
       break;
 
     case ACT_ADJUST_READY:
+      lora_link_send_command(CMD_RESUME);
       app_set_state(APP_SETTLING);
+      break;
+
+    case ACT_SKIP_PULL:
+      lora_link_send_command(CMD_SKIPPULL);
       break;
 
     default:
@@ -1508,7 +1707,7 @@ static void update_graph_sample(bool learning)
       current_value = baseline_value;
 
       if (detail_label != NULL && app_state == APP_STRIKE)
-        lv_label_set_text(detail_label, "3 peaks recorded • event saved");
+        lv_label_set_text(detail_label, "3 peaks recorded - event saved");
     }
   }
 
@@ -1523,6 +1722,32 @@ static void app_timer_cb(lv_timer_t *timer)
 {
   (void)timer;
 
+  lora_link_status_t link = lora_link_get_status();
+
+  // ---- New heartbeat from the rod (once per second) ----
+  if (link.hb_count != ui_last_hb_count) {
+    ui_last_hb_count = link.hb_count;
+    on_rod_heartbeat(&link);
+  }
+
+  // ---- Strike reported by the rod: show it from any screen ----
+  if (rod_connected &&
+      link.strike_type != STRIKE_NONE &&
+      link.strike_id != ui_last_strike_id) {
+    ui_last_strike_id = link.strike_id;
+    start_real_strike(&link);
+    return;
+  }
+
+  // ---- Link lost ----
+  if (rod_connected &&
+      link.last_hb_ms != 0 &&
+      (millis() - link.last_hb_ms) > LINK_LOST_MS) {
+    rod_connected = false;
+    app_set_state(APP_CONNECT_FAILED);
+    return;
+  }
+
   if (history_page_visible) return;
 
   uint32_t elapsed = app_elapsed_ms();
@@ -1530,13 +1755,8 @@ static void app_timer_cb(lv_timer_t *timer)
 
   // The signal screen is an overlay. Timers underneath continue to run.
   if (signal_page_visible) {
-    if ((now - last_signal_ms) >= 1200UL) {
-      static const uint8_t levels[] = {4, 4, 3, 3, 2, 2, 1, 1, 2, 3, 4};
-      int count = sizeof(levels) / sizeof(levels[0]);
-
-      signal_level = levels[signal_demo_step % count];
-      signal_demo_step++;
-
+    if ((now - last_signal_ms) >= 500UL) {
+      signal_level = lora_link_signal_bars();
       update_signal_visuals();
       last_signal_ms = now;
     }
@@ -1551,22 +1771,26 @@ static void app_timer_cb(lv_timer_t *timer)
       break;
 
     case APP_CONNECTING:
-#if DEMO_AUTO_CONNECT
-      if (elapsed >= CONNECT_DURATION_MS) {
+    case APP_CONNECT_FAILED:
+      if (link.connected) {
         rod_connected = true;
+        ui_last_strike_id = link.strike_id;   // don't replay an old alarm
         app_set_state(APP_CONNECTED);
       }
-#else
-      if (elapsed >= CONNECT_FAIL_MS) {
+      else if (app_state == APP_CONNECTING && elapsed >= CONNECT_FAIL_MS) {
         rod_connected = false;
         app_set_state(APP_CONNECT_FAILED);
       }
-#endif
       break;
 
     case APP_CONNECTED:
       if (elapsed >= CONNECTED_HOLD_MS) {
-        if (session_learned) {
+        // Watch restarted while the rod was already armed
+        if (link.rod_state == ROD_MONITORING) {
+          session_learned = true;
+          app_set_state(APP_MONITORING);
+        }
+        else if (session_learned) {
           app_set_state(APP_CAST_READY);
         }
         else {
@@ -1581,6 +1805,10 @@ static void app_timer_cb(lv_timer_t *timer)
         (elapsed >= LEARN_DURATION_MS) ?
         0 :
         (LEARN_DURATION_MS - elapsed);
+
+      // The rod's own countdown, once it has started learning
+      if (link.rod_state == ROD_LEARNING && link.learn_left > 0)
+        remaining_ms = link.learn_left * 1000UL;
 
       uint32_t remaining_s = (remaining_ms + 999UL) / 1000UL;
       uint32_t minutes = remaining_s / 60UL;
@@ -1598,20 +1826,17 @@ static void app_timer_cb(lv_timer_t *timer)
 
         if (progress_bar != NULL) {
           int percent =
-            (int)((elapsed * 100UL) / LEARN_DURATION_MS);
+            100 - (int)((remaining_ms * 100UL) / LEARN_DURATION_MS);
 
           if (percent > 100) percent = 100;
+          if (percent < 0) percent = 0;
 
           lv_bar_set_value(progress_bar, percent, LV_ANIM_OFF);
         }
-
-        if ((now - last_graph_ms) >= 180UL) {
-          update_graph_sample(true);
-          last_graph_ms = now;
-        }
       }
 
-      if (elapsed >= LEARN_DURATION_MS) {
+      // Done when the rod has finished learning and paused for the cast
+      if (elapsed >= 3000UL && link.rod_state == ROD_PAUSED) {
         session_learned = true;
         app_set_state(APP_LEARN_COMPLETE);
       }
@@ -1646,44 +1871,36 @@ static void app_timer_cb(lv_timer_t *timer)
       }
 
       if (elapsed >= CAST_DURATION_MS) {
+        lora_link_send_command(CMD_READY);
         app_set_state(APP_SETTLING);
       }
       break;
     }
 
     case APP_SETTLING:
-    {
-      uint32_t remaining_ms =
-        (elapsed >= SETTLE_DURATION_MS) ?
-        0 :
-        (SETTLE_DURATION_MS - elapsed);
-
-      uint32_t remaining_s = (remaining_ms + 999UL) / 1000UL;
-
-      if (!signal_page_visible && big_label != NULL) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%lu", (unsigned long)remaining_s);
-        lv_label_set_text(big_label, buf);
+      // The rod settles (and may ask for a pull test), then arms itself.
+      // Wait a moment so we don't react to the state before our command.
+      if (elapsed >= 1500UL && !lora_link_command_pending()) {
+        if (link.rod_state == ROD_PULLTEST) {
+          app_set_state(APP_PULLTEST);
+        }
+        else if (link.rod_state == ROD_MONITORING) {
+          app_set_state(APP_MONITORING);
+        }
       }
+      break;
 
-      if (elapsed >= SETTLE_DURATION_MS) {
-        // In the real product this would be the average flex-sensor reading.
-        baseline_value = current_value;
+    case APP_PULLTEST:
+      if (elapsed >= 1000UL && link.rod_state == ROD_MONITORING) {
         app_set_state(APP_MONITORING);
       }
       break;
-    }
 
     case APP_MONITORING:
-      if (!signal_page_visible &&
-          (now - last_graph_ms) >= 100UL) {
-        update_graph_sample(false);
-        last_graph_ms = now;
-      }
-      break;
-
     case APP_STRIKE:
+      // Only the SIM STRIKE demo draws here; real data comes with heartbeats
       if (!signal_page_visible &&
+          strike_sim_step >= 0 &&
           (now - last_graph_ms) >= 100UL) {
         update_graph_sample(false);
         last_graph_ms = now;

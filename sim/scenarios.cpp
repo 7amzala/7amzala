@@ -17,6 +17,9 @@ SerialT Serial;
 
 float simAX = 0, simAY = 0, simAZ = 1;
 
+#ifndef ENABLE_LORA
+#define ENABLE_LORA 0
+#endif
 #include "../StrikeSense/StrikeSense.ino"
 WiFiT WiFi; WireT Wire;
 

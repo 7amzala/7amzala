@@ -4,6 +4,21 @@
 #include <Preferences.h>
 #include <SparkFunLIS3DH.h>
 
+// LoRa link to the watch (XIAO ESP32-S3 + Wio-SX1262).
+// Set to 0 to build without LoRa.
+#ifndef ENABLE_LORA
+#define ENABLE_LORA 1
+#endif
+
+#if ENABLE_LORA
+#include <SPI.h>
+#include <RadioLib.h>
+#endif
+
+#include "strikesense_protocol.h"
+
+void loraOnStrike();
+
 LIS3DH myIMU(I2C_MODE, 0x19);
 WebServer server(80);
 Preferences prefs;
@@ -269,6 +284,10 @@ enum RodState
 };
 
 RodState rodState = ST_LEARNING;
+
+// Learning started from the watch: pause afterwards so the angler
+// can reel in, bait and cast before the pull test
+bool learnThenPause = false;
 
 // Running time: since power on, since armed, and all-time total
 unsigned long armedSince = 0;            // 0 = not armed
@@ -1254,6 +1273,8 @@ void startStrike(String type)
 
   startStrikeRecording();
 
+  loraOnStrike();
+
   Serial.println();
   Serial.print(">>> STRIKE: ");
   Serial.print(type);
@@ -1330,6 +1351,8 @@ void startSettling(bool fromReady)
 void startEnvironmentLearning()
 {
   rodState = ST_LEARNING;
+
+  learnThenPause = false;
 
   armedSince = 0;
 
@@ -1472,6 +1495,15 @@ void learningStep()
   Serial.println(waveSwing, 2);
   Serial.print("Sea state: ");
   Serial.println(SEA_NAMES[seaState]);
+
+  if(learnThenPause)
+  {
+    learnThenPause = false;
+    rodState = ST_PAUSED;
+
+    Serial.println("PAUSED - cast, then READY on the watch");
+    return;
+  }
 
   startPullTest();
 }
@@ -4369,17 +4401,18 @@ void handleRoot()
 }
 
 // I'M WATCHING: stop alert, keep protection, learn new rest position
-void handleWatching()
+// ---------- Commands (from the dashboard or the watch) ----------
+
+// I'M WATCHING: stop alert, keep protection, learn new rest position
+void cmdWatching()
 {
   clearStrike();
   startSettling(false);
 
   Serial.println("I'M WATCHING");
-
-  server.send(200, "text/plain", "OK");
 }
 
-void handleReelIn()
+void cmdReelIn()
 {
   clearStrike();
 
@@ -4393,40 +4426,74 @@ void handleReelIn()
 
   Serial.println();
   Serial.println("REEL IN - DETECTION PAUSED");
-
-  server.send(200, "text/plain", "OK");
 }
 
-void handleReady()
+// Cast done: settle, pull test, then armed
+bool cmdReady()
 {
   if(rodState != ST_PAUSED)
-  {
-    server.send(200, "text/plain", "ALREADY ACTIVE");
-    return;
-  }
+    return false;
 
   startSettling(true);
 
   Serial.println("READY - WAITING FOR STABLE POSITION");
 
-  server.send(200, "text/plain", "OK");
+  return true;
 }
 
-void handleRelearn()
+// Rod adjusted (no new cast): settle, then armed without pull test
+void cmdResume()
+{
+  if(rodState != ST_PAUSED)
+    return;
+
+  startSettling(false);
+
+  Serial.println("RESUME - WAITING FOR STABLE POSITION");
+}
+
+void cmdRelearn(bool thenPause)
 {
   startEnvironmentLearning();
 
-  server.send(200, "text/plain", "OK");
+  learnThenPause = thenPause;
 }
 
-void handleSkipPull()
+void cmdSkipPull()
 {
   if(rodState == ST_PULLTEST)
   {
     Serial.println("PULL TEST SKIPPED");
     goMonitoring();
   }
+}
 
+void handleWatching()
+{
+  cmdWatching();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleReelIn()
+{
+  cmdReelIn();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleReady()
+{
+  server.send(200, "text/plain", cmdReady() ? "OK" : "ALREADY ACTIVE");
+}
+
+void handleRelearn()
+{
+  cmdRelearn(false);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleSkipPull()
+{
+  cmdSkipPull();
   server.send(200, "text/plain", "OK");
 }
 
@@ -4671,6 +4738,306 @@ void handleStrike()
 }
 
 // =====================================================
+// LoRa LINK TO THE WATCH
+//
+// Heartbeat every second (state, tilt, strike...), STRIKE packets
+// repeated until the watch confirms, commands from the watch
+// confirmed with an ACK. Never blocks the 100 Hz detection.
+// =====================================================
+
+#if ENABLE_LORA
+
+// XIAO ESP32-S3 + Wio-SX1262 kit pins
+#define ROD_LORA_SCK      7
+#define ROD_LORA_MISO     8
+#define ROD_LORA_MOSI     9
+#define ROD_LORA_CS      41
+#define ROD_LORA_RESET   42
+#define ROD_LORA_BUSY    40
+#define ROD_LORA_DIO1    39
+
+SX1262 radio = new Module(ROD_LORA_CS, ROD_LORA_DIO1, ROD_LORA_RESET, ROD_LORA_BUSY);
+
+bool loraOk = false;
+volatile bool loraIrq = false;
+bool loraTxBusy = false;
+unsigned long loraTxStart = 0;
+
+uint8_t loraSeq = 0;
+unsigned long lastHeartbeatSent = 0;
+
+// Strike waiting for the watch to confirm
+bool strikeNeedsAck = false;
+uint16_t strikeAckId = 0;
+int strikeTries = 0;
+unsigned long nextStrikeSend = 0;
+
+// ACK waiting to be sent (short delay so the other side is listening)
+bool ackQueued = false;
+ss_ack_t queuedAck;
+unsigned long ackDueAt = 0;
+
+int lastCommandSeq = -1;
+
+void IRAM_ATTR onLoraIrq()
+{
+  loraIrq = true;
+}
+
+uint8_t strikeCode(const String& type)
+{
+  if(type == "SHARP STRIKE") return STRIKE_SHARP;
+  if(type == "SLOW PULL") return STRIKE_SLOW;
+  if(type == "REPEATED BITE") return STRIKE_REPEATED;
+  if(type == "DROP-BACK") return STRIKE_DROPBACK;
+
+  return STRIKE_NONE;
+}
+
+uint8_t rodStateCode()
+{
+  switch(rodState)
+  {
+    case ST_LEARNING: return ROD_LEARNING;
+    case ST_PULLTEST: return ROD_PULLTEST;
+    case ST_SETTLING: return ROD_SETTLING;
+    case ST_PAUSED: return ROD_PAUSED;
+    default: return ROD_MONITORING;
+  }
+}
+
+void loraSend(const void* data, size_t len)
+{
+  if(radio.startTransmit((const uint8_t*)data, len) == RADIOLIB_ERR_NONE)
+  {
+    loraTxBusy = true;
+    loraTxStart = millis();
+  }
+  else
+  {
+    radio.startReceive();
+  }
+}
+
+void fillHeader(ss_header_t& h, uint8_t type)
+{
+  h.net = SS_NET_ID;
+  h.type = type;
+  h.seq = loraSeq++;
+}
+
+void sendHeartbeat()
+{
+  ss_heartbeat_t p;
+  fillHeader(p.h, PKT_HEARTBEAT);
+
+  unsigned long learnLeft = 0;
+
+  if(rodState == ST_LEARNING && millis() - learningStart < LEARN_TIME)
+    learnLeft = (LEARN_TIME - (millis() - learningStart) + 999) / 1000;
+
+  p.state = rodStateCode();
+  p.strike = strikeActive ? strikeCode(strikeType) : (uint8_t)STRIKE_NONE;
+  p.strikeId = (uint16_t)strikeEventID;
+  p.sea = seaState;
+  p.battery = 255;   // not measured yet
+  p.learnLeft = (uint8_t)learnLeft;
+  p.tilt10 = (int16_t)clampFloat(tiltDeg * 10.0, -32000, 32000);
+  p.bucket = (uint8_t)clampFloat(pullBucket / bucketSize * 100.0, 0, 100);
+  p.knocks = (uint8_t)recentKnockCount();
+
+  loraSend(&p, sizeof(p));
+}
+
+void sendStrike()
+{
+  ss_strike_t p;
+  fillHeader(p.h, PKT_STRIKE);
+
+  p.strike = strikeCode(strikeType);
+  p.strikeId = strikeAckId;
+  p.peakTilt10 = (int16_t)clampFloat(strikePeakTilt * 10.0, -32000, 32000);
+
+  loraSend(&p, sizeof(p));
+}
+
+void queueAck(uint8_t ackType, uint16_t value)
+{
+  fillHeader(queuedAck.h, PKT_ACK);
+
+  queuedAck.ackType = ackType;
+  queuedAck.ackValue = value;
+
+  ackQueued = true;
+  ackDueAt = millis() + 20;
+}
+
+// Called by startStrike()
+void loraOnStrike()
+{
+  if(!loraOk)
+    return;
+
+  strikeNeedsAck = true;
+  strikeAckId = (uint16_t)strikeEventID;
+  strikeTries = 0;
+  nextStrikeSend = millis();
+}
+
+void handleCommand(const ss_command_t& c)
+{
+  // Always confirm, even a repeat (our first ACK may have been lost)
+  queueAck(PKT_COMMAND, c.h.seq);
+
+  if(c.h.seq == lastCommandSeq)
+    return;
+
+  lastCommandSeq = c.h.seq;
+
+  Serial.printf("[LoRa] command %d from watch\n", c.cmd);
+
+  switch(c.cmd)
+  {
+    case CMD_LEARN:    cmdRelearn(true); break;
+    case CMD_WATCHING: cmdWatching(); break;
+    case CMD_REELIN:   cmdReelIn(); break;
+    case CMD_READY:    cmdReady(); break;
+    case CMD_RESUME:   cmdResume(); break;
+    case CMD_SKIPPULL: cmdSkipPull(); break;
+  }
+}
+
+void handlePacket(const uint8_t* buf, size_t len)
+{
+  if(len < sizeof(ss_header_t))
+    return;
+
+  const ss_header_t* h = (const ss_header_t*)buf;
+
+  if(h->net != SS_NET_ID)
+    return;
+
+  if(h->type == PKT_COMMAND && len >= sizeof(ss_command_t))
+  {
+    handleCommand(*(const ss_command_t*)buf);
+  }
+  else if(h->type == PKT_ACK && len >= sizeof(ss_ack_t))
+  {
+    const ss_ack_t* a = (const ss_ack_t*)buf;
+
+    if(a->ackType == PKT_STRIKE && a->ackValue == strikeAckId)
+    {
+      strikeNeedsAck = false;
+      Serial.println("[LoRa] watch confirmed the strike");
+    }
+  }
+}
+
+void loraBegin()
+{
+  SPI.begin(ROD_LORA_SCK, ROD_LORA_MISO, ROD_LORA_MOSI, ROD_LORA_CS);
+
+  // Wio-SX1262: 1.8V TCXO powered from DIO3
+  int16_t state = radio.begin(
+    SS_FREQ_MHZ, SS_BW_KHZ, SS_SF, SS_CR,
+    SS_SYNC_WORD, SS_POWER_DBM, SS_PREAMBLE, 1.8
+  );
+
+  if(state != RADIOLIB_ERR_NONE)
+  {
+    Serial.printf("[LoRa] FAILED, error %d - running without the watch\n", state);
+    return;
+  }
+
+  // Wio-SX1262 antenna switch is driven by DIO2
+  radio.setDio2AsRfSwitch(true);
+
+  radio.setDio1Action(onLoraIrq);
+  radio.startReceive();
+
+  loraOk = true;
+
+  Serial.printf("[LoRa] OK  %.3f MHz  SF%d - talking to the watch\n", SS_FREQ_MHZ, SS_SF);
+}
+
+void loraPoll()
+{
+  if(!loraOk)
+    return;
+
+  unsigned long now = millis();
+
+  // ---------- Radio finished sending or received something ----------
+
+  if(loraIrq)
+  {
+    loraIrq = false;
+
+    if(loraTxBusy)
+    {
+      radio.finishTransmit();
+      loraTxBusy = false;
+    }
+    else
+    {
+      uint8_t buf[64];
+      size_t len = radio.getPacketLength();
+
+      if(len > 0 && len <= sizeof(buf) && radio.readData(buf, len) == RADIOLIB_ERR_NONE)
+        handlePacket(buf, len);
+    }
+
+    radio.startReceive();
+  }
+
+  // Never stay stuck "sending"
+  if(loraTxBusy && now - loraTxStart > 2000)
+  {
+    loraTxBusy = false;
+    radio.startReceive();
+  }
+
+  if(loraTxBusy)
+    return;
+
+  // ---------- What to send next (most important first) ----------
+
+  if(ackQueued && (long)(now - ackDueAt) >= 0)
+  {
+    ackQueued = false;
+    loraSend(&queuedAck, sizeof(queuedAck));
+    return;
+  }
+
+  if(strikeNeedsAck && strikeActive && (long)(now - nextStrikeSend) >= 0)
+  {
+    sendStrike();
+
+    strikeTries++;
+    nextStrikeSend = now + SS_RESEND_MS + random(0, 300);
+
+    if(strikeTries >= SS_MAX_TRIES)
+      strikeNeedsAck = false;
+
+    return;
+  }
+
+  if(now - lastHeartbeatSent >= SS_HEARTBEAT_MS)
+  {
+    lastHeartbeatSent = now;
+    sendHeartbeat();
+  }
+}
+
+#else
+
+void loraOnStrike() {}
+void loraBegin() {}
+void loraPoll() {}
+
+#endif
+
+// =====================================================
 // SETUP
 // =====================================================
 
@@ -4735,6 +5102,8 @@ void setup()
 
   server.begin();
 
+  loraBegin();
+
   startEnvironmentLearning();
 
   lastSampleTime = millis();
@@ -4750,6 +5119,8 @@ void setup()
 void loop()
 {
   server.handleClient();
+
+  loraPoll();
 
   oversample();
 

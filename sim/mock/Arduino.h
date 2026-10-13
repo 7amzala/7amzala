@@ -11,6 +11,7 @@ inline unsigned long millis(){ return simMillis; }
 inline unsigned long micros(){ return simMillis * 1000UL; }
 #define HEX 16
 inline void delay(unsigned long){}
+inline long random(long a, long b){ return a + rand() % (b - a); }
 class String {
 public:
   std::string s;
@@ -32,6 +33,7 @@ struct SerialT {
   void print(float v,int d){ if(!quiet) printf("%.*f",d,v);} void print(uint8_t v,int b){ if(!quiet) printf(b==16?"%X":"%d",v);} void println(float v,int d){ if(!quiet) printf("%.*f\n",d,v);} 
   void println(){ if(!quiet) printf("\n"); }
   void begin(int){}
+  template<class... A> void printf(const char* f, A... a){ if(!quiet) ::printf(f, a...); }
   void out(const char* c){ printf("[%7.1fs] %s", simMillis/1000.0, c);} void out(const String& s){ printf("%s", s.c_str()); }
   void out(int v){ printf("%d",v);} void out(long v){printf("%ld",v);} void out(unsigned long v){printf("%lu",v);} void out(float v){printf("%.3f",v);} void out(double v){printf("%.3f",v);}
 };
