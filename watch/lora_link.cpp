@@ -57,6 +57,7 @@ static bool ackedAnyStrike = false;
 #define RETRY_BEGIN_MS  5000
 
 static uint32_t lastBeginTry = 0;
+static uint32_t lastWatchHb = 0;
 static int beginTries = 0;
 
 static void IRAM_ATTR onLoraIrq(void)
@@ -315,6 +316,22 @@ void lora_link_poll(void)
       Serial.printf("[LoRa] rod did not confirm command %d\n", pendingCmd);
       pendingCmd = 0;
     }
+
+    return;
+  }
+
+  // "I'm here" for the rod's dashboard (only once we hear the rod)
+  if(status.connected && now - lastWatchHb >= SS_WATCH_HB_MS + (uint32_t)random(0, 500))
+  {
+    lastWatchHb = now;
+
+    ss_watch_hb_t w;
+    fillHeader(&w.h, PKT_WATCH_HB);
+    w.rodRssi = (int8_t)constrain((int)status.last_rssi, -127, 0);
+    w.rodSnr = (int8_t)constrain((int)status.last_snr, -30, 30);
+    w.battery = 255;
+
+    sendRaw(&w, sizeof(w));
   }
 }
 

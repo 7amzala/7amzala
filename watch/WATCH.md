@@ -76,9 +76,11 @@ time allowed; one heartbeat per second uses about 5%).
   itself when the rod is heard again.
 - **SIM STRIKE** on the monitoring screen is still a local demo (no radio).
 - Swipe left: **ROD LINK** page with real signal bars, RSSI and SNR.
+- The watch also sends a small "I'm here" message every 5 s, so the rod's
+  web dashboard can show **WATCH CONNECTED** with signal bars.
 
 ## Tested on the PC
 
 `sim/link_test.cpp` runs the real rod sketch and the real watch link
 together over a virtual radio, through a whole session, with 0% and 30% of
-packets lost: 38/38 checks pass. Not yet tested on the real boards.
+packets lost: 44/44 checks pass. Not yet tested on the real boards.

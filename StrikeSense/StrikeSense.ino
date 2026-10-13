@@ -18,6 +18,7 @@
 #include "strikesense_protocol.h"
 
 void loraOnStrike();
+void addLoraFields(String& json);
 
 LIS3DH myIMU(I2C_MODE, 0x19);
 WebServer server(80);
@@ -2805,6 +2806,53 @@ body.strikeFlash {
   color:#4cf294;
 }
 
+/* LORA / WATCH LINK */
+
+.loraChip {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border-radius:8px;
+  background:#0a120e;
+  border:1px solid #1a2a22;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.8px;
+  color:#62766b;
+}
+
+.loraChip b {
+  font-size:11px;
+  letter-spacing:.5px;
+}
+
+.loraChip small {
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:0;
+  color:#8fa398;
+  font-variant-numeric:tabular-nums;
+}
+
+.bars {
+  display:flex;
+  align-items:flex-end;
+  gap:2px;
+  height:12px;
+}
+
+.bars i {
+  width:3px;
+  border-radius:1px;
+  background:#22332a;
+}
+
+.bars i:nth-child(1) { height:4px; }
+.bars i:nth-child(2) { height:6px; }
+.bars i:nth-child(3) { height:9px; }
+.bars i:nth-child(4) { height:12px; }
+
 /* SETTINGS DRAWER */
 
 .drawer {
@@ -3068,6 +3116,11 @@ AUDIO: <span id="audioStatus">OFF</span>
 <span class="timeChip">&#9201; ON <b id="upTime">0:00:00</b></span>
 <span class="timeChip armed">ARMED <b id="armedTime">&ndash;</b></span>
 <span class="timeChip">TOTAL <b id="totalTime">0h</b></span>
+<span class="loraChip" id="loraChip" title="">&#128225; WATCH
+<span class="bars" id="loraBars"><i></i><i></i><i></i><i></i></span>
+<b id="loraText">&ndash;</b>
+<small id="loraInfo"></small>
+</span>
 </div>
 
 </div>
@@ -4023,6 +4076,48 @@ function showTimes(d)
   el("totalTime").innerText = hours(d.total);
 }
 
+const LORA_NAMES = ["", "POOR", "WEAK", "FAIR", "GOOD"];
+const LORA_COLOURS = ["#ff5757", "#ff5757", "#ffba52", "#c8e86a", "#45ef8d"];
+
+function showLora(d)
+{
+  const bars = el("loraBars").children;
+  let text, colour, info = "", tip = "";
+  let level = 0;
+
+  if(d.lora === undefined || d.lora === false)
+  {
+    text = "LORA OFF";
+    colour = "#62766b";
+    tip = "The rod's LoRa radio is not working";
+  }
+  else if(!d.watch)
+  {
+    text = "NOT CONNECTED";
+    colour = "#ff5757";
+    tip = d.wseen >= 0 ? "Watch last heard " + d.wseen + " s ago" : "Watch never heard since power on";
+  }
+  else
+  {
+    level = d.wbars;
+    text = "CONNECTED \u00b7 " + LORA_NAMES[level];
+    colour = LORA_COLOURS[level];
+    info = d.wrssi + " dBm";
+    tip = "Rod hears watch: " + d.wrssi + " dBm, SNR " + d.wsnr + " dB";
+
+    if(d.wrep)
+      tip += "\nWatch hears rod: " + d.w2rssi + " dBm, SNR " + d.w2snr + " dB";
+  }
+
+  for(let i = 0; i < 4; i++)
+    bars[i].style.background = i < level ? colour : "#22332a";
+
+  el("loraText").innerText = text;
+  el("loraText").style.color = colour;
+  el("loraInfo").innerText = info;
+  el("loraChip").title = tip;
+}
+
 async function setSea(mode)
 {
   await fetch("/sea?m=" + mode);
@@ -4231,6 +4326,7 @@ async function updateData()
     showState(d);
     showButtons(d);
     showTimes(d);
+    showLora(d);
     showLiveInDrawer(d);
 
     // ---------- Single knock pre-alert ----------
@@ -4696,6 +4792,8 @@ void handleData()
   addField(json, "peakenergy", strikePeakEnergy, 4);
   addField(json, "peaktilt", strikePeakTilt, 2);
 
+  addLoraFields(json);
+
   json += "}";
 
   server.send(200, "application/json", json);
@@ -4778,6 +4876,14 @@ ss_ack_t queuedAck;
 unsigned long ackDueAt = 0;
 
 int lastCommandSeq = -1;
+
+// What the rod knows about the watch (any packet from it counts)
+unsigned long watchLastSeen = 0;
+float watchRssi = 0;            // how strong the rod hears the watch
+float watchSnr = 0;
+int watchHearsRodRssi = 0;      // reported by the watch
+int watchHearsRodSnr = 0;
+bool watchReported = false;
 
 void IRAM_ATTR onLoraIrq()
 {
@@ -4917,7 +5023,19 @@ void handlePacket(const uint8_t* buf, size_t len)
   if(h->net != SS_NET_ID)
     return;
 
-  if(h->type == PKT_COMMAND && len >= sizeof(ss_command_t))
+  watchLastSeen = millis();
+  watchRssi = radio.getRSSI();
+  watchSnr = radio.getSNR();
+
+  if(h->type == PKT_WATCH_HB && len >= sizeof(ss_watch_hb_t))
+  {
+    const ss_watch_hb_t* w = (const ss_watch_hb_t*)buf;
+
+    watchHearsRodRssi = w->rodRssi;
+    watchHearsRodSnr = w->rodSnr;
+    watchReported = true;
+  }
+  else if(h->type == PKT_COMMAND && len >= sizeof(ss_command_t))
   {
     handleCommand(*(const ss_command_t*)buf);
   }
@@ -5029,11 +5147,47 @@ void loraPoll()
   }
 }
 
+// Watch heard in the last 15 s (it reports every 5 s)
+bool watchConnected()
+{
+  return loraOk && watchLastSeen != 0 && millis() - watchLastSeen < 15000;
+}
+
+int loraBars(float rssi)
+{
+  if(rssi > -80)  return 4;
+  if(rssi > -95)  return 3;
+  if(rssi > -108) return 2;
+
+  return 1;
+}
+
+void addLoraFields(String& json)
+{
+  bool connected = watchConnected();
+
+  addField(json, "lora", loraOk);
+  addField(json, "watch", connected);
+  addField(json, "wbars", (long)(connected ? loraBars(watchRssi) : 0));
+  addField(json, "wrssi", (long)watchRssi);
+  addField(json, "wsnr", watchSnr, 1);
+  addField(json, "wrep", connected && watchReported);
+  addField(json, "w2rssi", (long)watchHearsRodRssi);
+  addField(json, "w2snr", (long)watchHearsRodSnr);
+  addField(json, "wseen", watchLastSeen == 0 ? -1L : (long)((millis() - watchLastSeen) / 1000));
+}
+
 #else
 
 void loraOnStrike() {}
 void loraBegin() {}
 void loraPoll() {}
+
+void addLoraFields(String& json)
+{
+  addField(json, "lora", false);
+  addField(json, "watch", false);
+}
 
 #endif
 

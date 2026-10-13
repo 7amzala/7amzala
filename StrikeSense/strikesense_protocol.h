@@ -30,6 +30,7 @@
 // ---------- Timing ----------
 
 #define SS_HEARTBEAT_MS     1000   // rod -> watch "I'm alive" + status
+#define SS_WATCH_HB_MS      5000   // watch -> rod "I'm here" + link quality
 #define SS_RESEND_MS        1000   // repeat strikes / commands until confirmed
 #define SS_MAX_TRIES        15
 
@@ -40,7 +41,8 @@ enum
   PKT_HEARTBEAT = 1,   // rod -> watch, every second
   PKT_STRIKE    = 2,   // rod -> watch, repeated until ACK
   PKT_COMMAND   = 3,   // watch -> rod, repeated until ACK
-  PKT_ACK       = 4    // both ways
+  PKT_ACK       = 4,   // both ways
+  PKT_WATCH_HB  = 5    // watch -> rod, every 5 s
 };
 
 // ---------- Rod states ----------
@@ -113,6 +115,14 @@ typedef struct __attribute__((packed))
   ss_header_t h;
   uint8_t cmd;           // CMD_xxx
 } ss_command_t;
+
+typedef struct __attribute__((packed))
+{
+  ss_header_t h;
+  int8_t   rodRssi;      // how strong the watch hears the rod (dBm)
+  int8_t   rodSnr;       // dB
+  uint8_t  battery;      // watch battery %, 255 = not measured
+} ss_watch_hb_t;
 
 typedef struct __attribute__((packed))
 {

@@ -12,6 +12,7 @@ inline unsigned long micros(){ return simMillis * 1000UL; }
 #define HEX 16
 inline void delay(unsigned long){}
 inline long random(long a, long b){ return a + rand() % (b - a); }
+template<class T> inline T constrain(T v, T lo, T hi){ return v < lo ? lo : (v > hi ? hi : v); }
 class String {
 public:
   std::string s;

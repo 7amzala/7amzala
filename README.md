@@ -50,6 +50,18 @@ ROUGH automatically. Tap a sea state to override it, or AUTO to go back.
 The header shows running time: **ON** (since power on), **ARMED** (since the
 rod was last armed) and **TOTAL** (all hours ever, saved every 10 minutes).
 
+**📡 WATCH** (next to the times) shows the LoRa link to the watch: signal bars,
+GOOD / FAIR / WEAK / POOR and the signal in dBm, or **NOT CONNECTED** if the
+watch has not been heard for 15 s. Hold the mouse on it (or long-press) to see
+the signal in both directions.
+
+| Bars | Quality | Signal (dBm) |
+|---|---|---|
+| 4 | GOOD | above -80 |
+| 3 | FAIR | -80 to -95 |
+| 2 | WEAK | -95 to -108 |
+| 1 | POOR | below -108 |
+
 **⚙ SETTINGS** opens live sliders (knock limit, repeated bite, sharp strike,
 pull angle, pull time, drop-back and knock beep on/off). Changes work
 immediately; **SAVE** keeps them after power off.

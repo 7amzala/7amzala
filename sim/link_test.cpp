@@ -83,13 +83,15 @@ void session(float loss)
 
   pullTest(simMillis / 1000.0 + 0.5);
   for (int i = 0; i < 20 && rodState != ST_MONITORING; i++) step(0.5);
-  step(1.5);
+  for (int i = 0; i < 50 && lora_link_get_status().rod_state != ROD_MONITORING; i++) step(0.1);
   show("after pull test:");
   check(lora_link_get_status().rod_state == ROD_MONITORING, "watch shows MONITORING");
+  check(watchConnected(), "rod dashboard: watch CONNECTED");
+  check(watchReported && loraBars(watchRssi) == 4, "rod dashboard: 4 bars, watch reports how it hears the rod");
 
   // A fish
   unsigned long before = strikeEventID;
-  events.push_back({ (float)(simMillis / 1000.0 + 1), 1, 3.0, 2, 6 });
+  events.push_back({ (float)(simMillis / 1000.0 + 1), 1, 3.0, 2, 20 });   // fish keeps the line pulled
   unsigned long t0 = simMillis;
   while (strikeEventID == before && simMillis - t0 < 20000) step(0.05);
   unsigned long strikeAt = simMillis;
@@ -116,7 +118,9 @@ void session(float loss)
   // Link loss
   simLoraLoss = 1.0;
   step(7);
+  step(10);
   check(!lora_link_get_status().connected, "watch notices the link is lost");
+  check(!watchConnected(), "rod dashboard: watch NOT CONNECTED");
   simLoraLoss = loss;
   step(3);
   check(lora_link_get_status().connected, "watch reconnects by itself");
