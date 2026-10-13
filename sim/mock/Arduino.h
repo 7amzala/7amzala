@@ -39,3 +39,13 @@ struct SerialT {
   void out(int v){ printf("%d",v);} void out(long v){printf("%ld",v);} void out(unsigned long v){printf("%lu",v);} void out(float v){printf("%.3f",v);} void out(double v){printf("%.3f",v);}
 };
 extern SerialT Serial;
+// GPIO (no real pins on the PC: reads LOW)
+#define LOW 0
+#define HIGH 1
+#define INPUT 0x01
+#define OUTPUT 0x03
+#define INPUT_PULLUP 0x05
+inline void pinMode(int, int) {}
+inline void digitalWrite(int, int) {}
+inline int digitalRead(int) { return LOW; }
+inline void delayMicroseconds(unsigned) {}

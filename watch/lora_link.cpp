@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <RadioLib.h>
+#include <string.h>
 
 #include "lora_link.h"
 
@@ -210,6 +211,102 @@ static bool startLink(void)
   return true;
 }
 
+// ---------- Wiring self-check (slow software SPI, no library) ----------
+//
+// Reads the chip name straight from the module before RadioLib starts.
+// Tells us if a problem is the wires (no name) or the software (name OK).
+
+static uint8_t bbTransfer(uint8_t out)
+{
+  uint8_t in = 0;
+
+  for(int i = 7; i >= 0; i--)
+  {
+    digitalWrite(LORA_MOSI, (out >> i) & 1);
+    delayMicroseconds(10);
+    digitalWrite(LORA_SCK, HIGH);
+    delayMicroseconds(10);
+    in |= digitalRead(LORA_MISO) << i;
+    digitalWrite(LORA_SCK, LOW);
+    delayMicroseconds(10);
+  }
+
+  return in;
+}
+
+static bool wiringCheck(void)
+{
+  pinMode(LORA_RXEN, OUTPUT);
+  digitalWrite(LORA_RXEN, LOW);
+  pinMode(LORA_TXEN, OUTPUT);
+  digitalWrite(LORA_TXEN, LOW);
+
+  pinMode(LORA_BUSY, INPUT);
+  pinMode(LORA_RESET, OUTPUT);
+  pinMode(LORA_CS, OUTPUT);
+  digitalWrite(LORA_CS, HIGH);
+  pinMode(LORA_SCK, OUTPUT);
+  digitalWrite(LORA_SCK, LOW);
+  pinMode(LORA_MOSI, OUTPUT);
+  digitalWrite(LORA_MOSI, LOW);
+  pinMode(LORA_MISO, INPUT_PULLUP);
+
+  int busyBefore = digitalRead(LORA_BUSY);
+
+  digitalWrite(LORA_RESET, LOW);
+  delay(2);
+  digitalWrite(LORA_RESET, HIGH);
+
+  uint32_t t = millis();
+  while(digitalRead(LORA_BUSY) == HIGH && millis() - t < 100)
+    ;
+  int busyAfter = digitalRead(LORA_BUSY);
+
+  char text[17];
+  uint8_t raw[4];
+
+  digitalWrite(LORA_CS, LOW);
+  delayMicroseconds(20);
+  bbTransfer(0x1D);          // ReadRegister
+  bbTransfer(0x03);
+  bbTransfer(0x20);          // 0x0320 = chip name
+  bbTransfer(0x00);
+
+  for(int i = 0; i < 16; i++)
+  {
+    uint8_t c = bbTransfer(0x00);
+    if(i < 4)
+      raw[i] = c;
+    text[i] = (c >= 32 && c < 127) ? (char)c : '.';
+  }
+
+  text[16] = 0;
+  digitalWrite(LORA_CS, HIGH);
+
+  pinMode(LORA_MISO, INPUT);
+
+  bool ok = strncmp(text, "SX126", 5) == 0;
+
+  Serial.printf("[LoRa] wiring check: BUSY %d->%d  chip says \"%s\" (%02X %02X %02X %02X)  %s\n",
+                busyBefore, busyAfter, text, raw[0], raw[1], raw[2], raw[3],
+                ok ? "WIRING OK" : "NO ANSWER");
+
+  if(!ok)
+  {
+    if(raw[0] == 0xFF && raw[1] == 0xFF)
+      Serial.println("[LoRa]   all FF: MISO not connected, or the module has no power (3V3 / GND)");
+    else if(raw[0] == 0x00 && raw[1] == 0x00)
+      Serial.println("[LoRa]   all 00: MISO stuck low, or CLK / CS / MOSI not reaching the module");
+    else
+      Serial.println("[LoRa]   random bytes: a loose or mixed-up SPI wire (CLK, MOSI, MISO, CS)");
+
+    if(busyAfter == HIGH)
+      Serial.println("[LoRa]   BUSY stays HIGH: check RESET (IO6), BUSY (IO7) and the 3V3 supply");
+  }
+
+  return ok;
+}
+
 bool lora_link_begin(void)
 {
   memset(&status, 0, sizeof(status));
@@ -218,10 +315,12 @@ bool lora_link_begin(void)
   // Random start, so a restarted watch never repeats the rod's last seen number
   seq = (uint8_t)random(0, 256);
 
-  loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-
   Serial.println();
   Serial.println("[LoRa] starting SX1262...");
+
+  wiringCheck();
+
+  loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 
   return startLink();
 }
