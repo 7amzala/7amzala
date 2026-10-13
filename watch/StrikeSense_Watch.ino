@@ -5,10 +5,12 @@
 void setup()
 {
   Serial.begin(115200);
+  delay(1000);              // NEW: time to open the Serial Monitor
+
+  lora_link_begin();        // NEW: start the LoRa radio FIRST (like the PING test)
+
   Touch_Init();
   lcd_lvgl_Init();
-
-  lora_link_begin();        // NEW: start the LoRa radio
 }
 
 void loop()

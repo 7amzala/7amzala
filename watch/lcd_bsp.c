@@ -621,12 +621,16 @@ static void render_connect_failed(void)
   );
 
   lora_link_status_t link = lora_link_get_status();
+  char detail[96];
+
+  if (link.radio_ok)
+    snprintf(detail, sizeof(detail), "Check that the rod unit is powered on and nearby.");
+  else
+    snprintf(detail, sizeof(detail), "Watch LoRa module error %d.\nRetrying... check its wiring.", link.init_error);
 
   add_center_message(
     "NO LINK",
-    link.radio_ok
-      ? "Check that the rod unit is powered on and nearby."
-      : "Watch LoRa module not responding.\nCheck its wiring.",
+    detail,
     0xEF4444,
     0xD8A5A5
   );

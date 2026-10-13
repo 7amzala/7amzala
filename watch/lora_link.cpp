@@ -54,6 +54,11 @@ static uint32_t ackDueAt = 0;
 static uint16_t lastAckedStrike = 0;
 static bool ackedAnyStrike = false;
 
+#define RETRY_BEGIN_MS  5000
+
+static uint32_t lastBeginTry = 0;
+static int beginTries = 0;
+
 static void IRAM_ATTR onLoraIrq(void)
 {
   loraIrq = true;
@@ -168,15 +173,10 @@ static int16_t startRadio(float tcxoVoltage)
   );
 }
 
-bool lora_link_begin(void)
+static bool startLink(void)
 {
-  memset(&status, 0, sizeof(status));
-  status.rod_battery = 255;
-
-  // Random start, so a restarted watch never repeats the rod's last seen number
-  seq = (uint8_t)random(0, 256);
-
-  loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+  lastBeginTry = millis();
+  beginTries++;
 
   // The module clock is a TCXO (powered from DIO3) or a plain crystal
   int16_t state = startRadio(1.8);
@@ -188,7 +188,11 @@ bool lora_link_begin(void)
 
   if(state != RADIOLIB_ERR_NONE)
   {
-    Serial.printf("[LoRa] FAILED, error %d\n", state);
+    Serial.printf("[LoRa] FAILED (try %d), error %d - retrying in 5 s\n", beginTries, state);
+
+    if(state == RADIOLIB_ERR_CHIP_NOT_FOUND)
+      Serial.println("[LoRa] -2 = no answer over SPI: check 3V3, GND, CLK, MOSI, MISO, CS");
+
     return false;
   }
 
@@ -205,10 +209,32 @@ bool lora_link_begin(void)
   return true;
 }
 
+bool lora_link_begin(void)
+{
+  memset(&status, 0, sizeof(status));
+  status.rod_battery = 255;
+
+  // Random start, so a restarted watch never repeats the rod's last seen number
+  seq = (uint8_t)random(0, 256);
+
+  loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+
+  Serial.println();
+  Serial.println("[LoRa] starting SX1262...");
+
+  return startLink();
+}
+
 void lora_link_poll(void)
 {
+  // Radio did not start: try again every few seconds
   if(!status.radio_ok)
+  {
+    if(millis() - lastBeginTry >= RETRY_BEGIN_MS)
+      startLink();
+
     return;
+  }
 
   uint32_t now = millis();
 
