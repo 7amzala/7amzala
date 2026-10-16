@@ -5,15 +5,21 @@ the rod tip, plus a live dashboard over Wi-Fi.
 
 ## Files
 
-- `StrikeSense/StrikeSense.ino`: the sketch (open this folder in the Arduino IDE)
+- `StrikeSense/StrikeSense.ino`: the sketch with the LoRa watch link (open this folder in the Arduino IDE)
+- `StrikeSense_NoLoRa/StrikeSense_NoLoRa.ino`: the same without LoRa (dashboard only)
 - `StrikeSense/TUNING.md`: which number to change for which problem
 - `sim/`: PC simulator used to test the detection before going to the sea
 
 ## Hardware / libraries
 
 - ESP32 board (Arduino core for ESP32)
-- LIS3DH on I2C, address `0x19`
-- Library: **SparkFun LIS3DH Arduino Library**
+- Sensor on I2C (SDA = D4, SCL = D5), found automatically at start-up:
+  - **ADXL355** (EVAL-ADXL355-PMDZ), about 10x less noise. Pins 1 -> D5,
+    2 -> D4, 5 -> GND, 6 -> 3V3, and on the sensor link 3 -> 12 and
+    4 -> 11 (see `docs/adxl355_wiring.png`). Test it first with
+    `rod_adxl355_test/`.
+  - or **LIS3DH**, address `0x19`
+- Library: **SparkFun LIS3DH Arduino Library** (needed to build, even with the ADXL355)
 - `Preferences`, `WiFi` and `WebServer` come with the ESP32 core
 
 ## Using it
