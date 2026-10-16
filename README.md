@@ -68,6 +68,10 @@ the signal in both directions.
 | 2 | WEAK | -95 to -108 |
 | 1 | POOR | below -108 |
 
+**3D NOISE** (next to LIVE / LAST STRIKE) shows how the tip shakes as a 3D
+cloud of dots (100 per second, last 3 s), with the knock limit as an orange
+sphere. Dots inside = normal noise, dots outside = a knock. Drag to turn it.
+
 **⚙ SETTINGS** opens live sliders (knock limit, repeated bite, sharp strike,
 pull angle, pull time, drop-back and knock beep on/off). Changes work
 immediately; **SAVE** keeps them after power off.
