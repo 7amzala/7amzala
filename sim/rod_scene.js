@@ -1,7 +1,8 @@
 // Surf rod in a sand spike, on the beach at night (v3, detailed).
 // s: t, tilt (+ toward water), knock 0..1, state (armed/pull/drop/strike),
 //    label, dir, waveswing, period, wind (0..3), allow, bucket, drop,
-//    mode (normal / reel / out / cast) and anim 0..1 for reel in and cast
+//    mode (normal / reel / out / cast) and anim 0..1 for reel in and cast,
+//    hideLine / noHud (for the pull test picture). Returns the tip and line end.
 function drawRodScene(ctx, w, h, s)
 {
   const t = s.t;
@@ -670,7 +671,7 @@ function drawRodScene(ctx, w, h, s)
       lead(fx, fy);
     }
   }
-  else
+  else if(!s.hideLine)
   {
     const tension = Math.max(0, Math.min(1, (B - B0) / 0.25 + 0.55));
     const midX = (tip[0] + endX) / 2, midY = (tip[1] + endY) / 2;
@@ -755,6 +756,9 @@ function drawRodScene(ctx, w, h, s)
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 
+  if(s.noHud)
+    return { tip: tip, end: [endX, endY] };
+
   // ================= HUD =================
   const kh = Math.max(0.8, k);               // readable on a phone too
   const pw = Math.min(300 * kh, w - 24), ph = 96 * kh;
@@ -833,4 +837,6 @@ function drawRodScene(ctx, w, h, s)
     ctx.fillStyle = "#8ea6c8";
     ctx.fillText(name, bx, by);
   }
+
+  return { tip: tip, end: [endX, endY] };
 }
