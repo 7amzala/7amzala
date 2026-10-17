@@ -93,7 +93,7 @@ void simRead()
 
 struct Strike { double t; std::string type; };
 std::vector<Strike> strikes;
-unsigned long lastID = 0, lastKnock = 0; int knockAlerts = 0;
+unsigned long lastID = 0, lastKnock = 0, lastDrop = 0; int knockAlerts = 0, dropNotes = 0;
 double autoAckAt = -1;
 
 void run(double seconds, bool autoAck = true)
@@ -110,6 +110,7 @@ void run(double seconds, bool autoAck = true)
       if (autoAck) autoAckAt = simMillis / 1000.0 + 2.0;
     }
     if (knockAlertID != lastKnock) { lastKnock = knockAlertID; knockAlerts++; }
+    if (dropSeenID != lastDrop) { lastDrop = dropSeenID; dropNotes++; }
     if (autoAckAt > 0 && simMillis / 1000.0 >= autoAckAt) { autoAckAt = -1; handleWatching(); }
   }
 }
@@ -123,11 +124,11 @@ float truthDot() { Vec3 d = vNorm(vPerp(vSub(modelG(1), modelG(0)), restDir)); r
 void waitArmed() { autoAckAt = -1; if (strikeActive) handleWatching(); for (int i = 0; i < 120 && (rodState != ST_MONITORING || strikeActive); i++) run(0.5); run(20); }
 int phase(const char* name, double secs)
 {
-  size_t before = strikes.size(); int kb = knockAlerts;
+  size_t before = strikes.size(); int kb = knockAlerts, db = dropNotes;
   run(secs);
   int n = strikes.size() - before;
   std::string types; for (size_t i = before; i < strikes.size(); i++) { char b[64]; snprintf(b,64,"%s@+%.1fs ", strikes[i].type.c_str(), strikes[i].t - (simMillis/1000.0 - secs)); types += b; }
-  printf("  %-40s strikes=%d [%s] knocks=%d | thr=%.4f swing=%.2f per=%.1f wind=%.2f allow=%.2f bucket=%.1f fill=%.2f sea=%d dir=%d\n", name, n, types.size() > 120 ? "many" : types.c_str(), knockAlerts - kb,
+  printf("  %-40s strikes=%d [%s] knocks=%d drops=%d | thr=%.4f swing=%.2f per=%.1f wind=%.2f allow=%.2f bucket=%.1f fill=%.2f sea=%d dir=%d\n", name, n, types.size() > 120 ? "many" : types.c_str(), knockAlerts - kb, dropNotes - db,
          knockThreshold, waveSwing, wavePeriod, windSwing, pullAllow, bucketSize, waveFill, seaState, haveDir);
   return n;
 }
@@ -159,9 +160,14 @@ void scenario(const char* title, Env e, bool doPullTest, float pullDeg, float fa
   waitArmed(); t = simMillis / 1000.0;
   events.push_back({(float)t + 1, 1, pullDeg, 4, 6});
   phase("slow pull", 15);
-  waitArmed(); t = simMillis / 1000.0;
+  waitArmed(); run(130); t = simMillis / 1000.0;   // earlier drop-back watch over
   events.push_back({(float)t + 1, 2, pullDeg, 3, 6});
-  phase("drop-back", 15);
+  phase("drop-back alone (no alarm)", 15);
+  waitArmed(); run(130); t = simMillis / 1000.0;
+  events.push_back({(float)t + 1, 2, pullDeg, 3, 12});            // line goes slack...
+  events.push_back({(float)t + 9, 1, pullDeg * 2.2f, 1.5, 6});    // ...then the fish pulls forward
+  phase("drop-back then pull forward", 18);
+  waitArmed(); run(10);
   phase("5 min after (false alarms?)", 300);
 }
 

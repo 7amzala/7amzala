@@ -77,7 +77,7 @@ void session(float loss)
 
   check(command(CMD_READY, "READY"), "READY confirmed");
   for (int i = 0; i < 40 && rodState != ST_PULLTEST; i++) step(0.5);
-  step(1.5);
+  for (int i = 0; i < 50 && lora_link_get_status().rod_state != ROD_PULLTEST; i++) step(0.1);
   show("after settling:");
   check(lora_link_get_status().rod_state == ROD_PULLTEST, "watch shows the PULL TEST screen");
 

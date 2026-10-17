@@ -24,6 +24,7 @@ public:
   String& operator+=(const String& o){ s+=o.s; return *this;}
   String& operator+=(const char* o){ s+=o; return *this;}
   bool operator==(const char* o) const { return s==o; }
+  bool startsWith(const char* p) const { return s.rfind(p, 0) == 0; }
   const char* c_str() const { return s.c_str(); }
   float toFloat() const { return atof(s.c_str()); }
 };

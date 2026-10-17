@@ -64,7 +64,7 @@ enum
   STRIKE_SHARP    = 1,
   STRIKE_SLOW     = 2,
   STRIKE_REPEATED = 3,
-  STRIKE_DROPBACK = 4
+  STRIKE_DROPBACK = 4    // DROP-BACK + PULL (a drop-back alone is not an alarm)
 };
 
 // ---------- Commands (watch -> rod) ----------

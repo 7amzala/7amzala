@@ -413,6 +413,17 @@ float bucketSize = BUCKET_MIN;
 float pullBucket = 0;
 float dropBucket = 0;
 
+// Drop-back watch: a drop-back alone is normal (waves loosen the braid).
+// Back and then forward past the normal position is the fish pattern.
+const unsigned long DROP_WATCH_MS = 120000;   // watch this long for a pull after a drop-back
+const unsigned long DROP_PULL_HOLD_MS = 500;  // the pull forward must hold this long
+
+bool dropWatch = false;
+void noteDropBack(bool watch);
+unsigned long dropSeenAt = 0;                 // last drop-back seen (0 = never)
+unsigned long dropSeenID = 0;                 // counts drop-backs (dashboard)
+unsigned long dropPullSince = 0;
+
 // How full the waves alone get the bucket. Learned from each
 // wave that fills and empties it without causing an alarm.
 float sustainNeed = 1.0;         // s the bucket must stay filled before an alarm
@@ -1561,6 +1572,8 @@ void startSettling(bool fromReady)
 {
   rodState = ST_SETTLING;
 
+  dropWatch = false;
+
   pullTestAfterSettle = fromReady;
 
   settleGraceUntil =
@@ -1579,6 +1592,8 @@ void startSettling(bool fromReady)
 void startEnvironmentLearning()
 {
   rodState = ST_LEARNING;
+
+  dropWatch = false;
 
   armedSince = 0;
 
@@ -2102,7 +2117,7 @@ void updatePullBuckets()
 
   // ---------- Away from water ----------
 
-  if(!haveDir || settings.dropOn < 0.5)
+  if(!haveDir)
   {
     dropBucket = 0;
     dropEpisodeStart = 0;
@@ -2122,7 +2137,75 @@ void updatePullBuckets()
     episodeLength(dropEpisodeStart) >= sustainNeed
   )
   {
-    startStrike("DROP-BACK");
+    noteDropBack(true);
+  }
+}
+
+// ---------- Drop-back watch ----------
+
+void noteDropBack(bool watch)
+{
+  if(dropWatch)
+    return;
+
+  // While settling the same slack movement can last a while: note it once
+  if(!watch && dropSeenAt != 0 && millis() - dropSeenAt < 10000)
+    return;
+
+  dropSeenAt = millis();
+  dropSeenID++;
+
+  dropWatch = watch;
+  dropPullSince = 0;
+
+  Serial.println(watch ? "DROP-BACK SEEN (no alarm) - watching for a pull forward" : "DROP-BACK SEEN while settling (no alarm)");
+}
+
+void updateDropWatch()
+{
+  if(!dropWatch)
+    return;
+
+  // Forward past the normal position, further than the biggest wave
+  float needed = pullAllow;
+
+  if(waveSwing > needed)
+    needed = waveSwing;
+
+  needed += settings.pullDeg * 0.5;
+
+  if(tiltDeg >= needed)
+  {
+    if(dropPullSince == 0)
+      dropPullSince = millis();
+
+    if(millis() - dropPullSince >= DROP_PULL_HOLD_MS && settings.dropOn > 0.5)
+    {
+      dropWatch = false;
+      startStrike("DROP-BACK + PULL");
+      return;
+    }
+  }
+  else
+  {
+    dropPullSince = 0;
+  }
+
+  if(millis() - dropSeenAt >= DROP_WATCH_MS)
+  {
+    // Nothing followed: the slack line is the new normal position
+    dropWatch = false;
+
+    setRest(recentRest);
+
+    pullBucket = 0;
+    dropBucket = 0;
+    pullEpisodePeak = 0;
+    dropEpisodePeak = 0;
+    pullEpisodeStart = 0;
+    dropEpisodeStart = 0;
+
+    Serial.println("DROP-BACK: no pull followed, new rod position accepted");
   }
 }
 
@@ -2168,6 +2251,11 @@ void monitoringStep()
   if(strikeActive)
     return;
 
+  updateDropWatch();
+
+  if(strikeActive)
+    return;
+
   // Slowly forget big waves once the sea calms down
   waveFill -= waveFill * alphaFor(WAVE_FILL_TAU);
 
@@ -2175,6 +2263,7 @@ void monitoringStep()
   // no knock, and the bucket is neither unusually full nor filled
   // for longer than a wave can keep it filled
   bool quiet =
+    !dropWatch &&
     !knockActive &&
     millis() - lastKnockEnd > 1000 &&
     episodeLength(pullEpisodeStart) < sustainNeed &&
@@ -2281,9 +2370,15 @@ void settlingStep()
     now - settlePullStart >= SETTLE_PULL_TIME
   )
   {
-    if(!settlePullAway || settings.dropOn > 0.5)
+    if(settlePullAway)
     {
-      startStrike(settlePullAway ? "DROP-BACK" : "SLOW PULL");
+      // Line went slack: only noted, the new position is learned anyway
+      noteDropBack(false);
+      settlePullCandidate = false;
+    }
+    else
+    {
+      startStrike("SLOW PULL");
       return;
     }
   }
@@ -2412,6 +2507,7 @@ void processSample()
       break;
 
     case ST_PAUSED:
+      dropWatch = false;
       pullBucket = 0;
       dropBucket = 0;
       settlingConfidence = 0;
@@ -3729,7 +3825,7 @@ function playAlarmPattern()
   if(activeAlarmType === "SHARP STRIKE") sharpPattern();
   else if(activeAlarmType === "SLOW PULL") slowPattern();
   else if(activeAlarmType === "REPEATED BITE") repeatedPattern();
-  else if(activeAlarmType === "DROP-BACK") dropPattern();
+  else if(activeAlarmType.startsWith("DROP")) dropPattern();
 }
 
 function startContinuousAlarm(type)
@@ -3755,7 +3851,7 @@ function startContinuousAlarm(type)
   if(type === "SHARP STRIKE") repeatTime = 1200;
   else if(type === "SLOW PULL") repeatTime = 1800;
   else if(type === "REPEATED BITE") repeatTime = 1400;
-  else if(type === "DROP-BACK") repeatTime = 1900;
+  else if(type.startsWith("DROP")) repeatTime = 1900;
 
   alarmTimer = setInterval(playAlarmPattern, repeatTime);
 
@@ -4667,7 +4763,9 @@ function showState(d)
   {
     let sub = "Watching knocks, slow pulls and drop-backs.";
 
-    if(d.dirage >= 0 && d.dirage < 6)
+    if(d.dropwatch)
+      sub = "Drop-back seen " + d.dropseen + " s ago (line slack) \u2013 no alarm. Watching for a pull forward\u2026";
+    else if(d.dirage >= 0 && d.dirage < 6)
       sub = "Direction learned ✓ Rod armed.";
     else if(d.bucket > 60)
       sub = "Possible slow pull building up…";
@@ -4869,7 +4967,7 @@ noiseLoop();
 </div>
 
 <div class="setRow switchRow">
-<div><div class="setTop"><span>Drop-back alarm</span></div><div class="setHelp">Tip springs back, line goes slack.</div></div>
+<div><div class="setTop"><span>Drop-back + pull alarm</span></div><div class="setHelp">Line goes slack, then the tip pulls forward (fish). A drop-back alone is only shown, no alarm.</div></div>
 <button class="switch" id="t_drop" onclick="toggle('drop')">ON</button>
 </div>
 
@@ -5162,6 +5260,10 @@ void handleData()
 
   addField(json, "peakenergy", strikePeakEnergy, 4);
   addField(json, "peaktilt", strikePeakTilt, 2);
+
+  addField(json, "dropwatch", dropWatch);
+  addField(json, "dropseen", dropSeenAt == 0 ? -1L : (long)((millis() - dropSeenAt) / 1000));
+  addField(json, "dropid", (long)dropSeenID);
 
   addVibrationSamples(json);
 

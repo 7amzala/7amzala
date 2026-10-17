@@ -48,7 +48,11 @@ After an alarm:
 | REPEATED BITE | 3 taps within 4 s |
 | SHARP STRIKE | A very strong hit, or a strong tap plus a fast pull toward the water |
 | SLOW PULL | Tip pulled toward the water and staying there |
-| DROP-BACK | Tip springs back away from the water and stays there (line goes slack) |
+| DROP-BACK + PULL | Tip springs back (line goes slack), then pulls forward past its normal position: the fish pattern |
+
+A **drop-back alone is not an alarm** (waves can loosen the braid). The
+dashboard shows "Drop-back seen" and watches 2 minutes for a pull forward;
+if none comes, the slack line becomes the new normal position.
 
 The Conditions card shows waves, wind and tide, and picks CALM / MODERATE /
 ROUGH automatically. Tap a sea state to override it, or AUTO to go back.

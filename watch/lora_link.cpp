@@ -469,7 +469,7 @@ const char* lora_link_strike_name(uint8_t strike_type)
     case STRIKE_SHARP:    return "SHARP STRIKE";
     case STRIKE_SLOW:     return "SLOW PULL";
     case STRIKE_REPEATED: return "REPEATED BITE";
-    case STRIKE_DROPBACK: return "DROP-BACK";
+    case STRIKE_DROPBACK: return "DROP + PULL";
     default:              return "SIM STRIKE";
   }
 }
