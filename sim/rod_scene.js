@@ -1,6 +1,7 @@
 // Surf rod in a sand spike, on the beach at night (v3, detailed).
 // s: t, tilt (+ toward water), knock 0..1, state (armed/pull/drop/strike),
-//    label, dir, waveswing, period, wind (0..3), allow, bucket, drop
+//    label, dir, waveswing, period, wind (0..3), allow, bucket, drop,
+//    mode (normal / reel / out / cast) and anim 0..1 for reel in and cast
 function drawRodScene(ctx, w, h, s)
 {
   const t = s.t;
@@ -292,7 +293,7 @@ function drawRodScene(ctx, w, h, s)
   // ================= ROD =================
   const buttCup = [baseX + ux * spikeLen * 0.2, baseY + uy * spikeLen * 0.2];
   const butt = [buttCup[0] + nx * 9 * k, buttCup[1] + ny * 9 * k];
-  const L = Math.min(h * 0.66, spikeLen * 2.3);
+  const L = Math.min(h * 0.6, spikeLen * 2.2);
   const a0 = -(Math.PI / 2 - lean);
   const B0 = 0.30;
 
@@ -303,10 +304,48 @@ function drawRodScene(ctx, w, h, s)
 
   B = Math.max(0, Math.min(1.5, B));
 
+  const mode = s.mode || "normal";
+  const p = s.anim || 0;
+  const ease = f => (1 - Math.cos(Math.max(0, Math.min(1, f)) * Math.PI)) / 2;
+  let swingRot = 0;                                   // whole rod turns about the butt (cast)
+
+  if(mode === "reel")
+  {
+    B = B0 + 0.22 + 0.05 * Math.sin(t * 9);           // loaded by the lead coming in
+  }
+  else if(mode === "out")
+  {
+    B = 0.06;                                         // only the lead hanging
+  }
+  else if(mode === "cast")
+  {
+    if(p < 0.25)                                      // back over the shoulder, tip loads backward
+    {
+      swingRot = -0.55 * ease(p / 0.25);
+      B = 0.06 - 0.35 * ease(p / 0.25);
+    }
+    else if(p < 0.38)                                 // whip forward
+    {
+      const f = (p - 0.25) / 0.13;
+      swingRot = -0.55 + 0.7 * f;
+      B = -0.3 + 1.2 * f;
+    }
+    else if(p < 0.6)                                  // follow through, the rod shivers
+    {
+      const f = (p - 0.38) / 0.22;
+      swingRot = 0.15 * (1 - f);
+      B = 0.1 + 0.8 * (1 - f) + 0.15 * Math.sin(f * 20) * (1 - f);
+    }
+    else                                              // line tightens, back to normal
+    {
+      B = 0.1 + (B0 - 0.1) * ease((p - 0.6) / 0.4);
+    }
+  }
+
   const cupU = (spikeLen * 0.8) / L;
   const N = 64;
 
-  function rodPoints(bend)
+  function rodPoints(bend, rot)
   {
     const pts = [];
     let x = butt[0], y = butt[1];
@@ -315,7 +354,7 @@ function drawRodScene(ctx, w, h, s)
     {
       const u = i / N;
       const v = Math.max(0, (u - cupU) / (1 - cupU));
-      const ang = a0 + bend * v * (2 - v);
+      const ang = a0 + rot + bend * v * (2 - v);
 
       pts.push([x, y, ang]);
       x += Math.cos(ang) * L / N;
@@ -325,20 +364,23 @@ function drawRodScene(ctx, w, h, s)
     return pts;
   }
 
-  const pts = rodPoints(B);
+  const pts = rodPoints(B, swingRot);
   const tip = pts[N];
   const at = u => pts[Math.min(N, Math.round(u * N))];
   const side = (p, d) => [p[0] + Math.sin(p[2]) * -d, p[1] + Math.cos(p[2]) * d];   // + d = underside (toward the sea)
 
   // normal position (dashed)
-  const rest = rodPoints(B0);
+  const rest = rodPoints(B0, 0);
+  if(mode === "normal")
+  {
   ctx.setLineDash([5 * k, 6 * k]);
   ctx.strokeStyle = "rgba(234,243,255,.22)";
   ctx.lineWidth = 1.2 * k;
   ctx.beginPath();
-  rest.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  rest.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]));
   ctx.stroke();
   ctx.setLineDash([]);
+  }
 
   const width = u => (9 - 7.6 * Math.pow(u, 0.8)) * k;
 
@@ -462,9 +504,11 @@ function drawRodScene(ctx, w, h, s)
 
   ctx.strokeStyle = "#a9b8cf";                         // handle arm + knob
   ctx.lineWidth = 2 * k;
-  ctx.beginPath(); ctx.moveTo(30 * k, 6 * k); ctx.lineTo(40 * k, 14 * k); ctx.stroke();
+  const crankA = mode === "reel" ? t * 14 : 0.67;      // the handle turns while reeling
+  const knob = [30 * k + Math.cos(crankA) * 13 * k, 6 * k + Math.sin(crankA) * 13 * k];
+  ctx.beginPath(); ctx.moveTo(30 * k, 6 * k); ctx.lineTo(knob[0], knob[1]); ctx.stroke();
   ctx.fillStyle = "#11151d";
-  ctx.beginPath(); ctx.ellipse(41 * k, 17 * k, 3 * k, 4.5 * k, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(knob[0] + 1 * k, knob[1] + 2 * k, 3 * k, 4.5 * k, 0, 0, TAU); ctx.fill();
   ctx.restore();
 
   // ---- cups on the spike ----
@@ -531,20 +575,120 @@ function drawRodScene(ctx, w, h, s)
 
   // ================= LINE TO THE SEA =================
   const endX = w * 0.93, endY = horizon + (h - horizon) * 0.14;
-  const tension = Math.max(0, Math.min(1, (B - B0) / 0.25 + 0.55));
-  const midX = (tip[0] + endX) / 2, midY = (tip[1] + endY) / 2;
-  const cpX = midX + (tip[0] + (endX - tip[0]) * 0.2 - midX) * (1 - tension);
-  const cpY = midY + (endY + h * 0.12 - midY) * (1 - tension);
 
-  ctx.strokeStyle = s.state === "strike" ? "rgba(255,77,94," + flash + ")" : "rgba(234,243,255," + (0.35 + tension * 0.35) + ")";
-  ctx.lineWidth = (s.state === "strike" ? 1.6 : 1) * k;
-  ctx.beginPath();
-  ctx.moveTo(tip[0], tip[1]);
-  ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-  ctx.stroke();
+  // lead + hook
+  function lead(x, y)
+  {
+    const z = 1.7 * k;                              // drawn a bit big so it can be seen
+    ctx.strokeStyle = "rgba(234,243,255,.6)";
+    ctx.lineWidth = 0.8 * z;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 5 * z, y + 9 * z); ctx.stroke();      // snood
+    ctx.strokeStyle = "#c3d2ea";
+    ctx.lineWidth = 1.2 * z;
+    ctx.beginPath(); ctx.arc(x + 5 * z, y + 12 * z, 2.6 * z, -Math.PI / 2, Math.PI * 0.9); ctx.stroke();  // hook
+    ctx.fillStyle = "#8a96ab";
+    ctx.beginPath(); ctx.ellipse(x, y + 4 * z, 3.2 * z, 5.5 * z, 0, 0, TAU); ctx.fill();   // lead
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+    ctx.beginPath(); ctx.ellipse(x - 1 * z, y + 2.5 * z, 1 * z, 2 * z, 0, 0, TAU); ctx.fill();
+  }
 
-  // where the line goes in: rings; a splash on a strike
-  for(let i = 0; i < 3; i++)
+  function straightLine(x, y, alpha)
+  {
+    ctx.strokeStyle = "rgba(234,243,255," + alpha + ")";
+    ctx.lineWidth = 1 * k;
+    ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.lineTo(x, y); ctx.stroke();
+  }
+
+  const hang = [tip[0] + Math.sin(t * 1.8) * 6 * k, tip[1] + 34 * k];   // lead hanging from the tip
+  const inX = w * 0.44, inY = shoreY(w * 0.44) - surge - 10 * k;      // where the rig comes out of the surf
+
+  if(mode === "reel")
+  {
+    if(p < 0.75)                                      // rig comes in through the waves
+    {
+      const f = ease(p / 0.75);
+      const x = endX + (inX - endX) * f, y = endY + (inY - endY) * f;
+
+      straightLine(x, y, 0.8);
+
+      ctx.strokeStyle = "rgba(220,240,255,.45)";      // V wake behind it
+      ctx.lineWidth = 1 * k;
+      ctx.beginPath();
+      ctx.moveTo(x + 22 * k, y - 4 * k); ctx.lineTo(x, y); ctx.lineTo(x + 22 * k, y + 5 * k);
+      ctx.stroke();
+    }
+    else                                              // out of the water, up to the tip
+    {
+      const f = ease((p - 0.75) / 0.25);
+      const x = inX + (hang[0] - inX) * f, y = inY + (hang[1] - inY) * f;
+
+      straightLine(x, y, 0.8);
+      lead(x, y);
+
+      ctx.fillStyle = "rgba(200,230,255,.7)";         // drips
+      for(let i = 0; i < 3; i++) ctx.fillRect(x - 1 * k, y + (14 + i * 6 + ((t * 40) % 6)) * k, 1.2 * k, 2.5 * k);
+    }
+  }
+  else if(mode === "out")
+  {
+    straightLine(hang[0], hang[1], 0.7);
+    lead(hang[0], hang[1]);
+  }
+  else if(mode === "cast" && p < 0.83)
+  {
+    const R = rodPoints(B0, 0)[N];                    // release point
+
+    if(p < 0.33)                                      // lead swings with the rod
+    {
+      const x = tip[0] - Math.sin(swingRot) * 18 * k, y = tip[1] + 24 * k;
+      straightLine(x, y, 0.7);
+      lead(x, y);
+    }
+    else                                              // flying out over the sea
+    {
+      const f = Math.min(1, (p - 0.33) / 0.5);
+      const H = Math.min(h * 0.32, Math.max(10 * k, (R[1] + endY) / 2 - h * 0.14));   // arc stays in view
+      const fx = R[0] + (endX - R[0]) * f;
+      const fy = R[1] + (endY - R[1]) * f - H * 4 * f * (1 - f);
+
+      ctx.strokeStyle = "rgba(234,243,255,.6)";
+      ctx.lineWidth = 1 * k;
+      ctx.beginPath();
+      ctx.moveTo(tip[0], tip[1]);
+      ctx.quadraticCurveTo((tip[0] + fx) / 2, Math.min(tip[1], fy) - 10 * k, fx, fy);
+      ctx.stroke();
+
+      for(let i = 1; i <= 6; i++)                     // trail
+      {
+        const g2 = Math.max(0, f - i * 0.025);
+        ctx.fillStyle = "rgba(200,230,255," + (0.35 - i * 0.05) + ")";
+        ctx.beginPath();
+        ctx.arc(R[0] + (endX - R[0]) * g2, R[1] + (endY - R[1]) * g2 - H * 4 * g2 * (1 - g2), 1.4 * k, 0, TAU);
+        ctx.fill();
+      }
+
+      lead(fx, fy);
+    }
+  }
+  else
+  {
+    const tension = Math.max(0, Math.min(1, (B - B0) / 0.25 + 0.55));
+    const midX = (tip[0] + endX) / 2, midY = (tip[1] + endY) / 2;
+    const cpX = midX + (tip[0] + (endX - tip[0]) * 0.2 - midX) * (1 - tension);
+    const cpY = midY + (endY + h * 0.12 - midY) * (1 - tension);
+
+    ctx.strokeStyle = s.state === "strike" ? "rgba(255,77,94," + flash + ")" : "rgba(234,243,255," + (0.35 + tension * 0.35) + ")";
+    ctx.lineWidth = (s.state === "strike" ? 1.6 : 1) * k;
+    ctx.beginPath();
+    ctx.moveTo(tip[0], tip[1]);
+    ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+    ctx.stroke();
+  }
+
+  // where the line goes in: rings; a splash on a strike or when the lead lands
+  const lineIn = mode === "normal" || (mode === "cast" && p >= 0.83);
+
+  for(let i = 0; i < 3 && lineIn; i++)
   {
     const f = ((t * 0.5 + i / 3) % 1);
 
@@ -555,9 +699,11 @@ function drawRodScene(ctx, w, h, s)
     ctx.stroke();
   }
 
-  if(s.state === "strike" || s.knock > 0.4)
+  const landing = mode === "cast" && p >= 0.83;
+
+  if(lineIn && (s.state === "strike" || s.knock > 0.4 || landing))
   {
-    const big = s.state === "strike" ? 1 : 0.4;
+    const big = s.state === "strike" || landing ? 1 : 0.4;
 
     for(let i = 0; i < 14; i++)
     {
