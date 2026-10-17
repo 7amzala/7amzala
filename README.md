@@ -21,6 +21,10 @@ the rod tip, plus a live dashboard over Wi-Fi.
   - or **LIS3DH**, address `0x19`
 - Library: **SparkFun LIS3DH Arduino Library** (needed to build, even with the ADXL355)
 - `Preferences`, `WiFi` and `WebServer` come with the ESP32 core
+- Battery level (optional): two equal resistors (100k), BAT+ -> 100k -> D1
+  -> 100k -> GND (see `docs/battery_wiring.png`). Shown at the top of the
+  dashboard as % and volts, red and blinking below 15 %. Nothing wired =
+  "no battery". While charging it reads high (about 100 %).
 
 ## Using it
 
@@ -75,6 +79,11 @@ the signal in both directions.
 **3D NOISE** (next to LIVE / LAST STRIKE) shows how the tip shakes as a 3D
 cloud of dots (100 per second, last 3 s), with the knock limit as an orange
 sphere. Dots inside = normal noise, dots outside = a knock. Drag to turn it.
+
+**3D WAVES** shows the sea as the rod feels it: wave height from the wave
+swing, wave speed from the wave time, small ripples from the wind.
+**3D WIND** shows a flag: it hangs when calm and flies and flaps harder as the
+wind on the rod grows (strength only: the rod cannot tell the wind direction).
 
 **⚙ SETTINGS** opens live sliders (knock limit, repeated bite, sharp strike,
 slow pull sensitivity, pull angle, pull time, drop-back + pull and knock beep

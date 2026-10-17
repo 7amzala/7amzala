@@ -49,4 +49,6 @@ extern SerialT Serial;
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}
 inline int digitalRead(int) { return LOW; }
+#define D1 2
+inline unsigned analogReadMilliVolts(int) { return 1950; }   // 3.90 V battery
 inline void delayMicroseconds(unsigned) {}
