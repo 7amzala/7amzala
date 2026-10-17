@@ -64,7 +64,7 @@ const unsigned long SEA_STATE_HOLD = 30000; // auto sea state must hold this lon
 // ---------- Knock detector ----------
 
 const float KNOCK_FLOOR_LIS3DH = 0.010;  // g, threshold never goes below this (LIS3DH)
-const float KNOCK_FLOOR_ADXL355 = 0.004; // g, same for the ~10x quieter ADXL355
+const float KNOCK_FLOOR_ADXL355 = 0.006; // g, same for the ~10x quieter ADXL355
 float KNOCK_FLOOR = KNOCK_FLOOR_LIS3DH;  // set in setup() for the sensor found
 const float KNOCK_CEIL = 0.250;          // g, threshold never goes above this
 const float KNOCK_RELEASE = 0.50;        // knock ends halfway between normal noise and the limit
@@ -189,7 +189,7 @@ struct SettingInfo
 
 const SettingInfo SETTING_INFO[] =
 {
-  { "kmul",  &UserSettings::knockMul,     0.5,  2.5 },
+  { "kmul",  &UserSettings::knockMul,     0.5,  4.0 },
   { "pdeg",  &UserSettings::pullDeg,      0.4,  5.0 },
   { "ptime", &UserSettings::pullTime,     0.5,  8.0 },
   { "rcnt",  &UserSettings::repeatCount,  2,    5 },
@@ -1132,7 +1132,9 @@ void updateKnockThreshold()
     thr *= 1.0 + GUST_NOISE_MUL * (gustNoise / knockMean - 1.0);
 
   knockThreshold =
-    clampFloat(thr, KNOCK_FLOOR, KNOCK_CEIL);
+    // The slider also moves the smallest limit, so it works
+    // even when the sensor is so quiet that the minimum applies
+    clampFloat(thr, KNOCK_FLOOR * settings.knockMul, KNOCK_CEIL);
 }
 
 // Background vibration. Learns from quiet readings and from
@@ -3964,6 +3966,27 @@ function noiseRms()
   return Math.sqrt(sum / noiseCloud.length);
 }
 
+// Typical size of the shaking (median): one bump does not change it
+function noiseTypical()
+{
+  if(noiseCloud.length === 0)
+    return 0;
+
+  const m = noiseCloud.map(p => Math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2])).sort((a, b) => a - b);
+
+  return m[Math.floor(m.length / 2)];
+}
+
+function noisePeak()
+{
+  let peak = 0;
+
+  for(const p of noiseCloud)
+    peak = Math.max(peak, Math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]));
+
+  return peak;
+}
+
 function mg(g)
 {
   const v = g * 1000;
@@ -3983,7 +4006,8 @@ function drawNoise3D()
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
-  const rms = noiseRms();
+  const rms = noiseTypical();
+  const peak = noisePeak();
 
   // Zoom follows the noise and the knock limit, smoothly
   const target = Math.max(noiseThr * 1.3, rms * 4, 0.001);
@@ -4107,12 +4131,12 @@ function drawNoise3D()
   ctx.textBaseline = "top";
   ctx.font = "bold 13px Arial";
   ctx.fillStyle = "#49ef92";
-  ctx.fillText("NOISE  " + mg(rms) + " rms", 12, 10);
+  ctx.fillText("NOISE  " + mg(rms) + " typical", 12, 10);
   ctx.fillStyle = "#ffba52";
   ctx.fillText("KNOCK LIMIT  " + mg(noiseThr), 12, 28);
   ctx.fillStyle = "#7d9186";
   ctx.font = "11px Arial";
-  ctx.fillText("limit is " + (rms > 0 ? (noiseThr / rms).toFixed(1) : "-") + "x the noise" + (noiseSensor ? " · " + noiseSensor : ""), 12, 46);
+  ctx.fillText("limit is " + (rms > 0 ? (noiseThr / rms).toFixed(1) : "-") + "x the noise · peak " + mg(peak) + (noiseSensor ? " · " + noiseSensor : ""), 12, 46);
   ctx.textBaseline = "bottom";
   ctx.fillText("axis length = " + mg(noiseRange) + " · zoom follows the noise", 12, h - 8);
 }
@@ -4932,7 +4956,7 @@ noiseLoop();
 
 <div class="setRow">
 <div class="setTop"><span>Knock limit</span><strong id="v_kmul"></strong></div>
-<input type="range" id="s_kmul" min="0.5" max="2.5" step="0.05" oninput="slide('kmul')">
+<input type="range" id="s_kmul" min="0.5" max="4" step="0.05" oninput="slide('kmul')">
 <div class="setEnds"><span>more sensitive</span><span>stricter</span></div>
 <div class="setHelp">How far above the normal noise a knock must be.</div>
 </div>
