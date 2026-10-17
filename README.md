@@ -80,6 +80,12 @@ the signal in both directions.
 cloud of dots (100 per second, last 3 s), with the knock limit as an orange
 sphere. Dots inside = normal noise, dots outside = a knock. Drag to turn it.
 
+**LIVE ROD** (next to LIVE, which stays as it was) shows your rod in a sand
+spike on the beach, moving with the real readings: it bends toward the sea on
+a pull (orange, line tight), springs back on a drop-back (line slack), shakes
+on a knock and turns red and flashes on a strike. The bend is drawn bigger
+than real so it can be seen.
+
 **3D WAVES** shows the sea as the rod feels it: wave height from the wave
 swing, wave speed from the wave time, small ripples from the wind.
 **3D WIND** shows a flag: it hangs when calm and flies and flaps harder as the
