@@ -423,6 +423,9 @@ int knockTimeIndex = 0;
 unsigned long knockAlertID = 0;
 
 bool sharpPending = false;
+
+bool gustNoted = false;                 // this long shake was already reported as wind
+unsigned long gustIgnoredAt = 0;        // last strong gust ignored (dashboard)
 unsigned long sharpPendingStart = 0;
 float sharpPendingTilt = 0;
 
@@ -1878,6 +1881,7 @@ bool updateKnockDetector()
         knockStart = now - SAMPLE_MS * (KNOCK_CONFIRM - 1);
         knockPeak = knockEnergy;
         knockTiltAtStart = tiltDeg;
+        gustNoted = false;
       }
     }
     else
@@ -1942,6 +1946,24 @@ int recentKnockCount()
   return count;
 }
 
+// How strong a single hit must be for a SHARP STRIKE. Never below
+// sharpWithPull x the knock limit: in strong wind the knock limit can
+// rise above the fixed sharp level, and then every knock would count.
+float sharpLevel()
+{
+  const SeaProfile& p = profile();
+
+  float level = p.sharpAlone * knockThreshold;
+
+  if(level > settings.sharpG)
+    level = settings.sharpG;
+
+  if(level < p.sharpWithPull * knockThreshold)
+    level = p.sharpWithPull * knockThreshold;
+
+  return level;
+}
+
 void onKnock(bool settlingMode)
 {
   const SeaProfile& p = profile();
@@ -1952,7 +1974,7 @@ void onKnock(bool settlingMode)
     if(millis() < settleGraceUntil)
       return;
 
-    if(lastKnockStrength >= p.sharpAlone || knockPeak >= settings.sharpG)
+    if(knockPeak >= sharpLevel())
     {
       startStrike("SHARP STRIKE");
       return;
@@ -1962,7 +1984,7 @@ void onKnock(bool settlingMode)
     return;
   }
 
-  if(lastKnockStrength >= p.sharpAlone || knockPeak >= settings.sharpG)
+  if(knockPeak >= sharpLevel())
   {
     startStrike("SHARP STRIKE");
     return;
@@ -1985,24 +2007,43 @@ void onKnock(bool settlingMode)
   knockAlertID++;
 }
 
-// A very strong shake is a strike straight away, however long it lasts
+// A strong shake. A short one (a hit) is judged when it ends, in
+// onKnock(). A long one is a fish only if the tip also pulls toward
+// the water (hit and run); otherwise it is a wind gust: a gust lasts,
+// a hit does not.
 bool checkViolentShake()
 {
   if(!knockActive)
     return false;
 
-  float level = profile().sharpAlone * knockThreshold;
-
-  if(level > settings.sharpG)
-    level = settings.sharpG;
-
-  if(knockEnergy < level)
+  // Still short: wait until it ends (at most KNOCK_MAX_MS)
+  if(millis() - knockStart <= KNOCK_MAX_MS)
     return false;
 
-  knockPeak = knockEnergy;
-  startStrike("SHARP STRIKE");
+  if(knockPeak < sharpLevel())
+    return false;
 
-  return true;
+  // In 0.6 s a wave moves the tip at most ~0.75 x its swing
+  float needed = SHARP_PULL_MIN_DEG;
+
+  if(waveSwing * 0.8 > needed)
+    needed = waveSwing * 0.8;
+
+  if(haveDir && tiltDeg - knockTiltAtStart >= needed)
+  {
+    startStrike("SHARP STRIKE");
+    return true;
+  }
+
+  if(!gustNoted)
+  {
+    gustNoted = true;
+    gustIgnoredAt = millis();
+
+    Serial.println("STRONG LONG SHAKE, NO PULL: wind gust, ignored");
+  }
+
+  return false;
 }
 
 void checkSharpPending()
@@ -4898,7 +4939,9 @@ function showState(d)
   {
     let sub = "Watching knocks, slow pulls and drop-backs.";
 
-    if(d.dropwatch)
+    if(d.gustago >= 0 && d.gustago < 5)
+      sub = "Strong gust ignored (long shake, no pull toward the water).";
+    else if(d.dropwatch)
       sub = "Drop-back seen " + d.dropseen + " s ago (line slack) \u2013 no alarm. Watching for a pull forward\u2026";
     else if(d.dirage >= 0 && d.dirage < 6)
       sub = "Direction learned ✓ Rod armed.";
@@ -5440,6 +5483,7 @@ void handleData()
   addField(json, "peaktilt", strikePeakTilt, 2);
 
   addField(json, "dropwatch", dropWatch);
+  addField(json, "gustago", gustIgnoredAt == 0 ? -1L : (long)((millis() - gustIgnoredAt) / 1000));
   addField(json, "dropseen", dropSeenAt == 0 ? -1L : (long)((millis() - dropSeenAt) / 1000));
   addField(json, "dropid", (long)dropSeenID);
 
