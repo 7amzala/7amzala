@@ -149,6 +149,7 @@ struct UserSettings
   float sharpG;          // knock energy (g) that is always a SHARP STRIKE (~3x = hit size)
   float dropOn;          // 1 = drop-back alarm on
   float knockBeep;       // 1 = single knock beep on
+  float pullMul;         // slow pull: allowed lean and bucket x this (above 1 = less sensitive)
 };
 
 const UserSettings DEFAULT_SETTINGS =
@@ -160,7 +161,8 @@ const UserSettings DEFAULT_SETTINGS =
   4.0,    // repeatWindow
   0.08,   // sharpG
   1,      // dropOn
-  1       // knockBeep
+  1,      // knockBeep
+  1.0     // pullMul
 };
 
 struct SettingInfo
@@ -180,7 +182,8 @@ const SettingInfo SETTING_INFO[] =
   { "rwin",  &UserSettings::repeatWindow, 2.0,  8.0 },
   { "sharp", &UserSettings::sharpG,       0.03, 0.30 },
   { "drop",  &UserSettings::dropOn,       0,    1 },
-  { "kbeep", &UserSettings::knockBeep,    0,    1 }
+  { "kbeep", &UserSettings::knockBeep,    0,    1 },
+  { "pmul",  &UserSettings::pullMul,      0.8,  3.0 }
 };
 
 const int SETTING_COUNT = sizeof(SETTING_INFO) / sizeof(SETTING_INFO[0]);
@@ -2068,6 +2071,10 @@ void updatePullBuckets()
 
   if(bucketSize < BUCKET_MIN)
     bucketSize = BUCKET_MIN;
+
+  // Slow pull sensitivity: works in waves too (pull angle is only a minimum)
+  pullAllow *= settings.pullMul;
+  bucketSize *= settings.pullMul;
 
   // A wave fills the bucket and empties it again within about half
   // a wave period. A fish keeps it filled. When there are waves,
@@ -4498,7 +4505,7 @@ function showSettings(st)
 {
   settings = st;
 
-  for(const k of ["kmul", "pdeg", "ptime", "rcnt", "rwin", "sharp"])
+  for(const k of ["kmul", "pdeg", "ptime", "rcnt", "rwin", "sharp", "pmul"])
     el("s_" + k).value = st[k];
 
   el("v_kmul").innerText = "\u00D7" + st.kmul.toFixed(2);
@@ -4506,6 +4513,7 @@ function showSettings(st)
   el("v_sharp").innerText = st.sharp.toFixed(2) + " g (~" + (st.sharp / 0.3).toFixed(2) + " g hit)";
   el("v_pdeg").innerText = st.pdeg.toFixed(1) + "\u00B0";
   el("v_ptime").innerText = st.ptime.toFixed(1) + " s";
+  el("v_pmul").innerText = "\u00D7" + st.pmul.toFixed(2);
 
   for(const k of ["kbeep", "drop"])
   {
@@ -4951,6 +4959,13 @@ noiseLoop();
 </div>
 
 <div class="setGroup">PULLS</div>
+
+<div class="setRow">
+<div class="setTop"><span>Slow pull sensitivity</span><strong id="v_pmul"></strong></div>
+<input type="range" id="s_pmul" min="0.8" max="3" step="0.05" oninput="slide('pmul')">
+<div class="setEnds"><span>more sensitive</span><span>stricter</span></div>
+<div class="setHelp">How far and how long the tip must lean toward the water. Works in waves too (the waves set the normal lean, this multiplies it).</div>
+</div>
 
 <div class="setRow">
 <div class="setTop"><span>Pull angle</span><strong id="v_pdeg"></strong></div>

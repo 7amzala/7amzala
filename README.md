@@ -77,5 +77,7 @@ cloud of dots (100 per second, last 3 s), with the knock limit as an orange
 sphere. Dots inside = normal noise, dots outside = a knock. Drag to turn it.
 
 **⚙ SETTINGS** opens live sliders (knock limit, repeated bite, sharp strike,
-pull angle, pull time, drop-back and knock beep on/off). Changes work
+slow pull sensitivity, pull angle, pull time, drop-back + pull and knock beep
+on/off). **Slow pull sensitivity** (x0.8 to x3) works in waves too: pull angle
+is only a minimum, which waves usually exceed. Changes work
 immediately; **SAVE** keeps them after power off.
