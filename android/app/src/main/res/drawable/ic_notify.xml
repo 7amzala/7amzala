@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification icon: a fish (white, Android tints it) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2,12 C5,7 10,5 14.5,6.5 C17,7.3 19,9.3 20,12 C19,14.7 17,16.7 14.5,17.5 C10,19 5,17 2,12 Z M20,12 L23,8.5 L23,15.5 Z M15.5,10.5 A1.2,1.2 0 1,0 15.5,12.9 A1.2,1.2 0 1,0 15.5,10.5 Z" />
+</vector>

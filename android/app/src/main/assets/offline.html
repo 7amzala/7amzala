@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StrikeSense</title>
+<style>
+  :root {
+    --bg:#030814;
+    --card:#0b1630;
+    --line:#15274a;
+    --text:#eaf3ff;
+    --dim:#8ea6c8;
+    --cyan:#22d3ff;
+    --blue:#2f6bff;
+  }
+
+  * { box-sizing:border-box; }
+
+  body {
+    margin:0;
+    min-height:100vh;
+    padding:24px 18px;
+    background:radial-gradient(circle at 50% 20%, #0d2a5c 0, var(--bg) 60%);
+    color:var(--text);
+    font-family:Arial, Helvetica, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+
+  .logo {
+    width:150px;
+    height:150px;
+    border-radius:50%;
+    margin-top:10px;
+    box-shadow:0 0 40px rgba(30,150,255,.4);
+    animation:glow 1.6s ease-in-out infinite alternate;
+  }
+
+  @keyframes glow {
+    from { box-shadow:0 0 20px rgba(30,150,255,.25); }
+    to   { box-shadow:0 0 55px rgba(34,211,255,.55); }
+  }
+
+  h1 {
+    margin:22px 0 4px;
+    font-size:22px;
+    text-align:center;
+  }
+
+  .looking {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:var(--cyan);
+    font-weight:bold;
+    font-size:14px;
+  }
+
+  .spin {
+    width:16px;
+    height:16px;
+    border-radius:50%;
+    border:2.5px solid rgba(34,211,255,.25);
+    border-top-color:var(--cyan);
+    animation:spin 1s linear infinite;
+  }
+
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .card {
+    width:100%;
+    max-width:440px;
+    margin-top:22px;
+    padding:16px;
+    border-radius:16px;
+    background:var(--card);
+    border:1px solid var(--line);
+  }
+
+  ol {
+    margin:0;
+    padding:0;
+    list-style:none;
+  }
+
+  li {
+    display:flex;
+    gap:12px;
+    padding:8px 0;
+    font-size:15px;
+    line-height:1.4;
+    color:#c3d2ea;
+  }
+
+  li b.n {
+    flex:0 0 26px;
+    height:26px;
+    border-radius:50%;
+    background:#0d2a5c;
+    color:var(--cyan);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:13px;
+  }
+
+  .wifi {
+    color:var(--text);
+    font-weight:bold;
+  }
+
+  button {
+    width:100%;
+    max-width:440px;
+    margin-top:12px;
+    padding:14px;
+    border-radius:12px;
+    border:1px solid #22406e;
+    background:var(--card);
+    color:var(--text);
+    font-size:15px;
+    font-weight:bold;
+  }
+
+  button.main {
+    background:var(--blue);
+    border-color:var(--blue);
+  }
+
+  .small {
+    margin-top:18px;
+    font-size:12px;
+    color:#5f7799;
+    text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<img class="logo" src="logo.webp" alt="Laarif StrikeSense">
+
+<h1>Not connected to your rod</h1>
+<div class="looking"><div class="spin"></div>Looking for the rod…</div>
+
+<div class="card">
+<ol>
+<li><b class="n">1</b><span>Switch the rod unit on.</span></li>
+<li><b class="n">2</b><span>Join the WiFi <span class="wifi">StrikeSense-Test</span> (password <span class="wifi">12345678</span>).</span></li>
+<li><b class="n">3</b><span>If Android says <i>"No internet"</i>, choose <span class="wifi">Stay connected</span> / <span class="wifi">Keep</span>. The rod doesn't need internet.</span></li>
+<li><b class="n">4</b><span>Come back here. The dashboard opens by itself.</span></li>
+</ol>
+</div>
+
+<button class="main" onclick="StrikeApp.openWifi()">OPEN WIFI SETTINGS</button>
+<button onclick="StrikeApp.retry()">TRY AGAIN NOW</button>
+<button onclick="StrikeApp.stopWatching()">STOP WATCHING &amp; CLOSE</button>
+
+<div class="small">Laarif StrikeSense · keeps watching your rod in the background,<br>even with the screen off</div>
+
+</body>
+</html>

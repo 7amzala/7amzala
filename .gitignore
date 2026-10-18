@@ -3,3 +3,7 @@ sim/long_run
 sim/weather_change
 *.o
 sim/link_test
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

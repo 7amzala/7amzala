@@ -1,0 +1,44 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.laarif.strikesense"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.laarif.strikesense"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // The app's own signing key (a personal app, not on the Play Store).
+    // Keep this file: an update must be signed with the same key.
+    signingConfigs {
+        release {
+            storeFile file("strikesense.keystore")
+            storePassword "strikesense"
+            keyAlias "strikesense"
+            keyPassword "strikesense"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
