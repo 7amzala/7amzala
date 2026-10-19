@@ -129,6 +129,14 @@ static void onNotify(BLERemoteCharacteristic *, uint8_t *data, size_t length, bo
 
 // ---------- small helpers ----------
 
+static void setNote(const char *text)
+{
+  portENTER_CRITICAL(&mux);
+  strncpy(shared.note, text, sizeof(shared.note) - 1);
+  shared.note[sizeof(shared.note) - 1] = 0;
+  portEXIT_CRITICAL(&mux);
+}
+
 static long newId()
 {
   long id = nextId++;
@@ -356,14 +364,6 @@ static void readAnswers()
 }
 
 // ---------- connecting ----------
-
-static void setNote(const char *text)
-{
-  portENTER_CRITICAL(&mux);
-  strncpy(shared.note, text, sizeof(shared.note) - 1);
-  shared.note[sizeof(shared.note) - 1] = 0;
-  portEXIT_CRITICAL(&mux);
-}
 
 static void setPhase(ble_link_phase_t p)
 {
