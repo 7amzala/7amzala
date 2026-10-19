@@ -152,6 +152,7 @@ static lv_obj_t *ls_mark_label;
 static lv_obj_t *ls_info[3];
 static uint32_t ls_shown_ms = 0;      // which answer is drawn
 static uint32_t ls_asked = 0;
+static uint32_t ls_entered = 0;
 static long ls_strikeid = -1;
 static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
@@ -537,6 +538,7 @@ static void swipe_timer(lv_timer_t *t)
   {
     ble_link_ask_last_strike();
     ls_asked = lv_tick_get();
+    ls_entered = ls_asked;
   }
 
   if(page != before || vpage != vbefore)
@@ -665,24 +667,30 @@ static void last_strike_page(const ble_link_status_t *s, uint32_t now)
   set_text_color(title, COL_RED);
   set_text(hint, "swipe up: back");
 
-  // ask again every 5 s, and at once after a new strike
-  if(now - ls_asked > 5000 || s->strikeid != ls_strikeid)
+  static ble_last_strike_t ls;        // big: not on the stack
+  bool got = ble_link_get_last_strike(&ls);
+
+  // ask again every 5 s (every 1.5 s while nothing came), and at once after a new strike
+  if(now - ls_asked > (got ? 5000u : 1500u) || s->strikeid != ls_strikeid)
   {
     ls_strikeid = s->strikeid;
     ls_asked = now;
     ble_link_ask_last_strike();
   }
 
-  static ble_last_strike_t ls;        // big: not on the stack
-
-  if(!ble_link_get_last_strike(&ls))
+  if(!got || ls.error)
   {
-    set_text(subtitle, "loading...");
+    if(!got)
+      set_text(subtitle, now - ls_entered > 6000 ? "the rod does not answer" : "loading...");
+    else
+      set_text(subtitle, ls.error == 404 ? "update the rod sketch" : "the rod said no");
+
+    set_text_color(subtitle, COL_TEXT);
     show(ls_chart, false);
     show(ls_mark, false);
     show(ls_mark_label, false);
     set_text(ls_info[0], "");
-    set_text(ls_info[1], "");
+    set_text(ls_info[1], got && ls.error == 404 ? "(it has no last strike yet:\nupload the newest rod sketch)" : "");
     set_text(ls_info[2], "");
     return;
   }

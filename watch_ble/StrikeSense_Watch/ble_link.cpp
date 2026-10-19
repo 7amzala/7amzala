@@ -327,9 +327,19 @@ static void answer(long id, int code, const std::string &body)
   if(id == lastId)
   {
     lastId = -1;
+    Serial.printf("[BLE] /laststrike -> %d, %u bytes\n", code, (unsigned)body.size());
 
     if(code == 200)
+    {
       gotLastStrike(body);
+    }
+    else
+    {
+      portENTER_CRITICAL(&mux);
+      lastStrike.loaded = true;
+      lastStrike.error = code;           // 404: the rod sketch has no last strike yet
+      portEXIT_CRITICAL(&mux);
+    }
 
     return;
   }
@@ -635,7 +645,11 @@ void ble_link_poll(void)
 
   // LAST STRIKE page asked for the rod's last strike
   if(lastId >= 0 && now - lastAskedAt > 3000)
+  {
+    Serial.println("[BLE] /laststrike: no answer in 3 s, asking again");
     lastId = -1;                          // no answer: may ask again
+    wantLast = true;
+  }
 
   if(wantLast && lastId < 0)
   {

@@ -65,6 +65,7 @@ typedef struct
 typedef struct
 {
   bool loaded;              // an answer has come in
+  int error;                // 0 = fine, else the rod's answer code (404 = rod sketch too old)
   bool have;                // there was a strike since the rod started
   bool recording;           // a new strike is being recorded (10 s after)
   char type[24];
