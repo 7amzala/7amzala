@@ -276,7 +276,9 @@ static void answer(long id, int code, const std::string &body)
       // 404: the rod sketch is older than the watch (no "/watch")
       firstAnswerLogged = true;
       Serial.printf("[BLE] rod answered %d to /watch - update the rod sketch\n", code);
-      setNote("rod sketch too old - update it");
+      char note[40];
+      snprintf(note, sizeof(note), "rod sketch too old (%d) - update it", code);
+      setNote(note);
     }
   }
   else if(id == cmdId)

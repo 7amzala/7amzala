@@ -385,6 +385,7 @@ private:
       }
     }
 
+    Serial.printf("Bluetooth: unknown request %s\n", path.c_str());
     send(404, "text/plain", "NOT FOUND");
   }
 
@@ -7832,6 +7833,9 @@ void setup()
   Serial.begin(115200);
 
   delay(1000);
+
+  Serial.println();
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.1 (Bluetooth: phone + watch) ===");
 
   Wire.begin();
   Wire.setClock(400000);
