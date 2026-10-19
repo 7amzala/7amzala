@@ -2,7 +2,8 @@
 #define BUZZ_H
 
 // Wrist vibration: Pimoroni Haptic Bzzz (DRV2605L + LRA motor, I2C 0x5A)
-// on its own I2C bus: SDA = header pin 43, SCL = header pin 44.
+// on the watch header's SDA / SCL (shared with the touch screen).
+// Call buzz_begin() after Touch_Init().
 // Without the module the watch works the same (no vibration).
 
 #include <stdbool.h>

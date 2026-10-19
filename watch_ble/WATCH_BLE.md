@@ -60,8 +60,8 @@ and marks the rod with `<- THE ROD`.
 |---|---|
 | 2-5V | 3V3 |
 | GND | GND |
-| SDA | 43 (TXD) |
-| SCL | 44 (RXD) |
+| SDA | SDA |
+| SCL | SCL |
 | TRIG | not connected |
 
 | Event | You feel |
@@ -75,4 +75,5 @@ and marks the rod with `<- THE ROD`.
 
 At start the watch gives a double click and the Serial Monitor shows
 `[BUZZ] found`. Without the module: `[BUZZ] not found`, everything else
-works as before. Pins 45/46 are not used on purpose (start-up pins).
+works as before. It shares the I2C bus with the touch
+screen (different address, no clash).

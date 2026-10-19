@@ -1,8 +1,10 @@
 // =====================================================
 // WRIST VIBRATION (Pimoroni Haptic Bzzz: DRV2605L + LRA motor)
 //
-// Wiring:  2-5V -> 3V3,  GND -> GND,  SDA -> 43,  SCL -> 44,  TRIG: free.
-// Own I2C bus (the touch screen's bus is not on the header).
+// Wiring (watch header, right row):  2-5V -> 3V3,  GND -> GND,
+//   SDA -> SDA,  SCL -> SCL,  TRIG: not connected.
+// Shares the watch's I2C bus with the touch screen (0x38); the buzzer is 0x5A.
+// To use two other pins instead: BUZZ_OWN_BUS 1 and set BUZZ_SDA / BUZZ_SCL.
 // The vibrations are the DRV2605L's built-in effects (LRA library).
 // =====================================================
 
@@ -11,9 +13,16 @@
 #include "driver/i2c.h"
 #include <stdio.h>
 
-#define BUZZ_PORT  I2C_NUM_1
-#define BUZZ_SDA   43
-#define BUZZ_SCL   44
+#define BUZZ_OWN_BUS 0              // 0 = header SDA/SCL (touch bus, already started)
+
+#if BUZZ_OWN_BUS
+  #define BUZZ_PORT  I2C_NUM_1
+  #define BUZZ_SDA   43
+  #define BUZZ_SCL   44
+#else
+  #define BUZZ_PORT  I2C_NUM_0      // same port as FT3168.cpp (Touch_Init)
+#endif
+
 #define BUZZ_ADDR  0x5A
 
 // DRV2605L registers
@@ -40,6 +49,7 @@ static bool get(uint8_t reg, uint8_t *value)
 
 bool buzz_begin(void)
 {
+#if BUZZ_OWN_BUS
   i2c_config_t conf = {
     .mode = I2C_MODE_MASTER,
     .sda_io_num = BUZZ_SDA,
@@ -55,12 +65,13 @@ bool buzz_begin(void)
     printf("[BUZZ] I2C start failed\n");
     return false;
   }
+#endif
 
   uint8_t status = 0;
 
   if(!get(REG_STATUS, &status))
   {
-    printf("[BUZZ] not found (no vibration) - wiring: SDA 43, SCL 44, 3V3, GND\n");
+    printf("[BUZZ] not found (no vibration) - wiring: SDA, SCL, 3V3, GND\n");
     return false;
   }
 
