@@ -35,29 +35,44 @@ rep('''static portMUX_TYPE bleLock = portMUX_INITIALIZER_UNLOCKED;''', '''static
 
 #if defined(CONFIG_NIMBLE_ENABLED) && !defined(BLE_MOCK)
 #include "host/ble_hs.h"
-
-// One piece to one connection. false = the stack is full right now (try again)
-static bool bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
-{
-  os_mbuf* om = ble_hs_mbuf_from_flat(data, length);
-
-  if(om == nullptr)
-    return false;
-
-  return ble_gatts_notify_custom(conn, c->getHandle(), om) == 0;   // om is always used up
-}
-
-static size_t bleMtu(uint16_t conn)
-{
-  return ble_att_mtu(conn);
-}
-
-static bool bleConnected(uint16_t conn)
-{
-  ble_gap_conn_desc d;
-  return ble_gap_conn_find(conn, &d) == 0;
-}
 #endif''')
+
+# inside the class: plain functions at the top of an .ino make the Arduino
+# IDE put its function list there, before Vec3 is known
+rep('''class BleServer
+{
+public:
+''', '''class BleServer
+{
+public:
+#if defined(CONFIG_NIMBLE_ENABLED) && !defined(BLE_MOCK)
+  // (inside the class: plain functions up here would make the Arduino IDE
+  // put its function list before Vec3 is known)
+
+  // One piece to one connection. false = the stack is full right now (try again)
+  static bool bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
+  {
+    os_mbuf* om = ble_hs_mbuf_from_flat(data, length);
+
+    if(om == nullptr)
+      return false;
+
+    return ble_gatts_notify_custom(conn, c->getHandle(), om) == 0;   // om is always used up
+  }
+
+  static size_t bleMtu(uint16_t conn)
+  {
+    return ble_att_mtu(conn);
+  }
+
+  static bool bleConnected(uint16_t conn)
+  {
+    ble_gap_conn_desc d;
+    return ble_gap_conn_find(conn, &d) == 0;
+  }
+#endif
+
+''')
 
 # ---------- remember who wrote each line ----------
 rep('''    void onWrite(BLECharacteristic* c) override
