@@ -21,7 +21,7 @@ float simAX = 0, simAY = 0, simAZ = 1;
 #define ENABLE_LORA 0
 #endif
 #include "../StrikeSense/StrikeSense.ino"
-WiFiT WiFi; WireT Wire;
+WireT Wire;
 
 // ---------------- environment model ----------------
 struct Env {

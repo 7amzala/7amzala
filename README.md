@@ -20,7 +20,7 @@ the rod tip, plus a live dashboard over Wi-Fi.
     `rod_adxl355_test/`.
   - or **LIS3DH**, address `0x19`
 - Library: **SparkFun LIS3DH Arduino Library** (needed to build, even with the ADXL355)
-- `Preferences`, `WiFi` and `WebServer` come with the ESP32 core
+- `Preferences` and the Bluetooth (BLE) library come with the ESP32 core
 - Battery level (optional): two equal resistors (100k), BAT+ -> 100k -> D1
   -> 100k -> GND (see `docs/battery_wiring.png`). Shown at the top of the
   dashboard as % and volts, red and blinking below 15 %. Nothing wired =
@@ -28,8 +28,9 @@ the rod tip, plus a live dashboard over Wi-Fi.
 
 ## Using it
 
-1. Power on. Connect your phone to Wi-Fi **StrikeSense-Test** (password `12345678`)
-   and open **http://192.168.4.1**.
+1. Power on and open the **StrikeSense** app on your Android phone
+   (`android/release/StrikeSense.apk`). It finds the rod over **Bluetooth**
+   by itself; no WiFi, and the phone keeps its internet.
 2. Tap **ENABLE SOUND** (this also keeps the phone screen on).
 3. **LEARNING (15 s):** keep the rod still in the rest.
 4. **PULL TEST:** pull the line gently toward the water once, then let go.

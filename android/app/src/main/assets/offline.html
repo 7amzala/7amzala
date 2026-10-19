@@ -141,23 +141,32 @@
 
 <img class="logo" src="logo.webp" alt="Laarif StrikeSense">
 
-<h1>Not connected to your rod</h1>
-<div class="looking"><div class="spin"></div>Looking for the rod…</div>
+<h1>Connecting to your rod</h1>
+<div class="looking"><div class="spin"></div><span id="status">Looking for the rod…</span></div>
 
 <div class="card">
 <ol>
 <li><b class="n">1</b><span>Switch the rod unit on.</span></li>
-<li><b class="n">2</b><span>Join the WiFi <span class="wifi">StrikeSense-Test</span> (password <span class="wifi">12345678</span>).</span></li>
-<li><b class="n">3</b><span>If Android says <i>"No internet"</i>, choose <span class="wifi">Stay connected</span> / <span class="wifi">Keep</span>. The rod doesn't need internet.</span></li>
-<li><b class="n">4</b><span>Come back here. The dashboard opens by itself.</span></li>
+<li><b class="n">2</b><span>Turn <span class="wifi">Bluetooth</span> on and allow StrikeSense to use it.</span></li>
+<li><b class="n">3</b><span>Stay within about <span class="wifi">30 m</span> of the rod.</span></li>
+<li><b class="n">4</b><span>The dashboard opens by itself. No WiFi needed – your phone keeps its internet.</span></li>
 </ol>
 </div>
 
-<button class="main" onclick="StrikeApp.openWifi()">OPEN WIFI SETTINGS</button>
-<button onclick="StrikeApp.retry()">TRY AGAIN NOW</button>
+<button class="main" onclick="StrikeApp.openBluetooth()">BLUETOOTH</button>
+<button onclick="StrikeApp.retry()">SEARCH AGAIN</button>
+<button onclick="StrikeApp.appSettings()">APP PERMISSIONS</button>
 <button onclick="StrikeApp.stopWatching()">STOP WATCHING &amp; CLOSE</button>
 
 <div class="small">Laarif StrikeSense · keeps watching your rod in the background,<br>even with the screen off</div>
+
+<script>
+// Called by the app with what it is doing
+function setStatus(t)
+{
+  document.getElementById("status").textContent = t;
+}
+</script>
 
 </body>
 </html>

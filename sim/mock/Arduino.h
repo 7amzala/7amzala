@@ -27,6 +27,19 @@ public:
   bool startsWith(const char* p) const { return s.rfind(p, 0) == 0; }
   const char* c_str() const { return s.c_str(); }
   float toFloat() const { return atof(s.c_str()); }
+  // used by the Bluetooth link (BLE test)
+  size_t length() const { return s.size(); }
+  char operator[](size_t i) const { return i < s.size() ? s[i] : 0; }
+  int indexOf(char c) const { size_t p = s.find(c); return p == std::string::npos ? -1 : (int)p; }
+  String substring(size_t a) const { return a < s.size() ? String(s.substr(a)) : String(); }
+  String substring(size_t a, size_t b) const { return a < s.size() ? String(s.substr(a, b - a)) : String(); }
+  long toInt() const { return atol(s.c_str()); }
+  bool operator==(const String& o) const { return s == o.s; }
+  String& operator+=(char c){ s += c; return *this; }
+  bool concat(const char* p, unsigned n){ s.append(p, n); return true; }
+  friend String operator+(const String& a, const String& b){ return String(a.s + b.s); }
+  friend String operator+(const char* a, const String& b){ return String(std::string(a) + b.s); }
+  friend String operator+(const String& a, const char* b){ return String(a.s + b); }
 };
 struct SerialT {
   bool quiet=false;

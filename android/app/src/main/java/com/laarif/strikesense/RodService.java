@@ -5,14 +5,12 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
-import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -23,8 +21,8 @@ import android.os.Vibrator;
 
 import org.json.JSONObject;
 
-// Watches the rod in the background (also with the screen off) and
-// sounds an alarm with vibration when a strike comes in.
+// Watches the rod over Bluetooth in the background (also with the screen
+// off) and sounds an alarm with vibration when a strike comes in.
 public class RodService extends Service
 {
     static final String ACTION_STOP = "com.laarif.strikesense.STOP";
@@ -49,7 +47,6 @@ public class RodService extends Service
     private Handler worker;
     private NotificationManager nm;
     private PowerManager.WakeLock wakeLock;
-    private WifiManager.WifiLock wifiLock;
     private MediaPlayer player;
     private Vibrator vibrator;
 
@@ -58,7 +55,7 @@ public class RodService extends Service
     private boolean lostNotified = false;
     private boolean alarming = false;
     private boolean batteryLowNotified = false;
-    private long lastAnswer = 0;
+    private long lostSince = 0;
     private long lastStrikeId = Long.MIN_VALUE;
     private String lastStatus = "";
 
@@ -73,27 +70,41 @@ public class RodService extends Service
         makeChannels();
         goForeground("Looking for the rod…");
 
-        RodNetwork.get(this).start();
-
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "StrikeSense:watch");
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire();
 
-        WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-
-        if(wm != null)
-        {
-            @SuppressWarnings("deprecation")
-            int mode = WifiManager.WIFI_MODE_FULL_HIGH_PERF;
-            wifiLock = wm.createWifiLock(mode, "StrikeSense:wifi");
-            wifiLock.setReferenceCounted(false);
-            wifiLock.acquire();
-        }
-
         thread = new HandlerThread("rod");
         thread.start();
         worker = new Handler(thread.getLooper());
+
+        // Every answer from the rod (also the dashboard's) is checked here
+        RodLink link = RodLink.get(this);
+
+        link.setListener(new RodLink.Listener()
+        {
+            @Override
+            public void onData(final String json)
+            {
+                worker.post(new Runnable()
+                {
+                    @Override
+                    public void run()
+                    {
+                        try
+                        {
+                            handle(new JSONObject(json));
+                        }
+                        catch(Exception e)
+                        {
+                        }
+                    }
+                });
+            }
+        });
+
+        link.start();
 
         running = true;
         worker.post(poll);
@@ -117,7 +128,7 @@ public class RodService extends Service
                 @Override
                 public void run()
                 {
-                    RodNetwork.get(RodService.this).fetch("watching", 3000);
+                    RodLink.get(RodService.this).request("/watching", 3000);
                     stopAlarm(true);
                 }
             });
@@ -152,34 +163,47 @@ public class RodService extends Service
         }
     };
 
-    private void check() throws Exception
+    // Ask for /data only when the dashboard isn't already doing it
+    private void check()
     {
-        String body = RodNetwork.get(this).fetch("data", 2500);
+        RodLink link = RodLink.get(this);
         long now = System.currentTimeMillis();
 
-        if(body == null)
+        if(link.ready())
         {
-            if(everConnected && now - lastAnswer > LOST_MS && !lostNotified)
-            {
-                lostNotified = true;
-                info("Lost connection to the rod",
-                     "No answer for 30 s. Check the rod's battery and that the phone is on the StrikeSense WiFi.", true);
-            }
+            lostSince = 0;
 
-            if(!everConnected || now - lastAnswer > LOST_MS)
-                status("Not connected – join the StrikeSense WiFi");
+            if(now - link.lastDataAt() > 1500)
+                link.request("/data", 3000);       // the answer arrives in handle()
 
             return;
         }
 
-        JSONObject d = new JSONObject(body);
+        if(lostSince == 0)
+            lostSince = now;
+
+        if(everConnected && now - lostSince > LOST_MS && !lostNotified)
+        {
+            lostNotified = true;
+            info("Lost connection to the rod",
+                 "No Bluetooth contact for 30 s. Check the rod's battery and come closer to the rod (about 30 m).", true);
+        }
+
+        if(!everConnected || now - lostSince > 5000)
+            status(link.state() == RodLink.State.BLUETOOTH_OFF ? "Bluetooth is off – turn it on"
+                 : link.state() == RodLink.State.NO_PERMISSION ? "Open the app to allow Bluetooth"
+                 : "Looking for the rod (Bluetooth)…");
+    }
+
+    private void handle(JSONObject d)
+    {
+        long now = System.currentTimeMillis();
 
         if(lostNotified)
             nm.cancel(ID_INFO);
 
         everConnected = true;
         lostNotified = false;
-        lastAnswer = now;
 
         boolean strike = d.optBoolean("strike", false);
         long strikeId = d.optLong("strikeid", -1);
@@ -459,8 +483,8 @@ public class RodService extends Service
         if(wakeLock != null && wakeLock.isHeld())
             wakeLock.release();
 
-        if(wifiLock != null && wifiLock.isHeld())
-            wifiLock.release();
+        RodLink.get(this).setListener(null);
+        RodLink.get(this).stop();
 
         super.onDestroy();
     }

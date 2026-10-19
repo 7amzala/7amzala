@@ -3,12 +3,15 @@
 The rod's dashboard as a real Android app, plus a strike alarm that works
 with the phone locked.
 
-- Full screen dashboard from the rod (http://192.168.4.1), same as the browser.
-- Stays on the rod's WiFi even though it has no internet.
+- Connects to the rod over **Bluetooth** (BLE) by itself: no WiFi, the
+  phone keeps its internet.
+- The dashboard page is built into the app (copied from
+  `StrikeSense_NoLoRa.ino` at every build); its requests (/data, /set ...)
+  go to the rod over Bluetooth.
 - Watches the rod in the background: strike = alarm sound (loops) +
   vibration + notification with **I'M WATCHING** and **SILENCE**.
 - Warns when the connection is lost (30 s) or the rod battery is low.
-- Help page with a WiFi button when the rod can't be found.
+- Help page with Bluetooth / permission buttons while the rod is not found.
 
 ## Install
 
@@ -16,8 +19,8 @@ with the phone locked.
    "app-latest" release on GitHub).
 2. Open it. Android asks once to allow installing apps from this source:
    allow it, then **Install**.
-3. Open **StrikeSense**, allow notifications, and allow it to run in the
-   background (battery).
+3. Open **StrikeSense**, allow **Nearby devices** (Bluetooth),
+   notifications, and running in the background (battery).
 
 ## Build
 

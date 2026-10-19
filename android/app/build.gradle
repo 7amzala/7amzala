@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.0 Bluetooth"
     }
 
     // The app's own signing key (a personal app, not on the Play Store).
@@ -41,4 +41,37 @@ android {
         checkReleaseBuilds false
         abortOnError false
     }
+
+    sourceSets {
+        main {
+            assets.srcDirs += [file("$buildDir/generated/dashboard")]
+        }
+    }
+}
+
+// The dashboard page is written once, in the rod sketch. Copy it into the
+// app at every build, so the app always shows the same page.
+def sketch = rootProject.file("../StrikeSense_NoLoRa/StrikeSense_NoLoRa.ino")
+def dashboardDir = file("$buildDir/generated/dashboard")
+
+def extractDashboard = tasks.register("extractDashboard") {
+    inputs.file(sketch)
+    outputs.dir(dashboardDir)
+
+    doLast {
+        def text = sketch.getText("UTF-8")
+        def startMark = 'R"rawliteral('
+        def a = text.indexOf(startMark)
+        def b = text.indexOf(')rawliteral"', a)
+
+        if(a < 0 || b < 0)
+            throw new GradleException("Dashboard page not found in " + sketch)
+
+        dashboardDir.mkdirs()
+        new File(dashboardDir, "dashboard.html").setText(text.substring(a + startMark.length(), b), "UTF-8")
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn extractDashboard
 }
