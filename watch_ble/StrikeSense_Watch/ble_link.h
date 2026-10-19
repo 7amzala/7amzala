@@ -51,6 +51,11 @@ typedef struct
   bool dropwatch;           // drop-back seen, watching for a pull
 
   bool command_busy;        // a button is still being sent
+
+  // while looking (shown small on the screen, also on Serial)
+  int scans;                // scans done
+  int seen;                 // Bluetooth devices seen in the last scan
+  char note[40];            // what the link is doing / what went wrong
 } ble_link_status_t;
 
 void ble_link_begin(void);

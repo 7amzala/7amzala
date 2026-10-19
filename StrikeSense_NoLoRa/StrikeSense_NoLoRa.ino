@@ -84,9 +84,14 @@ public:
   void handleClient()
   {
     // Keep advertising while there is room for another phone/watch
-    if(advertiseAgain)
+    if(advertiseAgain || millis() - lastAdvertiseCheck >= 5000)
     {
+      if(!advertiseAgain)
+        Serial.printf("Bluetooth: %s, %d connected\n",
+                      clients < MAX_CLIENTS ? "advertising" : "full (not advertising)", (int)clients);
+
       advertiseAgain = false;
+      lastAdvertiseCheck = millis();
 
       if(clients < MAX_CLIENTS)
         BLEDevice::startAdvertising();
@@ -205,6 +210,7 @@ private:
   size_t chunk = 20;
   size_t chunkMin = 512;
   unsigned long lastPiece = 0;
+  unsigned long lastAdvertiseCheck = 0;
   String requestId = "0";
 
   String argNames[MAX_ARGS];

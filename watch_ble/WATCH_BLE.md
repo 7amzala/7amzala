@@ -39,3 +39,17 @@ the same time). Range: about 30 m.
 scripted rod: every screen drawn, every button tapped (all send the right
 request). `sim/ble_test.cpp`: the rod with phone + watch connected at once.
 Not yet tested on the real watch.
+
+## Watch stuck on "LOOKING FOR THE ROD"
+
+The small text under the title says what is happening:
+
+| Watch shows | Meaning | Fix |
+|---|---|---|
+| `scan N - X devices seen` / `rod not seen yet` | the rod is not advertising | upload the newest rod sketch; on the rod's Serial you should see `Bluetooth: advertising, 1 connected` every 5 s. `full (not advertising)` = 2 already connected |
+| `rod found but could not connect` | too far, or rod busy | come closer, restart the rod |
+| `no StrikeSense service on rod` | very old rod sketch | upload the newest rod sketch |
+| `rod sketch too old - update it` / `connected, rod not answering` | rod has no `/watch` | upload the newest rod sketch |
+
+Watch Serial (115200) lists every named device it sees (`[BLE]   saw ...`)
+and marks the rod with `<- THE ROD`.

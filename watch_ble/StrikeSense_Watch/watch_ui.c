@@ -317,7 +317,16 @@ static void ui_timer(lv_timer_t *t)
 
     set_text(title, LV_SYMBOL_BLUETOOTH "\nLOOKING FOR\nTHE ROD");
     lv_obj_set_style_text_color(title, COL_TEXT, 0);
-    set_text(subtitle, s.phase == BLE_LINK_CONNECTING ? "rod found - connecting..." : "Bluetooth - stay within ~30 m");
+    // what the link is doing, so a problem can be seen without a computer
+    char info[96];
+
+    if(s.phase == BLE_LINK_SEARCHING && s.scans > 0)
+      snprintf(info, sizeof(info), "scan %d - %d devices seen\n%s", s.scans, s.seen,
+               s.note[0] ? s.note : "rod not seen yet");
+    else
+      snprintf(info, sizeof(info), "%s", s.note[0] ? s.note : "Bluetooth - stay within ~30 m");
+
+    set_text(subtitle, info);
     lv_obj_set_style_text_color(subtitle, COL_DIM, 0);
     return;
   }

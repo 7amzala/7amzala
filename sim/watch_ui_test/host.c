@@ -51,6 +51,7 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
   float ts = sim_ms / 1000.0f;
 
   s->phase = scene == 0 ? BLE_LINK_SEARCHING : BLE_LINK_CONNECTED;
+  if(scene == 0) { s->scans = 7; s->seen = 12; }
   s->seq = scene == 0 ? 0 : sim_ms / 200;
   s->age_ms = 100;
   s->rssi = -64;

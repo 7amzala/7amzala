@@ -54,13 +54,42 @@ static char cmdSending[32] = "";
 static uint32_t lastRssi = 0;
 static int rssi = 0;
 
+static int scans = 0;
+static volatile int seenCount = 0;
+static uint32_t connectedAt = 0;
+static bool firstAnswerLogged = false;
+
 // ---------- scanning ----------
+
+// The rod: our service number, or (if that did not come through) its name
+static bool isRod(BLEAdvertisedDevice &d)
+{
+  if(d.haveServiceUUID() && d.isAdvertisingService(SERVICE_UUID))
+    return true;
+
+  if(d.haveName())
+  {
+    String name = d.getName();
+    return name.startsWith("StrikeSense") && name != "StrikeSense Watch";
+  }
+
+  return false;
+}
 
 class AdvCallbacks : public BLEAdvertisedDeviceCallbacks
 {
   void onResult(BLEAdvertisedDevice d) override
   {
-    if(found == nullptr && d.haveServiceUUID() && d.isAdvertisingService(SERVICE_UUID))
+    seenCount = seenCount + 1;
+
+    bool rod = isRod(d);
+
+    // only named devices, so the list stays short
+    if(d.haveName() || rod)
+      Serial.printf("[BLE]   saw %s \"%s\" %d dBm%s\n", d.getAddress().toString().c_str(),
+                    d.haveName() ? d.getName().c_str() : "", d.getRSSI(), rod ? "  <- THE ROD" : "");
+
+    if(found == nullptr && rod)
     {
       found = new BLEAdvertisedDevice(d);
       BLEDevice::getScan()->stop();
@@ -225,7 +254,22 @@ static void answer(long id, int code, const std::string &body)
     askId = -1;
 
     if(code == 200)
+    {
       gotWatchData(body);
+
+      if(!firstAnswerLogged)
+      {
+        firstAnswerLogged = true;
+        Serial.printf("[BLE] live data OK: %s\n", body.c_str());
+      }
+    }
+    else if(!firstAnswerLogged)
+    {
+      // 404: the rod sketch is older than the watch (no "/watch")
+      firstAnswerLogged = true;
+      Serial.printf("[BLE] rod answered %d to /watch - update the rod sketch\n", code);
+      setNote("rod sketch too old - update it");
+    }
   }
   else if(id == cmdId)
   {
@@ -313,6 +357,14 @@ static void readAnswers()
 
 // ---------- connecting ----------
 
+static void setNote(const char *text)
+{
+  portENTER_CRITICAL(&mux);
+  strncpy(shared.note, text, sizeof(shared.note) - 1);
+  shared.note[sizeof(shared.note) - 1] = 0;
+  portEXIT_CRITICAL(&mux);
+}
+
 static void setPhase(ble_link_phase_t p)
 {
   phase = p;
@@ -359,6 +411,9 @@ static void connectToRod()
   client = BLEDevice::createClient();
   client->setClientCallbacks(new ClientCallbacks());
 
+  Serial.printf("[BLE] rod found (%s), connecting...\n", found->getAddress().toString().c_str());
+  setNote("rod found - connecting...");
+
   bool ok = client->connect(found);
 
   delete found;
@@ -366,7 +421,9 @@ static void connectToRod()
 
   if(!ok)
   {
+    Serial.println("[BLE] could not connect");
     lost();
+    setNote("rod found but could not connect");
     return;
   }
 
@@ -377,7 +434,9 @@ static void connectToRod()
 
   if(rx == nullptr || tx == nullptr || !tx->canNotify())
   {
+    Serial.println("[BLE] connected, but no StrikeSense service (old rod sketch?)");
     lost();
+    setNote("no StrikeSense service on rod");
     return;
   }
 
@@ -395,6 +454,9 @@ static void connectToRod()
   send(newId(), path);
 
   setPhase(BLE_LINK_CONNECTED);
+  connectedAt = millis();
+  firstAnswerLogged = false;
+  setNote("connected - waiting for data");
   Serial.printf("[BLE] connected to the rod (MTU %d)\n", mtu);
 }
 
@@ -424,11 +486,20 @@ void ble_link_poll(void)
 
   if(phase == BLE_LINK_SEARCHING)
   {
-    BLEDevice::getScan()->start(2, false);       // up to 2 s, stops early when found
+    seenCount = 0;
+    BLEDevice::getScan()->start(3, false);       // up to 3 s, stops early when found
     BLEDevice::getScan()->clearResults();
+    scans++;
+
+    portENTER_CRITICAL(&mux);
+    shared.scans = scans;
+    shared.seen = seenCount;
+    portEXIT_CRITICAL(&mux);
 
     if(found != nullptr)
       connectToRod();
+    else
+      Serial.printf("[BLE] scan %d: %d devices, no rod\n", scans, (int)seenCount);
 
     return;
   }
@@ -439,10 +510,18 @@ void ble_link_poll(void)
   if(lostFlag || client == nullptr || !client->isConnected())
   {
     lost();
+    setNote("rod lost - searching again");
     return;
   }
 
   readAnswers();
+
+  if(!firstAnswerLogged && now - connectedAt > 5000)
+  {
+    firstAnswerLogged = true;
+    Serial.println("[BLE] connected, but the rod does not answer /watch (old rod sketch?)");
+    setNote("connected, rod not answering");
+  }
 
   // live data
   if(askId >= 0 && now - askedAt > ANSWER_TIMEOUT_MS)
