@@ -6,8 +6,10 @@
 // Shares the watch's I2C bus with the touch screen (0x38); the buzzer is 0x5A.
 // To use two other pins instead: BUZZ_OWN_BUS 1 and set BUZZ_SDA / BUZZ_SCL.
 //
-// At start: lists what is on the I2C bus, resets the DRV2605L, calibrates
-// it to the motor (falls back to a fixed drive if that fails), then buzzes.
+// At start: lists what is on the I2C bus, then sets the DRV2605L up the
+// same way as Pimoroni's own library (drv2605-python): reset, LRA mode,
+// LRA effect library, auto-calibration (loop gain high, brake 2, 1 s).
+// If calibration fails it drives the motor at a fixed frequency instead.
 // Everything is printed on the Serial Monitor as [BUZZ] ...
 // =====================================================
 
@@ -40,6 +42,7 @@
 #define REG_CAL_BEMF  0x19
 #define REG_FEEDBACK  0x1A
 #define REG_CONTROL1  0x1B
+#define REG_CONTROL2  0x1C
 #define REG_CONTROL3  0x1D
 #define REG_CONTROL4  0x1E
 
@@ -128,23 +131,31 @@ bool buzz_begin(void)
 
   Serial.printf("[BUZZ] found DRV2605 (chip id %d)\n", status >> 5);
 
-  // reset, then wake up
+  // reset (as Pimoroni: wait until the reset bit clears), then wake up
   put(REG_MODE, 0x80);
-  delay(20);
+  delay(100);
+
+  uint8_t mode = 0x80;
+
+  for(int i = 0; i < 50 && get(REG_MODE, &mode) && (mode & 0x80); i++)
+    delay(10);
+
   put(REG_MODE, 0x00);
 
-  // LRA motor (the Bzzz's ELV1411A): about 1.8 V rms, 2.5 V peak, ~170 Hz
-  put(REG_FEEDBACK, 0x80 | 0x30 | 0x04 | 0x02);   // LRA, brake 4x, loop gain medium, BEMF gain
-  put(REG_RATED_V, 0x4B);
-  put(REG_OD_CLAMP, 0x7E);
-  put(REG_CONTROL1, 0x93);                        // start boost, drive time for ~170-200 Hz
-  put(REG_CONTROL4, 0x20);                        // calibration time 500 ms
+  // LRA motor (the Bzzz's ELV1411A). Voltages: the chip's defaults, as Pimoroni.
+  // Feedback: LRA, brake factor 2, loop gain high, back-EMF gain 2
+  put(REG_FEEDBACK, 0x80 | (2 << 4) | (2 << 2) | 2);
+  put(REG_LIBRARY, 6);                            // LRA effect library
 
   // auto-calibration: the chip measures the motor
+  uint8_t c2 = 0xF5;
+  get(REG_CONTROL2, &c2);
+  put(REG_CONTROL2, (c2 & ~0x03) | 0x01);         // IDISS time 1
+  put(REG_CONTROL4, 0x30);                        // calibration 1000 ms, zero crossing 100 us
   put(REG_MODE, 0x07);
   put(REG_GO, 1);
 
-  bool calOk = waitDone(2000);
+  bool calOk = waitDone(3000);
   get(REG_STATUS, &status);
   calOk = calOk && (status & 0x08) == 0;          // DIAG_RESULT 0 = good
 
@@ -165,14 +176,33 @@ bool buzz_begin(void)
     Serial.printf("[BUZZ] calibration failed (status 0x%02X) - using fixed drive\n", status);
   }
 
-  found = put(REG_MODE, 0x00) &&                  // effects started by GO
+  found = put(REG_MODE, 0x00) &&                  // internal trigger: effects started by GO
           put(REG_RTP, 0x00) &&
-          put(REG_LIBRARY, 6);                    // LRA effect library
+          put(REG_LIBRARY, 6);
 
-  Serial.printf("[BUZZ] %s\n", found ? "ready - you should feel a double buzz now" : "setup failed");
+  if(!found)
+  {
+    Serial.println("[BUZZ] setup failed");
+    return false;
+  }
 
-  if(found)
-    buzz_play(BUZZ_HELLO);
+  // Test 1: motor on at full power for 0.4 s (real-time mode, as Pimoroni's
+  // trackball example). Feel this one = motor and wiring are fine.
+  Serial.println("[BUZZ] test 1: long buzz (full power, 0.4 s)");
+  uint8_t c3 = 0xA0;
+  get(REG_CONTROL3, &c3);
+  put(REG_CONTROL3, c3 | 0x08);                   // real-time data: unsigned 0..255
+  put(REG_MODE, 0x05);                            // real-time playback
+  put(REG_RTP, 255);
+  delay(400);
+  put(REG_RTP, 0);
+  put(REG_MODE, 0x00);
+  delay(300);
+
+  // Test 2: the built-in effect used for alerts
+  Serial.println("[BUZZ] test 2: two short buzzes (built-in effect)");
+  buzz_play(BUZZ_HELLO);
+  Serial.println("[BUZZ] ready");
 
   return found;
 }
