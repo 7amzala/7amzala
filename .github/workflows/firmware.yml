@@ -18,18 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: arduino/setup-arduino-cli@v2
-
-      - name: Install the ESP32 boards and libraries
-        run: |
-          arduino-cli config init
-          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32
-          arduino-cli lib install "SparkFun LIS3DH Arduino Library" RadioLib
-
-      - name: Compile StrikeSense_NoLoRa
-        run: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --warnings default StrikeSense_NoLoRa
-
-      - name: Compile StrikeSense (LoRa)
-        run: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --warnings default StrikeSense
+      - uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:XIAO_ESP32S3
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          libraries: |
+            - name: SparkFun LIS3DH Arduino Library
+            - name: RadioLib
+          sketch-paths: |
+            - StrikeSense_NoLoRa
+            - StrikeSense
+          enable-warnings-report: true
+          verbose: false
