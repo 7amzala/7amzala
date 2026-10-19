@@ -6,9 +6,12 @@
 //   buttons to answer (REEL IN, I'M WATCHING, READY, SKIP).
 // The outer ring: cyan = all fine, orange = something building, red = strike.
 //
-// Swipe left: SEA STATE (waves, wind), left again: RELEARN THE SEA (hold
-// the button 2 s). Swipe right: back. A strike always jumps to the main
-// page; after 30 s on another page the watch goes back by itself.
+// Swipes:  left = SEA STATE, right = RELEARN THE SEA (hold 2 s); the
+// opposite swipe goes back to the main page.  Down (any page) = LAST
+// STRIKE (from the rod, fresh after a rod restart), up = back.  Up (any
+// page) = BATTERY (rod + watch, time left), down = back.
+// A strike always jumps to the main page; after 30 s on another page the
+// watch goes back by itself.
 //
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
@@ -21,6 +24,7 @@
 #include "lvgl.h"
 #include "ble_link.h"
 #include "buzz.h"
+#include "watch_bat.h"
 #include "strikesense_boot_fixed.h"
 #include <stdio.h>
 #include <string.h>
@@ -89,7 +93,9 @@ typedef enum
   MODE_REELED,
   MODE_PULLTEST,
   MODE_SEA,
-  MODE_RELEARN
+  MODE_RELEARN,
+  MODE_BATTERY,
+  MODE_LASTSTRIKE
 } ui_mode_t;
 
 static ui_mode_t mode = MODE_BOOT;
@@ -124,8 +130,29 @@ static lv_obj_t *sea_val[2];
 static lv_obj_t *sea_bar[2][4];
 static lv_obj_t *hint;
 
-// pages: 0 main, 1 sea state, 2 relearn
+// pages: left/right: -1 relearn, 0 main, 1 sea state
+//        up/down:    -1 battery, 0 (the left/right page), 1 last strike
 static int page = 0;
+static int vpage = 0;
+
+// battery page
+static lv_obj_t *bat_cap[2];
+static lv_obj_t *bat_pct[2];
+static lv_obj_t *bat_bar[2];
+static lv_obj_t *bat_left[2];
+static lv_obj_t *bat_leftcap[2];
+
+// last strike page
+static lv_obj_t *ls_chart;
+static lv_chart_series_t *ls_knock;
+static lv_chart_series_t *ls_limit;
+static lv_chart_series_t *ls_tilt;
+static lv_obj_t *ls_mark;             // red line: the strike moment
+static lv_obj_t *ls_mark_label;
+static lv_obj_t *ls_info[3];
+static uint32_t ls_shown_ms = 0;      // which answer is drawn
+static uint32_t ls_asked = 0;
+static long ls_strikeid = -1;
 static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
 static uint32_t hold_from = 0;
@@ -296,7 +323,23 @@ static void layout(ui_mode_t m)
   show(cap2, live);
   show(val2, live);
   show(bar, m == MODE_PULLTEST);
-  show(hint, m == MODE_RELEARN);
+  show(hint, m == MODE_RELEARN || m == MODE_BATTERY || m == MODE_LASTSTRIKE);
+
+  for(int r = 0; r < 2; r++)
+  {
+    show(bat_cap[r], m == MODE_BATTERY);
+    show(bat_pct[r], m == MODE_BATTERY);
+    show(bat_bar[r], m == MODE_BATTERY);
+    show(bat_left[r], m == MODE_BATTERY);
+    show(bat_leftcap[r], m == MODE_BATTERY);
+  }
+
+  show(ls_chart, m == MODE_LASTSTRIKE);
+  show(ls_mark, m == MODE_LASTSTRIKE);
+  show(ls_mark_label, m == MODE_LASTSTRIKE);
+
+  for(int i = 0; i < 3; i++)
+    show(ls_info[i], m == MODE_LASTSTRIKE);
 
   for(int r = 0; r < 2; r++)
   {
@@ -309,7 +352,7 @@ static void layout(ui_mode_t m)
   show(btn1, false);
   show(btn2, false);
 
-  bool top = m != MODE_BOOT && m != MODE_LOOKING;
+  bool top = m != MODE_BOOT && m != MODE_LOOKING && m != MODE_BATTERY && m != MODE_LASTSTRIKE;
 
   show(bt_icon, top);
   show(bat_label, top);
@@ -318,7 +361,7 @@ static void layout(ui_mode_t m)
     show(bars[i], top);
 
   for(int i = 0; i < 3; i++)
-    show(dots[i], top && m != MODE_STRIKE);
+    show(dots[i], top && m != MODE_STRIKE && m != MODE_BATTERY && m != MODE_LASTSTRIKE);
 
   show(ring, m != MODE_BOOT);
 
@@ -361,6 +404,20 @@ static void layout(ui_mode_t m)
       lv_obj_set_style_text_font(title, FONT_BIG, 0);
       lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 92);
       lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 196);
+      lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 350);
+      break;
+
+    case MODE_BATTERY:
+      lv_obj_set_style_text_font(title, FONT_BIG, 0);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 44);
+      lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 404);
+      break;
+
+    case MODE_LASTSTRIKE:
+      lv_obj_set_style_text_font(title, FONT_BIG, 0);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 50);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 98);
+      lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 412);
       break;
 
     case MODE_PULLTEST:
@@ -433,8 +490,10 @@ static void swipe_timer(lv_timer_t *t)
 
   int dx = p.x - from.x;
   int dy = p.y - from.y;
+  int adx = dx < 0 ? -dx : dx;
+  int ady = dy < 0 ? -dy : dy;
 
-  if(swiped || (dx < SWIPE_PX && dx > -SWIPE_PX) || (dy > 0 ? dy : -dy) > (dx > 0 ? dx : -dx))
+  if(swiped || (adx < SWIPE_PX && ady < SWIPE_PX))
     return;
 
   swiped = true;                    // one page per swipe
@@ -444,13 +503,43 @@ static void swipe_timer(lv_timer_t *t)
     return;
 
   int before = page;
+  int vbefore = vpage;
 
-  if(dx < 0 && page < 2)
-    page++;
-  else if(dx > 0 && page > 0)
-    page--;
+  if(adx >= ady)
+  {
+    // left / right: only on the normal pages
+    if(vpage == 0)
+    {
+      if(dx < 0 && page < 1)
+        page++;                     // left: main -> sea state, relearn -> main
+      else if(dx > 0 && page > -1)
+        page--;                     // right: main -> relearn, sea state -> main
+    }
+  }
+  else if(dy < 0)
+  {
+    // finger up: battery, or back from the last strike
+    if(vpage == 0)
+      vpage = -1;
+    else if(vpage == 1)
+      vpage = 0;
+  }
+  else
+  {
+    // finger down: last strike, or back from the battery
+    if(vpage == 0)
+      vpage = 1;
+    else if(vpage == -1)
+      vpage = 0;
+  }
 
-  if(page != before)
+  if(vpage == 1 && vbefore != 1)
+  {
+    ble_link_ask_last_strike();
+    ls_asked = lv_tick_get();
+  }
+
+  if(page != before || vpage != vbefore)
     buzz_play(BUZZ_TAP);
 
   page_since = lv_tick_get();
@@ -459,7 +548,7 @@ static void swipe_timer(lv_timer_t *t)
 static void page_dots(void)
 {
   for(int i = 0; i < 3; i++)
-    set_bg_color(dots[i], i == page ? COL_TEXT : lv_color_hex(0x3a4458));
+    set_bg_color(dots[i], i == page + 1 ? COL_TEXT : lv_color_hex(0x3a4458));
 }
 
 static void sea_row(int r, const char *name, int level, lv_color_t c)
@@ -510,6 +599,7 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
     hold_from = 0;
     swiped = true;                    // this touch is used up: letting go presses nothing
     page = 0;                         // back to the main page: it shows LEARNING
+    vpage = 0;
     return;
   }
 
@@ -517,6 +607,143 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
   set_button(btn1, btn1_label, &btn1_path, s->command_busy ? "..." : holding ? "KEEP HOLDING" : "RELEARN",
              "", 300, 260, 70, holding ? COL_ORANGE : COL_BLUE, holding ? lv_color_hex(0x221400) : COL_TEXT);
   set_text(hint, "hold 2 seconds,\nthen keep the rod still");
+}
+
+static void time_left(char *out, size_t size, int pct, long minutes)
+{
+  if(pct < 0)
+    snprintf(out, size, "--");
+  else if(minutes < 0)
+    snprintf(out, size, "measuring...");
+  else
+    snprintf(out, size, "%ld h %02ld m", minutes / 60, minutes % 60);
+}
+
+static void battery_row(int r, int pct, long minutes)
+{
+  char a[24];
+
+  lv_color_t c = pct < 0 ? COL_DIM : pct < 20 ? COL_RED : pct < 50 ? COL_ORANGE : lv_color_hex(0x3ddc84);
+
+  if(pct < 0)
+    snprintf(a, sizeof(a), "--");
+  else
+    snprintf(a, sizeof(a), "%d%%", pct);
+
+  set_text(bat_pct[r], a);
+  set_text_color(bat_pct[r], c);
+  lv_bar_set_value(bat_bar[r], pct < 0 ? 0 : pct, LV_ANIM_OFF);
+
+  if(lv_obj_get_style_bg_color(bat_bar[r], LV_PART_INDICATOR).full != c.full)
+    lv_obj_set_style_bg_color(bat_bar[r], c, LV_PART_INDICATOR);
+
+  time_left(a, sizeof(a), pct, minutes);
+  set_text(bat_left[r], pct < 0 ? "not measured" : a);
+  set_text(bat_leftcap[r], pct < 0 || minutes < 0 ? "" : "left");
+}
+
+static void battery_page(const ble_link_status_t *s)
+{
+  layout(MODE_BATTERY);
+  ring_set(0, COL_CYAN);
+
+  set_text(title, "BATTERY");
+  set_text_color(title, COL_TEXT);
+  set_text(subtitle, "");
+  set_text(hint, "swipe down: back");
+
+  battery_row(0, s->bat, s->batleft);
+  battery_row(1, watch_bat_percent(), watch_bat_left_min());
+}
+
+static void last_strike_page(const ble_link_status_t *s, uint32_t now)
+{
+  layout(MODE_LASTSTRIKE);
+  ring_set(0, COL_RED);
+
+  set_text(title, "LAST STRIKE");
+  set_text_color(title, COL_RED);
+  set_text(hint, "swipe up: back");
+
+  // ask again every 5 s, and at once after a new strike
+  if(now - ls_asked > 5000 || s->strikeid != ls_strikeid)
+  {
+    ls_strikeid = s->strikeid;
+    ls_asked = now;
+    ble_link_ask_last_strike();
+  }
+
+  static ble_last_strike_t ls;        // big: not on the stack
+
+  if(!ble_link_get_last_strike(&ls))
+  {
+    set_text(subtitle, "loading...");
+    show(ls_chart, false);
+    show(ls_mark, false);
+    show(ls_mark_label, false);
+    set_text(ls_info[0], "");
+    set_text(ls_info[1], "");
+    set_text(ls_info[2], "");
+    return;
+  }
+
+  bool graph = ls.have && ls.n > 1;
+  show(ls_chart, graph);
+  show(ls_mark, graph);
+  show(ls_mark_label, graph);
+
+  char a[64];
+
+  if(!ls.have)
+  {
+    set_text(subtitle, ls.recording ? "recording the strike..." : "No strike yet");
+    set_text_color(subtitle, COL_TEXT);
+    set_text(ls_info[0], "");
+    set_text(ls_info[1], ls.recording ? "ready 10 s after the strike" : "since the rod was switched on");
+    set_text(ls_info[2], "");
+    return;
+  }
+
+  // how long ago, counting on from when it was fetched
+  long ago = ls.ago_s + (long)((now - ls.got_ms) / 1000);
+
+  if(ago < 60)
+    snprintf(a, sizeof(a), "%s  -  %ld s ago", ls.type[0] ? ls.type : "STRIKE", ago);
+  else if(ago < 3600)
+    snprintf(a, sizeof(a), "%s  -  %ld min ago", ls.type[0] ? ls.type : "STRIKE", ago / 60);
+  else
+    snprintf(a, sizeof(a), "%s  -  %ld h %02ld min ago", ls.type[0] ? ls.type : "STRIKE", ago / 3600, (ago % 3600) / 60);
+
+  set_text(subtitle, a);
+  set_text_color(subtitle, COL_TEXT);
+
+  // draw the graph once per answer
+  if(ls.got_ms != ls_shown_ms)
+  {
+    ls_shown_ms = ls.got_ms;
+    lv_chart_set_point_count(ls_chart, ls.n);
+
+    for(int i = 0; i < ls.n; i++)
+    {
+      lv_chart_set_value_by_id(ls_chart, ls_knock, i, ls.k[i]);
+      lv_chart_set_value_by_id(ls_chart, ls_limit, i, KNOCK_LIMIT);
+      lv_chart_set_value_by_id(ls_chart, ls_tilt, i, ls.t[i]);
+    }
+
+    lv_chart_refresh(ls_chart);
+
+    // red line where the strike was (inside the chart's 8 px padding)
+    int x = 8 + (ls.n > 1 ? ls.pre * (360 - 16) / (ls.n - 1) : 0);
+    lv_obj_align_to(ls_mark, ls_chart, LV_ALIGN_TOP_LEFT, x, 0);
+    lv_obj_align_to(ls_mark_label, ls_chart, LV_ALIGN_TOP_LEFT, x + 5, 4);
+  }
+
+  snprintf(a, sizeof(a), "%d s before          %d s after", ls.pre / 5, (ls.n - ls.pre) / 5);
+  set_text(ls_info[0], a);
+  snprintf(a, sizeof(a), "tilt peak %+.1f     pull %d%%", ls.tiltpeak, ls.pull);
+  set_text(ls_info[1], a);
+  snprintf(a, sizeof(a), "%d strike%s since the rod started", ls.count, ls.count == 1 ? "" : "s");
+  set_text(ls_info[2], a);
 }
 
 static void ui_timer(lv_timer_t *t)
@@ -570,10 +797,25 @@ static void ui_timer(lv_timer_t *t)
 
   top_icons(&s);
 
-  if(s.strike || (page != 0 && now - page_since > PAGE_BACK_MS))
+  if(s.strike || ((page != 0 || vpage != 0) && now - page_since > PAGE_BACK_MS))
+  {
     page = 0;
+    vpage = 0;
+  }
 
   page_dots();
+
+  if(vpage == -1)
+  {
+    battery_page(&s);
+    return;
+  }
+
+  if(vpage == 1)
+  {
+    last_strike_page(&s, now);
+    return;
+  }
 
   if(page == 1)
   {
@@ -581,11 +823,11 @@ static void ui_timer(lv_timer_t *t)
     return;
   }
 
-  if(page == 2)
+  if(page == -1)
   {
     relearn_page(&s, now);
 
-    if(page == 2)
+    if(page == -1)
       return;
   }
 
@@ -910,9 +1152,73 @@ void watch_ui_create(void)
     }
   }
 
-  // relearn page: small text under the button
+  // relearn page: small text under the button (also "swipe ...: back")
   hint = label(scr, FONT_TINY, COL_DIM);
   lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 350);
+
+  // battery page: ROD and WATCH rows
+  const char *bat_names[2] = { "ROD", "WATCH" };
+
+  for(int r = 0; r < 2; r++)
+  {
+    int y = 104 + r * 140;
+
+    bat_cap[r] = label(scr, FONT_TINY, COL_DIM);
+    lv_label_set_text(bat_cap[r], bat_names[r]);
+    lv_obj_align(bat_cap[r], LV_ALIGN_TOP_LEFT, 72, y);
+
+    bat_pct[r] = label(scr, FONT_HUGE, COL_TEXT);
+    lv_obj_align(bat_pct[r], LV_ALIGN_TOP_LEFT, 70, y + 22);
+
+    bat_leftcap[r] = label(scr, FONT_TINY, COL_DIM);
+    lv_obj_align(bat_leftcap[r], LV_ALIGN_TOP_RIGHT, -72, y + 10);
+
+    bat_left[r] = label(scr, FONT_SMALL, COL_TEXT);
+    lv_obj_align(bat_left[r], LV_ALIGN_TOP_RIGHT, -72, y + 34);
+
+    bat_bar[r] = lv_bar_create(scr);
+    lv_bar_set_range(bat_bar[r], 0, 100);
+    lv_obj_set_size(bat_bar[r], 322, 14);
+    lv_obj_align(bat_bar[r], LV_ALIGN_TOP_MID, 0, y + 84);
+    lv_obj_set_style_bg_color(bat_bar[r], lv_color_hex(0x262b36), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bat_bar[r], LV_OPA_COVER, LV_PART_MAIN);
+  }
+
+  // last strike page: graph of the rod's recording
+  ls_chart = lv_chart_create(scr);
+  lv_obj_set_size(ls_chart, 360, 150);
+  lv_obj_align(ls_chart, LV_ALIGN_TOP_MID, 0, 138);
+  lv_chart_set_type(ls_chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(ls_chart, LS_MAX);
+  lv_chart_set_div_line_count(ls_chart, 0, 0);
+  lv_chart_set_range(ls_chart, LV_CHART_AXIS_PRIMARY_Y, -300, 300);
+  lv_chart_set_range(ls_chart, LV_CHART_AXIS_SECONDARY_Y, -300, 900);
+  lv_obj_set_style_bg_color(ls_chart, COL_PANEL, 0);
+  lv_obj_set_style_border_width(ls_chart, 0, 0);
+  lv_obj_set_style_radius(ls_chart, 14, 0);
+  lv_obj_set_style_pad_all(ls_chart, 8, 0);
+  lv_obj_set_style_size(ls_chart, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_line_width(ls_chart, 3, LV_PART_ITEMS);
+  lv_obj_clear_flag(ls_chart, LV_OBJ_FLAG_CLICKABLE);
+
+  ls_limit = lv_chart_add_series(ls_chart, lv_color_hex(0x6b5426), LV_CHART_AXIS_PRIMARY_Y);
+  ls_tilt = lv_chart_add_series(ls_chart, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
+  ls_knock = lv_chart_add_series(ls_chart, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
+
+  ls_mark = lv_obj_create(scr);
+  lv_obj_remove_style_all(ls_mark);
+  lv_obj_set_style_bg_opa(ls_mark, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(ls_mark, COL_RED, 0);
+  lv_obj_set_size(ls_mark, 2, 150);
+
+  ls_mark_label = label(scr, FONT_TINY, COL_RED);
+  lv_label_set_text(ls_mark_label, "STRIKE");
+
+  for(int i = 0; i < 3; i++)
+  {
+    ls_info[i] = label(scr, i == 1 ? FONT_SMALL : FONT_TINY, i == 1 ? COL_TEXT : COL_DIM);
+    lv_obj_align(ls_info[i], LV_ALIGN_TOP_MID, 0, 296 + i * 30 + (i == 2 ? 4 : 0));
+  }
 
   // page dots at the bottom
   for(int i = 0; i < 3; i++)

@@ -205,6 +205,30 @@ int main()
   check(ask(500004, "/watch", a) && a.code == 200, "phone gone: watch still answered");
   check(ask(500005, "/watching", a) && a.body == "OK", "watch button (I'M WATCHING) works");
 
+  // watch pages: last strike (fresh after a rod start) and battery time left
+  printf("\n=== WATCH PAGES ===\n");
+  check(ask(500006, "/watch", a) && a.body.find("\"batleft\"") != std::string::npos, "/watch has battery time left");
+  check(ask(500007, "/laststrike", a) && a.body.find("\"have\":false") != std::string::npos &&
+        a.body.find("\"count\":0") != std::string::npos, "/laststrike: no strike yet after start");
+
+  step(25);                                       // some history before the strike
+  strikeActive = false;
+  rodState = ST_MONITORING;
+  startStrike("SLOW PULL");
+  step(2);
+  check(ask(500008, "/laststrike", a) && a.body.find("\"recording\":true") != std::string::npos, "strike: being recorded (10 s after)");
+  step(10);
+  ok = ask(500009, "/laststrike", a);
+  size_t kpos = a.body.find("\"k\":["), tpos = a.body.find("\"t\":[");
+  int kn = 0, tn = 0;
+  for (size_t i = kpos; i < a.body.find(']', kpos); i++) if (a.body[i] == ',') kn++;
+  for (size_t i = tpos; i < a.body.find(']', tpos); i++) if (a.body[i] == ',') tn++;
+  printf("        /laststrike = %zu bytes, %d points\n", a.body.size(), kn + 1);
+  check(ok && a.body.find("\"have\":true") != std::string::npos && a.body.find("SLOW PULL") != std::string::npos &&
+        a.body.find("\"count\":1") != std::string::npos, "/laststrike: type, count after a strike");
+  check(kn == tn && kn + 1 == 150 && a.body.find("\"pre\":100") != std::string::npos, "/laststrike: 150 points, 100 before (20 s) + 50 after (10 s)");
+  check(a.body.size() < 3000, "/laststrike small enough for the watch");
+
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }

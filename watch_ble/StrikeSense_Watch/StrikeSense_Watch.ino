@@ -17,6 +17,7 @@
 #include "FT3168.h"
 #include "ble_link.h"
 #include "buzz.h"
+#include "watch_bat.h"
 
 void setup()
 {
@@ -29,6 +30,7 @@ void setup()
   Touch_Init();
   lcd_lvgl_Init();          // screen + the StrikeSense screens (watch_ui.c)
   buzz_begin();             // wrist vibration, if the Haptic Bzzz is wired (SDA/SCL)
+  watch_bat_begin();        // the watch's own battery (BATTERY page)
 
   ble_link_begin();         // Bluetooth to the rod
 }
@@ -36,5 +38,6 @@ void setup()
 void loop()
 {
   ble_link_poll();          // find/connect the rod, live data, buttons
+  watch_bat_poll();
   delay(2);
 }

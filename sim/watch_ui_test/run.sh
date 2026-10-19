@@ -13,7 +13,8 @@ for f in $(find $L/src -name '*.c'); do
   o=obj/$(echo $f | md5sum | cut -c1-12).o
   [ -f $o ] || gcc -O1 -c -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L $f -o $o
 done
-gcc -O1 -Wall -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c $W/watch_ui.c -o watch_ui.o
+gcc -O1 -Wall -fsyntax-only -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W $W/watch_ui.c
+# host.c includes watch_ui.c, so the test can look at the page numbers
 gcc -O1 -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c host.c -o host.o
-gcc -o host host.o watch_ui.o obj/*.o -lm
+gcc -o host host.o obj/*.o -lm
 ./host

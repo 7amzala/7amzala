@@ -15,6 +15,19 @@ Waveshare ESP32-S3-Touch-AMOLED-1.43 talking to the rod over **Bluetooth**
 
 Outer ring: cyan = all fine, orange = something building, red = strike.
 
+### Swipes
+
+| From | Swipe | Page |
+|---|---|---|
+| main | left | SEA STATE (waves, wind) |
+| main | right | RELEARN THE SEA (hold 2 s) |
+| any page | down | LAST STRIKE: 20 s before + 10 s after, from the rod (fresh after a rod restart) |
+| any page | up | BATTERY: rod + watch %, time left (learned after ~15 min) |
+
+The opposite swipe goes back. A strike jumps to the main page; after
+30 s on another page the watch goes back by itself. The watch battery is
+read from an AXP2101 chip if there is one, else GPIO 4 (Serial: `[BAT] ...`).
+
 ## Setup (Arduino IDE)
 
 1. Open `StrikeSense_Watch/StrikeSense_Watch.ino` (all files in that folder

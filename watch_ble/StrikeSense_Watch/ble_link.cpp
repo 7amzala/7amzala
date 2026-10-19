@@ -55,6 +55,11 @@ static uint32_t cmdSentAt = 0;
 static int cmdTries = 0;
 static char cmdSending[32] = "";
 
+static long lastId = -1;              // "/laststrike" in flight
+static uint32_t lastAskedAt = 0;
+static volatile bool wantLast = false;
+static ble_last_strike_t lastStrike;   // guarded by mux
+
 static uint32_t lastRssi = 0;
 static int rssi = 0;
 
@@ -239,6 +244,7 @@ static void gotWatchData(const std::string &j)
   s.wave = (int)jsonNum(j, "wave", 0);
   s.wind = (int)jsonNum(j, "wind", 0);
   s.bat = (int)jsonNum(j, "bat", -1);
+  s.batleft = (long)jsonNum(j, "batleft", -1);
   s.dir = jsonBool(j, "dir");
   s.dropwatch = jsonBool(j, "dropwatch");
 
@@ -259,8 +265,75 @@ static void gotWatchData(const std::string &j)
   portEXIT_CRITICAL(&mux);
 }
 
+// "k":[1,2,3] -> numbers
+static int jsonList(const std::string &j, const char *key, short *out, int max)
+{
+  std::string k = std::string("\"") + key + "\":[";
+  size_t p = j.find(k);
+
+  if(p == std::string::npos)
+    return 0;
+
+  const char *c = j.c_str() + p + k.size();
+  int n = 0;
+
+  while(*c && *c != ']' && n < max)
+  {
+    char *end;
+    long v = strtol(c, &end, 10);
+
+    if(end == c)
+      break;
+
+    out[n++] = (short)v;
+    c = end;
+
+    if(*c == ',')
+      c++;
+  }
+
+  return n;
+}
+
+static void gotLastStrike(const std::string &j)
+{
+  static ble_last_strike_t ls;       // big: not on the stack
+
+  memset(&ls, 0, sizeof(ls));
+  ls.loaded = true;
+  ls.have = jsonBool(j, "have");
+  ls.recording = jsonBool(j, "recording");
+  jsonGet(j, "type", ls.type, sizeof(ls.type));
+  ls.ago_s = (long)jsonNum(j, "ago", 0);
+  ls.got_ms = millis();
+  ls.count = (int)jsonNum(j, "count", 0);
+  ls.tiltpeak = jsonNum(j, "tiltpeak", 0);
+  ls.pull = (int)jsonNum(j, "pull", 0);
+  ls.pre = (int)jsonNum(j, "pre", 0);
+  ls.n = jsonList(j, "k", ls.k, LS_MAX);
+
+  int nt = jsonList(j, "t", ls.t, LS_MAX);
+
+  if(nt < ls.n)
+    ls.n = nt;
+
+  portENTER_CRITICAL(&mux);
+  lastStrike = ls;
+  portEXIT_CRITICAL(&mux);
+}
+
 static void answer(long id, int code, const std::string &body)
 {
+  if(id == lastId)
+  {
+    lastId = -1;
+
+    if(code == 200)
+      gotLastStrike(body);
+
+    return;
+  }
+
   if(id == askId)
   {
     askId = -1;
@@ -400,6 +473,7 @@ static void lost()
   rx = nullptr;
   askId = -1;
   cmdId = -1;
+  lastId = -1;
   inbox.clear();
 
   portENTER_CRITICAL(&mux);
@@ -489,6 +563,7 @@ void ble_link_begin(void)
 {
   memset(&shared, 0, sizeof(shared));
   shared.bat = -1;
+  shared.batleft = -1;
   strcpy(shared.state, "");
 
   BLEDevice::init("StrikeSense Watch");
@@ -556,6 +631,18 @@ void ble_link_poll(void)
     askedAt = now;
     lastAsk = now;
     send(askId, "/watch");
+  }
+
+  // LAST STRIKE page asked for the rod's last strike
+  if(lastId >= 0 && now - lastAskedAt > 3000)
+    lastId = -1;                          // no answer: may ask again
+
+  if(wantLast && lastId < 0)
+  {
+    wantLast = false;
+    lastId = newId();
+    lastAskedAt = now;
+    send(lastId, "/laststrike");
   }
 
   // buttons: sent until the rod answers (3 tries)
@@ -632,6 +719,20 @@ void ble_link_get(ble_link_status_t *out, bool take_peak)
     peak = 0;
 
   portEXIT_CRITICAL(&mux);
+}
+
+void ble_link_ask_last_strike(void)
+{
+  wantLast = true;
+}
+
+bool ble_link_get_last_strike(ble_last_strike_t *out)
+{
+  portENTER_CRITICAL(&mux);
+  *out = lastStrike;
+  portEXIT_CRITICAL(&mux);
+
+  return out->loaded;
 }
 
 void ble_link_command(const char *path)

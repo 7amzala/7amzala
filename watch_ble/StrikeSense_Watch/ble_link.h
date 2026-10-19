@@ -47,6 +47,7 @@ typedef struct
   int wave;                 // 0 flat .. 3 big
   int wind;                 // 0 calm .. 3 very strong
   int bat;                  // rod battery %, -1 = none
+  long batleft;             // rod battery minutes left, -1 = still measuring
   bool dir;                 // pull direction learned
   bool dropwatch;           // drop-back seen, watching for a pull
 
@@ -57,6 +58,29 @@ typedef struct
   int seen;                 // Bluetooth devices seen in the last scan
   char note[40];            // what the link is doing / what went wrong
 } ble_link_status_t;
+
+// The rod's last strike (LAST STRIKE page). Fresh after a rod restart.
+#define LS_MAX 150
+
+typedef struct
+{
+  bool loaded;              // an answer has come in
+  bool have;                // there was a strike since the rod started
+  bool recording;           // a new strike is being recorded (10 s after)
+  char type[24];
+  long ago_s;               // seconds ago, when it was fetched
+  uint32_t got_ms;          // millis() when fetched
+  int count;                // strikes since the rod started
+  float tiltpeak;
+  int pull;
+  int pre;                  // points before the strike
+  int n;                    // points
+  short k[LS_MAX];          // knock, % of the knock limit
+  short t[LS_MAX];          // tilt x 100
+} ble_last_strike_t;
+
+void ble_link_ask_last_strike(void);                        // safe from the screen task
+bool ble_link_get_last_strike(ble_last_strike_t *out);      // copy; false = nothing yet
 
 void ble_link_begin(void);
 void ble_link_poll(void);                                   // call from loop()
