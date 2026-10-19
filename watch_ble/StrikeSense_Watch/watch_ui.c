@@ -60,6 +60,9 @@
 #define COL_DARK    lv_color_hex(0x5f7799)
 #define COL_BTN     lv_color_hex(0x13213f)
 
+// Slow pull / drop-back shown (orange ring, title) from this % (was 30)
+#define PULL_SHOW   10
+
 #define GRAPH_POINTS 200          // 200 x 100 ms = 20 s
 #define KNOCK_LIMIT  100          // knock limit drawn at 100 on the graph (knock: top half, tilt: bottom half)
 #define BOOT_MS      2500
@@ -106,7 +109,6 @@ static const char *btn2_path = "";
 
 static long last_knock_id = -1;
 static uint32_t knock_until = 0;
-static uint32_t spin = 0;
 
 // ---------- small helpers ----------
 
@@ -122,6 +124,9 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, lv_color_t colou
 
 static void show(lv_obj_t *o, bool on)
 {
+  if(lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) == !on)
+    return;                       // already so: no redraw
+
   if(on)
     lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
   else
@@ -132,6 +137,27 @@ static void set_text(lv_obj_t *l, const char *t)
 {
   if(strcmp(lv_label_get_text(l), t) != 0)
     lv_label_set_text(l, t);
+}
+
+// Setting a style always redraws, even with the same value. These only
+// touch LVGL when something changed, so the screen is not redrawn 10x a
+// second for nothing (that made the watch lag behind the rod).
+static void set_text_color(lv_obj_t *o, lv_color_t c)
+{
+  if(lv_obj_get_style_text_color(o, 0).full != c.full)
+    lv_obj_set_style_text_color(o, c, 0);
+}
+
+static void set_bg_color(lv_obj_t *o, lv_color_t c)
+{
+  if(lv_obj_get_style_bg_color(o, 0).full != c.full)
+    lv_obj_set_style_bg_color(o, c, 0);
+}
+
+static void set_font(lv_obj_t *o, const lv_font_t *f)
+{
+  if(lv_obj_get_style_text_font(o, 0) != f)
+    lv_obj_set_style_text_font(o, f, 0);
 }
 
 static void button_clicked(lv_event_t *e)
@@ -161,10 +187,16 @@ static void set_button(lv_obj_t *b, lv_obj_t *t, const char **slot, const char *
                        int y, int w, int h, lv_color_t bg, lv_color_t fg)
 {
   show(b, true);
-  lv_obj_set_size(b, w, h);
-  lv_obj_align(b, LV_ALIGN_TOP_MID, 0, y - h / 2);
-  lv_obj_set_style_bg_color(b, bg, 0);
-  lv_obj_set_style_text_color(t, fg, 0);
+
+  if(lv_obj_get_style_width(b, 0) != w || lv_obj_get_style_height(b, 0) != h ||
+     lv_obj_get_style_y(b, 0) != y - h / 2)
+  {
+    lv_obj_set_size(b, w, h);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, y - h / 2);
+  }
+
+  set_bg_color(b, bg);
+  set_text_color(t, fg);
   set_text(t, text);
 
   if(*slot != path)
@@ -175,11 +207,21 @@ static void set_button(lv_obj_t *b, lv_obj_t *t, const char **slot, const char *
   }
 }
 
+static uint32_t spin = 0;
+static bool spinning = false;
+
 static void ring_set(int value, lv_color_t colour)
 {
-  lv_arc_set_rotation(ring, 270);
-  lv_arc_set_value(ring, value < 0 ? 0 : (value > 100 ? 100 : value));
-  lv_obj_set_style_arc_color(ring, colour, LV_PART_INDICATOR);
+  if(spinning)
+  {
+    spinning = false;
+    lv_arc_set_rotation(ring, 270);
+  }
+
+  lv_arc_set_value(ring, value < 0 ? 0 : (value > 100 ? 100 : value));   // no redraw if the same
+
+  if(lv_obj_get_style_arc_color(ring, LV_PART_INDICATOR).full != colour.full)
+    lv_obj_set_style_arc_color(ring, colour, LV_PART_INDICATOR);
 }
 
 static const char *wave_name(int w)
@@ -257,6 +299,8 @@ static void layout(ui_mode_t m)
       break;
 
     case MODE_PULLTEST:
+      lv_obj_set_size(bar, 260, 12);
+      lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 262);
       lv_obj_set_style_text_font(title, FONT_BIG, 0);
       lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 95);
       lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 150);
@@ -274,7 +318,7 @@ static void top_icons(const ble_link_status_t *s)
   int n = s->rssi == 0 ? 0 : s->rssi >= -60 ? 4 : s->rssi >= -70 ? 3 : s->rssi >= -80 ? 2 : 1;
 
   for(int i = 0; i < 4; i++)
-    lv_obj_set_style_bg_color(bars[i], i < n ? COL_CYAN : lv_color_hex(0x262b36), 0);
+    set_bg_color(bars[i], i < n ? COL_CYAN : lv_color_hex(0x262b36));
 
   char t[24];
 
@@ -287,7 +331,7 @@ static void top_icons(const ble_link_status_t *s)
              s->bat);
 
   set_text(bat_label, t);
-  lv_obj_set_style_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : COL_DIM, 0);
+  set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : COL_DIM);
 }
 
 static void ui_timer(lv_timer_t *t)
@@ -311,12 +355,15 @@ static void ui_timer(lv_timer_t *t)
     layout(MODE_LOOKING);
 
     spin = (spin + 12) % 360;
+    spinning = true;
     lv_arc_set_rotation(ring, spin);
     lv_arc_set_value(ring, 25);
-    lv_obj_set_style_arc_color(ring, COL_BLUE, LV_PART_INDICATOR);
+
+    if(lv_obj_get_style_arc_color(ring, LV_PART_INDICATOR).full != COL_BLUE.full)
+      lv_obj_set_style_arc_color(ring, COL_BLUE, LV_PART_INDICATOR);
 
     set_text(title, LV_SYMBOL_BLUETOOTH "\nLOOKING FOR\nTHE ROD");
-    lv_obj_set_style_text_color(title, COL_TEXT, 0);
+    set_text_color(title, COL_TEXT);
     // what the link is doing, so a problem can be seen without a computer
     char info[96];
 
@@ -327,7 +374,7 @@ static void ui_timer(lv_timer_t *t)
       snprintf(info, sizeof(info), "%s", s.note[0] ? s.note : "Bluetooth - stay within ~30 m");
 
     set_text(subtitle, info);
-    lv_obj_set_style_text_color(subtitle, COL_DIM, 0);
+    set_text_color(subtitle, COL_DIM);
     return;
   }
 
@@ -348,21 +395,21 @@ static void ui_timer(lv_timer_t *t)
 
     bool on = (now / 350) % 2 == 0;     // flashing
 
-    lv_obj_set_style_bg_color(scr, on ? lv_color_hex(0x5a000c) : lv_color_hex(0x220004), 0);
+    set_bg_color(scr, on ? lv_color_hex(0x5a000c) : lv_color_hex(0x220004));
     ring_set(100, on ? COL_RED : lv_color_hex(0x7a0010));
 
     set_text(title, "STRIKE!");
-    lv_obj_set_style_text_color(title, COL_TEXT, 0);
+    set_text_color(title, COL_TEXT);
     set_text(subtitle, s.type[0] ? s.type : "FISH ON");
-    lv_obj_set_style_text_color(subtitle, COL_RED, 0);
-    lv_obj_set_style_text_font(subtitle, FONT_MID, 0);
+    set_text_color(subtitle, COL_RED);
+    set_font(subtitle, FONT_MID);
 
     set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : "I'M WATCHING", "/watching", 290, 300, 66, COL_CYAN, lv_color_hex(0x001226));
     set_button(btn2, btn2_label, &btn2_path, "REEL IN", "/reelin", 372, 300, 66, COL_TEXT, lv_color_hex(0x7a0010));
     return;
   }
 
-  lv_obj_set_style_text_font(subtitle, FONT_SMALL, 0);
+  set_font(subtitle, FONT_SMALL);
 
   if(strcmp(s.state, "paused") == 0)
   {
@@ -370,9 +417,9 @@ static void ui_timer(lv_timer_t *t)
     ring_set(0, COL_CYAN);
 
     set_text(title, "REELED IN");
-    lv_obj_set_style_text_color(title, COL_TEXT, 0);
+    set_text_color(title, COL_TEXT);
     set_text(subtitle, "cast, then press READY");
-    lv_obj_set_style_text_color(subtitle, COL_DIM, 0);
+    set_text_color(subtitle, COL_DIM);
 
     set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : "READY", "/ready", 330, 260, 78, COL_BLUE, COL_TEXT);
     return;
@@ -388,13 +435,11 @@ static void ui_timer(lv_timer_t *t)
     ring_set((int)(frac * 100), COL_ORANGE);
 
     set_text(title, "PULL TEST");
-    lv_obj_set_style_text_color(title, COL_ORANGE, 0);
+    set_text_color(title, COL_ORANGE);
 
     set_text(subtitle, frac >= 1 ? "good - now let go" : "pull the line gently\ntoward the sea, then let go");
-    lv_obj_set_style_text_color(subtitle, COL_TEXT, 0);
+    set_text_color(subtitle, COL_TEXT);
 
-    lv_obj_set_size(bar, 260, 12);
-    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 262);
     lv_bar_set_value(bar, (int)(frac * 100), LV_ANIM_OFF);
 
     set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : "SKIP", "/skippull", 360, 170, 54, COL_BTN, COL_TEXT);
@@ -430,7 +475,7 @@ static void ui_timer(lv_timer_t *t)
     warn = true;
     ringv = 100;
   }
-  else if(s.bucket >= 30)
+  else if(s.bucket >= PULL_SHOW)
   {
     set_text(title, "SLOW PULL");
     snprintf(a, sizeof(a), "%d%% - building up", s.bucket);
@@ -438,7 +483,7 @@ static void ui_timer(lv_timer_t *t)
     c = COL_ORANGE;
     warn = true;
   }
-  else if(s.drop >= 30)
+  else if(s.drop >= PULL_SHOW)
   {
     set_text(title, "DROP-BACK");
     snprintf(a, sizeof(a), "%d%% - line going slack", s.drop);
@@ -460,26 +505,26 @@ static void ui_timer(lv_timer_t *t)
     set_text(subtitle, s.dir ? a : "no pull test: knocks only");
   }
 
-  lv_obj_set_style_text_color(title, c, 0);
-  lv_obj_set_style_text_color(subtitle, COL_DIM, 0);
+  set_text_color(title, c);
+  set_text_color(subtitle, COL_DIM);
   ring_set(ringv < 4 ? 4 : ringv, c);
 
   set_text(cap1, "TILT (DEG)");          // the built-in fonts have no degree sign
   snprintf(a, sizeof(a), "%+.1f", s.tilt);
   set_text(val1, a);
-  lv_obj_set_style_text_color(val1, warn ? COL_ORANGE : COL_VIOLET, 0);
+  set_text_color(val1, warn ? COL_ORANGE : COL_VIOLET);
 
-  if(s.bucket >= 30)
+  if(s.bucket >= PULL_SHOW)
   {
     set_text(cap2, "PULL");
     snprintf(b, sizeof(b), "%d%%", s.bucket);
-    lv_obj_set_style_text_color(val2, COL_ORANGE, 0);
+    set_text_color(val2, COL_ORANGE);
   }
   else
   {
     set_text(cap2, "KNOCKS");
     snprintf(b, sizeof(b), "%d", s.knocks);
-    lv_obj_set_style_text_color(val2, s.knocks > 0 ? COL_CYAN : COL_TEXT, 0);
+    set_text_color(val2, s.knocks > 0 ? COL_CYAN : COL_TEXT);
   }
 
   set_text(val2, b);

@@ -6,6 +6,7 @@
 #include "ble_link.h"
 #include "watch_ui.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -17,8 +18,12 @@ static uint32_t sim_ms = 0;
 static char sent[64][32];
 static int sent_n = 0;
 
+static unsigned long flushed_px = 0;
+
 static void flush(lv_disp_drv_t *d, const lv_area_t *a, lv_color_t *c)
 {
+  flushed_px += (unsigned long)(a->x2 - a->x1 + 1) * (a->y2 - a->y1 + 1);
+  if(getenv("SHOWAREA") && flushed_px) fprintf(stderr, "%d,%d-%d,%d\n", a->x1, a->y1, a->x2, a->y2);
   for(int y = a->y1; y <= a->y2; y++)
     for(int x = a->x1; x <= a->x2; x++)
       fb[y * W + x] = *c++;
@@ -178,7 +183,10 @@ int main(void)
   run_ms(1000);           save("w0_boot");
   scene = 0; run_ms(3000); save("w1_looking");
 
-  scene = 1; scene_start = sim_ms; run_ms(21000); save("w2_armed");
+  scene = 1; scene_start = sim_ms; run_ms(18000);
+  flushed_px = 0; run_ms(3000);
+  printf("live screen: %.1f full screens redrawn per second\n", flushed_px / 3.0 / (W * H));
+  save("w2_armed");
   scene = 2; scene_start = sim_ms; run_ms(2500);  save("w3_knock");
   scene = 3; scene_start = sim_ms; run_ms(7000);  save("w4_pull");
   scene = 4; scene_start = sim_ms; run_ms(1500);  save("w5_strike");
