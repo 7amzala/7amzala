@@ -156,6 +156,29 @@ static void press(int x, int y)
   touch_down = 0; run_ms(200);
 }
 
+// finger from (x1,y) to (x2,y) in 250 ms
+static void swipe(int x1, int x2, int y)
+{
+  touch_y = y;
+  touch_down = 1;
+
+  for(int i = 0; i <= 10; i++)
+  {
+    touch_x = x1 + (x2 - x1) * i / 10;
+    run_ms(25);
+  }
+
+  touch_down = 0;
+  run_ms(200);
+}
+
+static void hold(int x, int y, int ms)
+{
+  touch_x = x; touch_y = y;
+  touch_down = 1; run_ms(ms);
+  touch_down = 0; run_ms(200);
+}
+
 int main(void)
 {
   lv_init();
@@ -201,9 +224,20 @@ int main(void)
   scene = 6; run_ms(500); press(233, 360);   // SKIP
   press(233, 120);                           // empty spot: nothing
 
-  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull" };
-  int ok = sent_n == 5;
-  for(int i = 0; i < 5 && i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(strcmp(sent[i], want[i])) ok = 0; }
+  // swipe pages (on the live screen)
+  scene = 1; run_ms(500);
+  swipe(380, 120, 300);  save("w8_sea");     // left: sea state
+  swipe(380, 120, 300);  save("w9_relearn"); // left again: relearn
+  hold(233, 300, 800);                       // short press: nothing
+  hold(233, 300, 2300);                      // hold 2 s: /relearn, back to main
+  swipe(380, 120, 300); swipe(120, 380, 300); // left then right: main again
+  printf("before last swipe: %d sent\n", sent_n);
+  swipe(380, 120, 405);                      // swipe starting on REEL IN: no /reelin
+  printf("after last swipe: %d sent\n", sent_n);
+
+  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn" };
+  int ok = sent_n == 6;
+  for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 6 || strcmp(sent[i], want[i])) ok = 0; }
   printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", sent_n, ok ? "all buttons send the right request" : "wrong");
   return 0;
 }

@@ -6,6 +6,10 @@
 //   buttons to answer (REEL IN, I'M WATCHING, READY, SKIP).
 // The outer ring: cyan = all fine, orange = something building, red = strike.
 //
+// Swipe left: SEA STATE (waves, wind), left again: RELEARN THE SEA (hold
+// the button 2 s). Swipe right: back. A strike always jumps to the main
+// page; after 30 s on another page the watch goes back by itself.
+//
 // Data comes from the rod over Bluetooth (ble_link.cpp, "/watch").
 // =====================================================
 
@@ -63,6 +67,10 @@
 // Slow pull / drop-back shown (orange ring, title) from this % (was 30)
 #define PULL_SHOW   10
 
+#define SWIPE_PX     70           // finger moved this far sideways = swipe
+#define PAGE_BACK_MS 30000        // other page: back to the main page after this
+#define HOLD_MS      2000         // RELEARN: hold this long
+
 #define GRAPH_POINTS 200          // 200 x 100 ms = 20 s
 #define KNOCK_LIMIT  100          // knock limit drawn at 100 on the graph (knock: top half, tilt: bottom half)
 #define BOOT_MS      2500
@@ -74,7 +82,9 @@ typedef enum
   MODE_LIVE,
   MODE_STRIKE,
   MODE_REELED,
-  MODE_PULLTEST
+  MODE_PULLTEST,
+  MODE_SEA,
+  MODE_RELEARN
 } ui_mode_t;
 
 static ui_mode_t mode = MODE_BOOT;
@@ -103,6 +113,17 @@ static lv_obj_t *btn1_label;
 static lv_obj_t *btn2;
 static lv_obj_t *btn2_label;
 static lv_obj_t *bar;
+static lv_obj_t *dots[3];
+static lv_obj_t *sea_cap[2];
+static lv_obj_t *sea_val[2];
+static lv_obj_t *sea_bar[2][4];
+static lv_obj_t *hint;
+
+// pages: 0 main, 1 sea state, 2 relearn
+static int page = 0;
+static uint32_t page_since = 0;
+static bool swiped = false;           // this touch was a swipe: no button press
+static uint32_t hold_from = 0;
 
 static const char *btn1_path = "";
 static const char *btn2_path = "";
@@ -164,7 +185,7 @@ static void button_clicked(lv_event_t *e)
 {
   const char *path = (const char *)lv_event_get_user_data(e);
 
-  if(path != NULL && path[0] != 0)
+  if(path != NULL && path[0] != 0 && !swiped)
     ble_link_command(path);
 }
 
@@ -256,6 +277,16 @@ static void layout(ui_mode_t m)
   show(cap2, live);
   show(val2, live);
   show(bar, m == MODE_PULLTEST);
+  show(hint, m == MODE_RELEARN);
+
+  for(int r = 0; r < 2; r++)
+  {
+    show(sea_cap[r], m == MODE_SEA);
+    show(sea_val[r], m == MODE_SEA);
+
+    for(int i = 0; i < 4; i++)
+      show(sea_bar[r][i], m == MODE_SEA);
+  }
   show(btn1, false);
   show(btn2, false);
 
@@ -266,6 +297,9 @@ static void layout(ui_mode_t m)
 
   for(int i = 0; i < 4; i++)
     show(bars[i], top);
+
+  for(int i = 0; i < 3; i++)
+    show(dots[i], top && m != MODE_STRIKE);
 
   show(ring, m != MODE_BOOT);
 
@@ -296,6 +330,18 @@ static void layout(ui_mode_t m)
       lv_obj_set_style_text_font(title, FONT_BIG, 0);
       lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 120);
       lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 180);
+      break;
+
+    case MODE_SEA:
+      lv_obj_set_style_text_font(title, FONT_BIG, 0);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 84);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 128);
+      break;
+
+    case MODE_RELEARN:
+      lv_obj_set_style_text_font(title, FONT_BIG, 0);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 92);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 196);
       break;
 
     case MODE_PULLTEST:
@@ -332,6 +378,120 @@ static void top_icons(const ble_link_status_t *s)
 
   set_text(bat_label, t);
   set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : COL_DIM);
+}
+
+// ---------- swipe: watch the finger (also over buttons) ----------
+
+static void swipe_timer(lv_timer_t *t)
+{
+  (void)t;
+
+  static bool down = false;
+  static lv_point_t from;
+
+  lv_indev_t *in = lv_indev_get_next(NULL);
+
+  if(in == NULL)
+    return;
+
+  lv_point_t p;
+  lv_indev_get_point(in, &p);
+  bool pressed = in->proc.state == LV_INDEV_STATE_PRESSED;
+
+  if(pressed && !down)
+  {
+    down = true;
+    from = p;
+    swiped = false;
+    return;
+  }
+
+  if(!pressed)
+  {
+    down = false;
+    return;
+  }
+
+  int dx = p.x - from.x;
+  int dy = p.y - from.y;
+
+  if(swiped || (dx < SWIPE_PX && dx > -SWIPE_PX) || (dy > 0 ? dy : -dy) > (dx > 0 ? dx : -dx))
+    return;
+
+  swiped = true;                    // one page per swipe
+  hold_from = 0;
+
+  if(mode == MODE_BOOT || mode == MODE_LOOKING || mode == MODE_STRIKE)
+    return;
+
+  if(dx < 0 && page < 2)
+    page++;
+  else if(dx > 0 && page > 0)
+    page--;
+
+  page_since = lv_tick_get();
+}
+
+static void page_dots(void)
+{
+  for(int i = 0; i < 3; i++)
+    set_bg_color(dots[i], i == page ? COL_TEXT : lv_color_hex(0x3a4458));
+}
+
+static void sea_row(int r, const char *name, int level, lv_color_t c)
+{
+  set_text(sea_val[r], name);
+  set_text_color(sea_val[r], c);
+
+  for(int i = 0; i < 4; i++)
+    set_bg_color(sea_bar[r][i], i < level + 1 ? c : lv_color_hex(0x262b36));
+}
+
+static void sea_page(const ble_link_status_t *s)
+{
+  layout(MODE_SEA);
+  ring_set(0, COL_BLUE);
+
+  set_text(title, "SEA STATE");
+  set_text_color(title, COL_TEXT);
+  set_text(subtitle, "from the rod's sensor");
+  set_text_color(subtitle, COL_DIM);
+
+  sea_row(0, wave_name(s->wave), s->wave, COL_CYAN);
+  sea_row(1, wind_name(s->wind), s->wind, COL_VIOLET);
+}
+
+static void relearn_page(const ble_link_status_t *s, uint32_t now)
+{
+  layout(MODE_RELEARN);
+
+  set_text(title, "RELEARN\nTHE SEA");
+  set_text_color(title, COL_ORANGE);
+  set_text(subtitle, "use after moving the rod\nor when the sea changes a lot");
+  set_text_color(subtitle, COL_DIM);
+
+  bool holding = lv_obj_has_state(btn1, LV_STATE_PRESSED) && !swiped;
+
+  if(!holding)
+    hold_from = 0;
+  else if(hold_from == 0)
+    hold_from = now;
+
+  uint32_t held = hold_from ? now - hold_from : 0;
+
+  if(held >= HOLD_MS)
+  {
+    ble_link_command("/relearn");
+    hold_from = 0;
+    swiped = true;                    // this touch is used up: letting go presses nothing
+    page = 0;                         // back to the main page: it shows LEARNING
+    return;
+  }
+
+  ring_set((int)(held * 100 / HOLD_MS), COL_ORANGE);
+  set_button(btn1, btn1_label, &btn1_path, s->command_busy ? "..." : holding ? "KEEP HOLDING" : "RELEARN",
+             "", 300, 260, 70, holding ? COL_ORANGE : COL_BLUE, holding ? lv_color_hex(0x221400) : COL_TEXT);
+  set_text(hint, "hold 2 seconds,\nthen keep the rod still");
 }
 
 static void ui_timer(lv_timer_t *t)
@@ -379,6 +539,25 @@ static void ui_timer(lv_timer_t *t)
   }
 
   top_icons(&s);
+
+  if(s.strike || (page != 0 && now - page_since > PAGE_BACK_MS))
+    page = 0;
+
+  page_dots();
+
+  if(page == 1)
+  {
+    sea_page(&s);
+    return;
+  }
+
+  if(page == 2)
+  {
+    relearn_page(&s, now);
+
+    if(page == 2)
+      return;
+  }
 
   // a new knock: show it for 3 s
   if(last_knock_id >= 0 && s.knockid != last_knock_id)
@@ -647,6 +826,44 @@ void watch_ui_create(void)
   lv_obj_set_style_bg_color(bar, lv_color_hex(0x262b36), LV_PART_MAIN);
   lv_obj_set_style_bg_color(bar, COL_ORANGE, LV_PART_INDICATOR);
 
+  // sea state page: two rows (name + 4 level blocks)
+  const char *sea_caps[2] = { "WAVES", "WIND" };
+
+  for(int r = 0; r < 2; r++)
+  {
+    sea_cap[r] = label(scr, FONT_TINY, COL_DIM);
+    lv_label_set_text(sea_cap[r], sea_caps[r]);
+    lv_obj_align(sea_cap[r], LV_ALIGN_TOP_LEFT, 92, 176 + r * 86);
+
+    sea_val[r] = label(scr, FONT_MID, COL_CYAN);
+    lv_obj_align(sea_val[r], LV_ALIGN_TOP_LEFT, 92, 198 + r * 86);
+
+    for(int i = 0; i < 4; i++)
+    {
+      sea_bar[r][i] = lv_obj_create(scr);
+      lv_obj_remove_style_all(sea_bar[r][i]);
+      lv_obj_set_style_bg_opa(sea_bar[r][i], LV_OPA_COVER, 0);
+      lv_obj_set_style_radius(sea_bar[r][i], 5, 0);
+      lv_obj_set_size(sea_bar[r][i], 30, 12);
+      lv_obj_align(sea_bar[r][i], LV_ALIGN_TOP_LEFT, 236 + i * 36, 182 + r * 86);
+    }
+  }
+
+  // relearn page: small text under the button
+  hint = label(scr, FONT_TINY, COL_DIM);
+  lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 350);
+
+  // page dots at the bottom
+  for(int i = 0; i < 3; i++)
+  {
+    dots[i] = lv_obj_create(scr);
+    lv_obj_remove_style_all(dots[i]);
+    lv_obj_set_style_bg_opa(dots[i], LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(dots[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_size(dots[i], 10, 10);
+    lv_obj_align(dots[i], LV_ALIGN_TOP_MID, -20 + i * 20, 438);
+  }
+
   // buttons
   btn1 = button(&btn1_label, &btn1_path);
   btn2 = button(&btn2_label, &btn2_path);
@@ -662,4 +879,5 @@ void watch_ui_create(void)
 
   lv_timer_create(ui_timer, 100, NULL);
   lv_timer_create(graph_timer, 100, NULL);
+  lv_timer_create(swipe_timer, 20, NULL);
 }
