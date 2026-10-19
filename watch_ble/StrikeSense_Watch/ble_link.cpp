@@ -61,6 +61,8 @@ static uint32_t lastAskedAt = 0;
 static volatile bool wantLast = false;
 static ble_last_strike_t lastStrike;   // guarded by mux
 
+static uint32_t lastLiveMs = 0;          // last live message from the rod (0 = none yet)
+
 static uint32_t lastRssi = 0;
 static int rssi = 0;
 
@@ -433,6 +435,41 @@ static void readAnswers()
     int code = 0;
     long len = 0;
 
+    // the rod's live message (10 a second, for everyone): "#live 200 <len>"
+    bool live = inbox.compare(start + 1, 5, "live ") == 0;
+
+    if(live)
+    {
+      if(sscanf(inbox.c_str() + start + 6, "%d %ld", &code, &len) != 2 || len < 0 || len > 4000)
+      {
+        inbox.erase(0, nl + 1);
+        continue;
+      }
+
+      if(inbox.size() - (nl + 1) < (size_t)len)
+      {
+        inbox.erase(0, start);      // wait for the rest
+        return;
+      }
+
+      std::string body = inbox.substr(nl + 1, len);
+      inbox.erase(0, nl + 1 + len);
+
+      if(code == 200)
+      {
+        gotWatchData(body);
+        lastLiveMs = millis();
+
+        if(!firstAnswerLogged)
+        {
+          firstAnswerLogged = true;
+          Serial.printf("[BLE] live data OK (rod sends it by itself): %s\n", body.c_str());
+        }
+      }
+
+      continue;
+    }
+
     if(sscanf(inbox.c_str() + start + 1, "%ld %d %ld", &id, &code, &len) != 3 || len < 0 || len > 200000)
     {
       inbox.erase(0, nl + 1);
@@ -485,6 +522,7 @@ static void lost()
   askId = -1;
   cmdId = -1;
   lastId = -1;
+  lastLiveMs = 0;
   inbox.clear();
 
   portENTER_CRITICAL(&mux);
@@ -644,7 +682,10 @@ void ble_link_poll(void)
          shared.knocks > 0 || commandBusy || strcmp(shared.state, "monitoring") != 0;
   portEXIT_CRITICAL(&mux);
 
-  if(askId < 0 && now - lastAsk >= (busy ? ASK_FAST_MS : ASK_CALM_MS))
+  // the rod sends live messages by itself: no need to ask (older rods: ask)
+  bool liveOn = lastLiveMs != 0 && now - lastLiveMs < 1000;
+
+  if(!liveOn && askId < 0 && now - lastAsk >= (busy ? ASK_FAST_MS : ASK_CALM_MS))
   {
     askId = newId();
     askedAt = now;

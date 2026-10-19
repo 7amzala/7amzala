@@ -102,6 +102,7 @@ final class RodLink
     private volatile int payload = 20;                  // bytes per Bluetooth piece
     private volatile int rssi = 0;
     private volatile long lastDataAt = 0;
+    private static final int LIVE_ID = -1;      // "#live" messages (not an answer to a request)
     private volatile boolean fast = false;
     private volatile Listener listener;
 
@@ -724,7 +725,8 @@ final class RodLink
 
                 try
                 {
-                    id = Integer.parseInt(head[0]);
+                    // "#live 200 <len>": the rod's live message, 10 a second, for everyone
+                    id = head[0].equals("live") ? LIVE_ID : Integer.parseInt(head[0]);
                     code = Integer.parseInt(head[1]);
                     len = Integer.parseInt(head[2]);
                 }
@@ -759,6 +761,22 @@ final class RodLink
 
     private void answer(int id, int code, byte[] body)
     {
+        // the live message drives the background alarm: no need to ask for /data
+        if(id == LIVE_ID)
+        {
+            if(code == 200)
+            {
+                lastDataAt = System.currentTimeMillis();
+
+                Listener l = listener;
+
+                if(l != null)
+                    l.onData(new String(body, StandardCharsets.UTF_8));
+            }
+
+            return;
+        }
+
         Pending p = pending.get(id);
 
         if(p == null)

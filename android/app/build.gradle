@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 2
-        versionName "2.0 Bluetooth"
+        versionCode 3
+        versionName "2.1 Bluetooth (live)"
     }
 
     // The app's own signing key (a personal app, not on the Play Store).

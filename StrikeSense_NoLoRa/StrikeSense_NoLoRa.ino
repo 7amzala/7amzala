@@ -35,6 +35,14 @@ class BleServer
 public:
   typedef void (*Handler)();
 
+  typedef String (*LiveBuilder)();
+
+  // The live message: built and sent to everyone every LIVE_MS
+  void onLive(LiveBuilder b)
+  {
+    liveBuilder = b;
+  }
+
   void on(const char* path, Handler h)
   {
     if(routeCount < MAX_ROUTES)
@@ -131,6 +139,16 @@ public:
       return;
     }
 
+    // between answers: the live message, 10 times a second
+    if(clients > 0 && liveBuilder != nullptr && millis() - lastLive >= LIVE_MS)
+    {
+      lastLive = millis();
+      String body = liveBuilder();
+      out = "#live 200 " + String((unsigned long)body.length()) + "\n" + body;
+      outPos = 0;
+      return;
+    }
+
     char line[REQ_MAX];
 
     if(!popLine(line))
@@ -180,6 +198,7 @@ private:
   static const int REQ_QUEUE = 8;
   static const int REQ_MAX = 200;
   static const unsigned long PIECE_GAP_US = 4000;
+  static const unsigned long LIVE_MS = 100;  // live message 10 times a second
 
   struct Route
   {
@@ -210,6 +229,8 @@ private:
   size_t chunk = 20;
   size_t chunkMin = 512;
   unsigned long lastPiece = 0;
+  unsigned long lastLive = 0;
+  LiveBuilder liveBuilder = nullptr;
   unsigned long lastAdvertiseCheck = 0;
   String requestId = "0";
 
@@ -7748,8 +7769,9 @@ void addField(String& json, const char* name, bool value)
   json += value ? "true" : "false";
 }
 
-// Only what the watch shows (much smaller than /data)
-void handleWatch()
+// Only what the watch shows (much smaller than /data). Also the live
+// message the rod sends to everyone 10 times a second.
+String watchJson()
 {
   String json;
   json.reserve(320);
@@ -7782,7 +7804,12 @@ void handleWatch()
 
   json += "}";
 
-  server.send(200, "application/json", json);
+  return json;
+}
+
+void handleWatch()
+{
+  server.send(200, "application/json", watchJson());
 }
 
 // The watch's LAST STRIKE page (fresh after a rod restart)
@@ -8008,6 +8035,9 @@ void setup()
   server.on("/logo.webp", handleLogo);
   server.on("/data", handleData);
   server.on("/watch", handleWatch);
+#if defined(ESP32)
+  server.onLive(watchJson);
+#endif
   server.on("/laststrike", handleLastStrike);
   server.on("/watching", handleWatching);
   server.on("/reelin", handleReelIn);

@@ -199,6 +199,28 @@ int main()
   bool watchSaw = a.body.find("\"energy\":0.0000") == std::string::npos;
   check(phoneSaw && watchSaw, "a knock reaches both phone and watch (separate peaks)");
 
+  // the live message: 10 a second, for everyone, between answers
+  {
+    std::string all;
+    size_t from = txc->notified.size();
+    step(2);
+    for (size_t i = from; i < txc->notified.size(); i++) all += txc->notified[i];
+    int lives = 0;
+    std::string body;
+    for (size_t p = all.find("#live 200 "); p != std::string::npos; p = all.find("#live 200 ", p + 1)) {
+      lives++;
+      size_t nl = all.find('\n', p);
+      long len = atol(all.c_str() + p + 10);
+      if (nl != std::string::npos && all.size() >= nl + 1 + len) body = all.substr(nl + 1, len);
+    }
+    printf("        %d live messages in 2 s, last: %zu bytes\n", lives, body.size());
+    check(lives >= 18 && lives <= 21, "rod sends the live message 10 times a second by itself");
+    check(!body.empty() && body.front() == '{' && body.back() == '}' && body.find("\"strike\"") != std::string::npos &&
+          body.find("\"strikeid\"") != std::string::npos && body.find("\"bat\"") != std::string::npos,
+          "live message: complete, has strike, strike id, battery (phone alarm + watch)");
+  }
+  check(ask(47, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "answers still complete between live messages");
+
   // the phone leaves: the watch keeps working
   srv->cb->onDisconnect(srv);
   step(0.2);
