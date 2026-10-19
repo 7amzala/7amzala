@@ -218,7 +218,7 @@ private:
 
     void onConnect(BLEServer*) override
     {
-      owner->clients++;
+      owner->clients = owner->clients + 1;
       owner->chunk = 20;               // until the newcomer says its MTU
       owner->advertiseAgain = true;
       Serial.printf("Bluetooth: connected (%d)\n", (int)owner->clients);
@@ -227,7 +227,7 @@ private:
     void onDisconnect(BLEServer*) override
     {
       if(owner->clients > 0)
-        owner->clients--;
+        owner->clients = owner->clients - 1;
 
       owner->advertiseAgain = true;
       Serial.printf("Bluetooth: disconnected (%d left)\n", (int)owner->clients);
