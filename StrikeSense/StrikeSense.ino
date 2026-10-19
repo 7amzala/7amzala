@@ -44,7 +44,33 @@ LIS3DH myIMU(I2C_MODE, 0x19);
 #define BLE_RX_UUID      "6e8a0002-5f2d-4c8e-9a51-2b7c1d3e4f60"   // phone -> rod
 #define BLE_TX_UUID      "6e8a0003-5f2d-4c8e-9a51-2b7c1d3e4f60"   // rod -> phone
 
-static portMUX_TYPE bleLock = portMUX_INITIALIZER_UNLOCKED;   // phone writes vs loop()
+static portMUX_TYPE bleLock = portMUX_INITIALIZER_UNLOCKED;
+
+#if defined(CONFIG_NIMBLE_ENABLED) && !defined(BLE_MOCK)
+#include "host/ble_hs.h"
+
+// One piece to one connection. false = the stack is full right now (try again)
+static bool bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
+{
+  os_mbuf* om = ble_hs_mbuf_from_flat(data, length);
+
+  if(om == nullptr)
+    return false;
+
+  return ble_gatts_notify_custom(conn, c->getHandle(), om) == 0;   // om is always used up
+}
+
+static size_t bleMtu(uint16_t conn)
+{
+  return ble_att_mtu(conn);
+}
+
+static bool bleConnected(uint16_t conn)
+{
+  ble_gap_conn_desc d;
+  return ble_gap_conn_find(conn, &d) == 0;
+}
+#endif   // phone writes vs loop()
 
 class BleServer
 {
@@ -127,15 +153,46 @@ public:
       if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
       {
         size_t n = out.length() - outPos;
-
-        if(n > chunk)
-          n = chunk;
-
-        tx->setValue((uint8_t*)out.c_str() + outPos, n);
-        tx->notify();
-
-        outPos += n;
         lastPiece = micros();
+
+#if defined(CONFIG_NIMBLE_ENABLED)
+        if(replyConn != NO_CONN)
+        {
+          // only the phone/watch that asked, in pieces of its own size
+          size_t mtu = bleMtu(replyConn);
+          size_t piece = mtu > 23 ? mtu - 3 : 20;
+
+          if(piece > 512)
+            piece = 512;
+
+          if(n > piece)
+            n = piece;
+
+          if(!bleConnected(replyConn))
+          {
+            outPos = out.length();               // it has gone: drop the answer
+          }
+          else if(bleNotifyTo(tx, replyConn, (const uint8_t*)out.c_str() + outPos, n))
+          {
+            outPos += n;
+            replyTries = 0;
+          }
+          else if(++replyTries > 250)            // ~1 s full: give up this answer
+          {
+            outPos = out.length();
+          }
+        }
+        else
+#endif
+        {
+          if(n > chunk)
+            n = chunk;
+
+          tx->setValue((uint8_t*)out.c_str() + outPos, n);
+          tx->notify();
+
+          outPos += n;
+        }
       }
 
       if(outPos >= out.length() || clients == 0)
@@ -149,9 +206,13 @@ public:
 
     char line[REQ_MAX];
 
-    if(!popLine(line))
+    uint16_t conn = NO_CONN;
+
+    if(!popLine(line, &conn))
       return;
 
+    replyConn = conn;
+    replyTries = 0;
     dispatch(line);
   }
 
@@ -219,6 +280,13 @@ private:
   int qTail = 0;
   char partial[REQ_MAX];
   int partialLen = 0;
+  uint16_t queueConn[REQ_QUEUE];
+  uint16_t partialConn = 0xFFFF;
+
+  // who the answer being sent is for
+  static const uint16_t NO_CONN = 0xFFFF;
+  uint16_t replyConn = 0xFFFF;
+  int replyTries = 0;
 
   // Answer being sent
   String out;
@@ -269,16 +337,33 @@ private:
       auto v = c->getValue();
 
       for(size_t i = 0; i < v.length(); i++)
-        owner->received(v[i]);
+        owner->received(v[i], NO_CONN);
     }
+
+#if defined(CONFIG_NIMBLE_ENABLED)
+    // NimBLE also says which connection wrote it: answer only that one
+    void onWrite(BLECharacteristic* c, ble_gap_conn_desc* desc) override
+    {
+      auto v = c->getValue();
+
+      for(size_t i = 0; i < v.length(); i++)
+        owner->received(v[i], desc != nullptr ? desc->conn_handle : NO_CONN);
+    }
+#endif
 
   private:
     BleServer* owner;
   };
 
-  void received(char ch)
+  void received(char ch, uint16_t conn)
   {
     portENTER_CRITICAL(&bleLock);
+
+    // a line is written by one phone/watch: another one starting = new line
+    if(partialLen > 0 && conn != partialConn)
+      partialLen = 0;
+
+    partialConn = conn;
 
     if(ch == '\n')
     {
@@ -288,6 +373,7 @@ private:
       {
         memcpy(queue[qHead], partial, partialLen);
         queue[qHead][partialLen] = 0;
+        queueConn[qHead] = conn;
         qHead = next;
       }
 
@@ -301,7 +387,7 @@ private:
     portEXIT_CRITICAL(&bleLock);
   }
 
-  bool popLine(char* line)
+  bool popLine(char* line, uint16_t* conn)
   {
     bool got = false;
 
@@ -310,6 +396,7 @@ private:
     if(qTail != qHead)
     {
       memcpy(line, queue[qTail], REQ_MAX);
+      *conn = queueConn[qTail];
       qTail = (qTail + 1) % REQ_QUEUE;
       got = true;
     }

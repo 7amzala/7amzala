@@ -67,15 +67,32 @@ void readNotifications()
   }
 }
 
-// The phone writes a request, in 20-byte pieces like a small Bluetooth packet
+const uint16_t PHONE = 1, WATCH = 2;     // connection numbers
+
+// The phone (or watch, ids from 500000) writes a request, in 20-byte pieces
 void write(int id, const std::string& path)
 {
   std::string line = std::to_string(id) + "|" + path + "\n";
+  ble_gap_conn_desc d = { (uint16_t)(id >= 500000 ? WATCH : PHONE) };
 
   for (size_t i = 0; i < line.size(); i += 20) {
     rxc->value = line.substr(i, 20);
-    rxc->cb->onWrite(rxc);
+    rxc->cb->onWrite(rxc, &d);
   }
+}
+
+// Did a connection receive an answer header for an id of the other device?
+bool gotOthers(uint16_t conn)
+{
+  std::string all;
+  for (auto& p : mockConns().notified[conn]) all += p;
+  for (size_t i = all.find('#'); i != std::string::npos; i = all.find('#', i + 1)) {
+    long id = atol(all.c_str() + i + 1);
+    size_t nl = all.find('\n', i);
+    if (nl == std::string::npos || nl - i > 24) continue;   // not a header
+    if (conn == PHONE ? id >= 500000 : id < 500000) return true;
+  }
+  return false;
 }
 
 bool ask(int id, const std::string& path, Answer& a, double timeout = 5)
@@ -104,6 +121,7 @@ int main()
   printf("\n=== BLUETOOTH LINK ===\n");
   check(BLEDevice::adv().started == 1, "rod advertises after start-up");
 
+  mockConns().mtu[PHONE] = 183;                  // pieces of 180 bytes
   srv->cb->onConnect(srv);
   step(1);
   check(BLEDevice::adv().started == 2, "phone connected: rod keeps advertising so the watch can join");
@@ -152,6 +170,7 @@ int main()
   write(20, "/");
   step(0.2);
   int advBeforeLeave = BLEDevice::adv().started;
+  mockConns().down[PHONE] = true;
   srv->cb->onDisconnect(srv);
   step(0.2);
   check(BLEDevice::adv().started == advBeforeLeave + 1, "after a disconnect the rod advertises again");
@@ -163,6 +182,8 @@ int main()
   // phone comes back (a new connection: the app starts with an empty buffer)
   inbox.clear();
   seen = txc->notified.size();
+  mockConns().down[PHONE] = false;
+  mockConns().mtu[PHONE] = 247;
   srv->cb->onConnect(srv);
   step(0.2);
   check(ask(21, "/mtu?v=244", a) && ask(22, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "reconnect: /data works again");
@@ -174,13 +195,14 @@ int main()
   // ---------- the watch joins as a second device ----------
   printf("\n=== PHONE + WATCH ===\n");
   int advBefore = BLEDevice::adv().started;
+  mockConns().mtu[WATCH] = 203;
   srv->cb->onConnect(srv);                      // watch connects
   step(0.1);
   check(BLEDevice::adv().started == advBefore, "phone + watch connected: full, the rod stops advertising");
 
   check(ask(500001, "/mtu?v=200", a) && a.code == 200, "watch says its MTU");
   check(ask(25, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "phone /data still complete with both connected");
-  printf("        biggest piece now %zu bytes (smallest MTU wins)\n", biggestPiece);
+  printf("        biggest piece now %zu bytes (each device its own size)\n", biggestPiece);
 
   ok = ask(500002, "/watch", a);
   check(ok && a.code == 200 && a.body.front() == '{' && a.body.back() == '}', "/watch: complete JSON");
@@ -199,7 +221,18 @@ int main()
   bool watchSaw = a.body.find("\"energy\":0.0000") == std::string::npos;
   check(phoneSaw && watchSaw, "a knock reaches both phone and watch (separate peaks)");
 
+  // each answer only to the device that asked
+  for (int i = 0; i < 20; i++) { write(27 + i, "/data"); write(500100 + i, "/watch"); step(0.1); readNotifications(); }
+  check(!gotOthers(PHONE), "phone gets only its own answers (none of the watch's)");
+  check(!gotOthers(WATCH), "watch gets only its own answers (none of the phone's)");
+  check(answers.count(46) && answers.count(500119), "both kept getting answers, 10 a second each");
+
+  // the Bluetooth stack is full for a moment: the piece is sent again, nothing lost
+  mockConns().refuseNext = 30;
+  check(ask(60, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "stack full for a moment: answer still complete");
+
   // the phone leaves: the watch keeps working
+  mockConns().down[PHONE] = true;
   srv->cb->onDisconnect(srv);
   step(0.2);
   check(ask(500004, "/watch", a) && a.code == 200, "phone gone: watch still answered");

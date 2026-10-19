@@ -15,7 +15,8 @@ static BLEUUID SERVICE_UUID("6e8a0001-5f2d-4c8e-9a51-2b7c1d3e4f60");
 static BLEUUID RX_UUID("6e8a0002-5f2d-4c8e-9a51-2b7c1d3e4f60");   // watch -> rod
 static BLEUUID TX_UUID("6e8a0003-5f2d-4c8e-9a51-2b7c1d3e4f60");   // rod -> watch
 
-static const uint32_t ASK_EVERY_MS = 100;        // 10 times a second (as the phone)
+static const uint32_t ASK_FAST_MS = 100;         // 10 times a second when something moves
+static const uint32_t ASK_CALM_MS = 200;         // 5 times a second when all is calm (less radio for the phone)
 static const uint32_t ANSWER_TIMEOUT_MS = 600;   // a lost answer: ask again soon
 static const uint32_t COMMAND_TIMEOUT_MS = 2000;
 static const int COMMAND_TRIES = 3;
@@ -635,7 +636,15 @@ void ble_link_poll(void)
   if(askId >= 0 && now - askedAt > ANSWER_TIMEOUT_MS)
     askId = -1;
 
-  if(askId < 0 && now - lastAsk >= ASK_EVERY_MS)
+  // something going on (knock, pull, drop-back, strike, learning...): ask fast
+  bool busy;
+
+  portENTER_CRITICAL(&mux);
+  busy = shared.strike || shared.bucket >= 5 || shared.drop >= 5 || shared.dropwatch ||
+         shared.knocks > 0 || commandBusy || strcmp(shared.state, "monitoring") != 0;
+  portEXIT_CRITICAL(&mux);
+
+  if(askId < 0 && now - lastAsk >= (busy ? ASK_FAST_MS : ASK_CALM_MS))
   {
     askId = newId();
     askedAt = now;
