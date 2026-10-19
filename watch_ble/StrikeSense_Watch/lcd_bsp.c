@@ -83,11 +83,28 @@ void lcd_lvgl_Init(void)
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_disp_on_off(panel_handle, true));
 
   lv_init();
-  lv_color_t *buf1 = heap_caps_malloc(EXAMPLE_LCD_H_RES * EXAMPLE_LVGL_BUF_HEIGHT * sizeof(lv_color_t), MALLOC_CAP_DMA);
+
+  // Drawing buffers in fast (DMA) memory. Bluetooth needs some of that
+  // memory too, so use smaller buffers than the demo (1/8 of the screen,
+  // about 54 KB each) and step down instead of crashing if memory is short.
+  static const int heights[] = { EXAMPLE_LCD_V_RES / 8 & ~1, EXAMPLE_LCD_V_RES / 16 & ~1, EXAMPLE_LCD_V_RES / 32 & ~1 };
+  lv_color_t *buf1 = NULL;
+  lv_color_t *buf2 = NULL;
+  int lines = 0;
+
+  for(int i = 0; i < 3 && buf1 == NULL; i++)
+  {
+    lines = heights[i];
+    buf1 = heap_caps_malloc(EXAMPLE_LCD_H_RES * lines * sizeof(lv_color_t), MALLOC_CAP_DMA);
+  }
+
   assert(buf1);
-  lv_color_t *buf2 = heap_caps_malloc(EXAMPLE_LCD_H_RES * EXAMPLE_LVGL_BUF_HEIGHT * sizeof(lv_color_t), MALLOC_CAP_DMA);
-  assert(buf2);
-  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, EXAMPLE_LCD_H_RES * EXAMPLE_LVGL_BUF_HEIGHT);
+  buf2 = heap_caps_malloc(EXAMPLE_LCD_H_RES * lines * sizeof(lv_color_t), MALLOC_CAP_DMA);   // optional: smoother if there is room
+
+  printf("[LCD] draw buffers: %d lines x %s, free DMA memory left: %u bytes\n",
+         lines, buf2 ? "2" : "1", (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA));
+
+  lv_disp_draw_buf_init(&disp_buf, buf1, buf2, EXAMPLE_LCD_H_RES * lines);
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = EXAMPLE_LCD_H_RES;
   disp_drv.ver_res = EXAMPLE_LCD_V_RES;
