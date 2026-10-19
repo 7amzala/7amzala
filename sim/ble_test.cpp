@@ -228,8 +228,15 @@ int main()
   check(answers.count(46) && answers.count(500119), "both kept getting answers, 10 a second each");
 
   // the Bluetooth stack is full for a moment: the piece is sent again, nothing lost
-  mockConns().refuseNext = 30;
-  check(ask(60, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "stack full for a moment: answer still complete");
+  mockConns().refuseNext = 2;
+  check(ask(60, "/data", a) && a.body.front() == '{' && a.body.back() == '}' && !server.sendsToAll(),
+        "stack full for a moment: piece sent again, answer complete");
+
+  // sending to one device keeps failing: back to sending to all, still works
+  mockConns().refuseNext = 3;
+  check(ask(61, "/data", a) && a.body.front() == '{' && a.body.back() == '}' && server.sendsToAll(),
+        "send to one device fails: falls back to send-to-all, answer complete");
+  check(ask(500200, "/watch", a) && a.code == 200, "after the fallback the watch is still answered");
 
   // the phone leaves: the watch keeps working
   mockConns().down[PHONE] = true;

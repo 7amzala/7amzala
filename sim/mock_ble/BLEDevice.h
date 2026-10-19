@@ -97,13 +97,13 @@ struct MockConns
 
 inline MockConns& mockConns() { static MockConns m; return m; }
 
-inline bool bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
+inline int bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
 {
-  if(mockConns().refuseNext > 0) { mockConns().refuseNext--; return false; }
+  if(mockConns().refuseNext > 0) { mockConns().refuseNext--; return 6; }   // 6 = BLE_HS_ENOMEM
   std::string piece((const char*)data, length);
   mockConns().notified[conn].push_back(piece);
   c->notified.push_back(piece);                            // also the all-in-one log the test reads
-  return true;
+  return 0;
 }
 
 inline size_t bleMtu(uint16_t conn)

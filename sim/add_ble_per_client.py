@@ -49,15 +49,15 @@ public:
   // (inside the class: plain functions up here would make the Arduino IDE
   // put its function list before Vec3 is known)
 
-  // One piece to one connection. false = the stack is full right now (try again)
-  static bool bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
+  // One piece to one connection. 0 = sent, else the Bluetooth stack's error code
+  static int bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
   {
     os_mbuf* om = ble_hs_mbuf_from_flat(data, length);
 
     if(om == nullptr)
-      return false;
+      return -1;                                                  // no memory right now
 
-    return ble_gatts_notify_custom(conn, c->getHandle(), om) == 0;   // om is always used up
+    return ble_gatts_notify_custom(conn, c->getHandle(), om);     // om is always used up
   }
 
   static size_t bleMtu(uint16_t conn)
@@ -181,7 +181,8 @@ rep('''  char partial[REQ_MAX];
   // who the answer being sent is for
   static const uint16_t NO_CONN = 0xFFFF;
   uint16_t replyConn = 0xFFFF;
-  int replyTries = 0;''')
+  int replyTries = 0;
+  bool directOff = false;                // sending to one device failed: send to all''')
 
 # ---------- send each piece to the asker only ----------
 rep('''      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
@@ -202,7 +203,7 @@ rep('''      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
         lastPiece = micros();
 
 #if defined(CONFIG_NIMBLE_ENABLED)
-        if(replyConn != NO_CONN)
+        if(replyConn != NO_CONN && !directOff)
         {
           // only the phone/watch that asked, in pieces of its own size
           size_t mtu = bleMtu(replyConn);
@@ -214,18 +215,23 @@ rep('''      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
           if(n > piece)
             n = piece;
 
+          int rc = 0;
+
           if(!bleConnected(replyConn))
           {
             outPos = out.length();               // it has gone: drop the answer
           }
-          else if(bleNotifyTo(tx, replyConn, (const uint8_t*)out.c_str() + outPos, n))
+          else if((rc = bleNotifyTo(tx, replyConn, (const uint8_t*)out.c_str() + outPos, n)) == 0)
           {
             outPos += n;
             replyTries = 0;
           }
-          else if(++replyTries > 250)            // ~1 s full: give up this answer
+          else if(++replyTries >= 3)
           {
-            outPos = out.length();
+            // sending to one device does not work here: back to sending to all
+            directOff = true;
+            replyTries = 0;
+            Serial.printf("Bluetooth: send to one device failed (error %d) - sending to all instead\\n", rc);
           }
         }
         else
@@ -240,6 +246,20 @@ rep('''      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
           outPos += n;
         }
       }''')
+
+rep('''  bool connected() const
+  {
+    return clients > 0;
+  }''', '''  bool connected() const
+  {
+    return clients > 0;
+  }
+
+  // true after sending to one device failed (then everything goes to all)
+  bool sendsToAll() const
+  {
+    return directOff;
+  }''')
 
 open(path, 'w').write(s)
 print("ok", path)
