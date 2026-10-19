@@ -1,7 +1,7 @@
 name: Rod firmware
 
-# Compiles both rod sketches for the XIAO ESP32-S3 with the ESP32 Arduino
-# core 3.x (as in the Arduino IDE), so a mistake shows up before you upload.
+# Compiles both rod sketches for the XIAO ESP32-S3 with arduino-cli (the
+# same compiler as the Arduino IDE), so a mistake shows up before you upload.
 
 on:
   push:
@@ -15,25 +15,31 @@ jobs:
   compile:
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        sketch: [StrikeSense_NoLoRa, StrikeSense]
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: arduino/setup-arduino-cli@v2
 
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Compile ${{ matrix.sketch }}
+      - name: Install the ESP32 boards and libraries
         run: |
-          pio ci ${{ matrix.sketch }} \
-            --board seeed_xiao_esp32s3 \
-            --project-option="platform=https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip" \
-            --project-option="framework=arduino" \
-            --project-option="lib_deps=sparkfun/SparkFun LIS3DH Arduino Library, jgromes/RadioLib"
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+          # "update-index" fails to unpack Arduino's index on the runners:
+          # show why, then fetch the index files directly instead
+          arduino-cli core update-index --log-level debug 2>&1 | tail -20 || true
+          mkdir -p ~/.arduino15
+          curl -fsSL https://downloads.arduino.cc/packages/package_index.json -o ~/.arduino15/package_index.json
+          curl -fsSL https://espressif.github.io/arduino-esp32/package_esp32_index.json -o ~/.arduino15/package_esp32_index.json
+
+          arduino-cli core install esp32:esp32
+          arduino-cli lib update-index
+          arduino-cli lib install "SparkFun LIS3DH Arduino Library" RadioLib
+          arduino-cli core list
+
+      - name: Compile StrikeSense_NoLoRa
+        run: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --warnings default StrikeSense_NoLoRa
+
+      - name: Compile StrikeSense (LoRa)
+        if: always()
+        run: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --warnings default StrikeSense
