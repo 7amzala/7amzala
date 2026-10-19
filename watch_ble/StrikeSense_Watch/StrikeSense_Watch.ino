@@ -21,7 +21,10 @@
 void setup()
 {
   Serial.begin(115200);
-  delay(500);
+
+  uint32_t t = millis();          // give the Serial Monitor up to 3 s to connect
+  while(!Serial && millis() - t < 3000)
+    delay(10);
 
   Touch_Init();
   lcd_lvgl_Init();          // screen + the StrikeSense screens (watch_ui.c)
