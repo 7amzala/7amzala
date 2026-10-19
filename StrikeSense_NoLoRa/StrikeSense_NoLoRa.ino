@@ -1,7 +1,9 @@
 #if defined(ESP32)
 #include <BLEDevice.h>
 #include <BLEServer.h>
+#if !defined(CONFIG_NIMBLE_ENABLED)
 #include <BLE2902.h>
+#endif
 #else
 #include <WebServer.h>        // host simulator
 #endif
@@ -59,7 +61,10 @@ public:
     rx->setCallbacks(new RxCallbacks(this));
 
     tx = service->createCharacteristic(BLE_TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
-    tx->addDescriptor(new BLE2902());
+
+#if !defined(CONFIG_NIMBLE_ENABLED)
+    tx->addDescriptor(new BLE2902());    // older ESP32 boards (Bluedroid); NimBLE adds it by itself
+#endif
 
     service->start();
 
