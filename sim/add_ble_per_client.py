@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Rod Bluetooth: each answer only to the phone/watch that asked.
+"""NOT APPLIED - kept for later. On the real rod the watch got almost no
+answers with this ("connected - waiting for data"), so the sketches use
+the send-to-all method again (see git history, 24fcced).
+
+Rod Bluetooth: each answer only to the phone/watch that asked.
 
 Before, every answer went to both connections (all notifications go to
 every subscriber), in pieces as small as the smaller MTU of the two. With

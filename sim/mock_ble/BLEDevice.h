@@ -4,13 +4,6 @@
 #include "Arduino.h"
 #include <vector>
 #include <string>
-#include <map>
-
-// Behave like NimBLE (ESP32-S3): writes say which connection wrote them,
-// answers can go to one connection only.
-#define CONFIG_NIMBLE_ENABLED 1
-#define BLE_MOCK 1
-struct ble_gap_conn_desc { uint16_t conn_handle; };
 
 typedef int portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED 0
@@ -31,7 +24,6 @@ struct BLECharacteristicCallbacks
 {
   virtual ~BLECharacteristicCallbacks() {}
   virtual void onWrite(BLECharacteristic*) {}
-  virtual void onWrite(BLECharacteristic* c, ble_gap_conn_desc*) { onWrite(c); }
 };
 
 struct BLEDescriptor { virtual ~BLEDescriptor() {} };
@@ -85,33 +77,3 @@ struct BLEDevice
   static BLEAdvertising* getAdvertising() { return &adv(); }
   static void startAdvertising() { adv().started++; }
 };
-
-// ---- one connection at a time (what NimBLE gives the rod) ----
-struct MockConns
-{
-  std::map<uint16_t, std::vector<std::string>> notified;   // per connection
-  std::map<uint16_t, size_t> mtu;                          // ATT MTU per connection
-  std::map<uint16_t, bool> down;                           // disconnected
-  int refuseNext = 0;                                      // the stack is "full" this many times
-};
-
-inline MockConns& mockConns() { static MockConns m; return m; }
-
-inline int bleNotifyTo(BLECharacteristic* c, uint16_t conn, const uint8_t* data, size_t length)
-{
-  if(mockConns().refuseNext > 0) { mockConns().refuseNext--; return 6; }   // 6 = BLE_HS_ENOMEM
-  std::string piece((const char*)data, length);
-  mockConns().notified[conn].push_back(piece);
-  c->notified.push_back(piece);                            // also the all-in-one log the test reads
-  return 0;
-}
-
-inline size_t bleMtu(uint16_t conn)
-{
-  return mockConns().mtu.count(conn) ? mockConns().mtu[conn] : 23;
-}
-
-inline bool bleConnected(uint16_t conn)
-{
-  return !mockConns().down[conn];
-}

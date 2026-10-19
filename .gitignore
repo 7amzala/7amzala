@@ -12,3 +12,4 @@ sim/watch_ui_test/obj/
 sim/watch_ui_test/*.o
 sim/watch_ui_test/host
 sim/watch_ui_test/*.raw
+__pycache__/
