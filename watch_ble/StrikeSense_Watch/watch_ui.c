@@ -60,7 +60,7 @@
 #define COL_DARK    lv_color_hex(0x5f7799)
 #define COL_BTN     lv_color_hex(0x13213f)
 
-#define GRAPH_POINTS 120          // 120 x 167 ms = 20 s
+#define GRAPH_POINTS 200          // 200 x 100 ms = 20 s
 #define KNOCK_LIMIT  100          // knock limit drawn at 100 on the graph (knock: top half, tilt: bottom half)
 #define BOOT_MS      2500
 
@@ -488,7 +488,7 @@ static void ui_timer(lv_timer_t *t)
     set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : "REEL IN", "/reelin", 405, 170, 50, COL_BTN, COL_TEXT);
 }
 
-// ---------- every 167 ms: graph (120 points = 20 s) ----------
+// ---------- every 100 ms: graph (200 points = 20 s) ----------
 
 static void graph_timer(lv_timer_t *t)
 {
@@ -616,5 +616,5 @@ void watch_ui_create(void)
   layout(MODE_BOOT);
 
   lv_timer_create(ui_timer, 100, NULL);
-  lv_timer_create(graph_timer, 167, NULL);
+  lv_timer_create(graph_timer, 100, NULL);
 }

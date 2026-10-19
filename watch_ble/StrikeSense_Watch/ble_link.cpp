@@ -6,13 +6,17 @@
 
 #include "ble_link.h"
 
+#if defined(CONFIG_NIMBLE_ENABLED)
+#include "host/ble_gap.h"
+#endif
+
 // Same as the rod (StrikeSense .ino) and the phone app (RodLink.java)
 static BLEUUID SERVICE_UUID("6e8a0001-5f2d-4c8e-9a51-2b7c1d3e4f60");
 static BLEUUID RX_UUID("6e8a0002-5f2d-4c8e-9a51-2b7c1d3e4f60");   // watch -> rod
 static BLEUUID TX_UUID("6e8a0003-5f2d-4c8e-9a51-2b7c1d3e4f60");   // rod -> watch
 
-static const uint32_t ASK_EVERY_MS = 200;        // 5 times a second
-static const uint32_t ANSWER_TIMEOUT_MS = 1500;
+static const uint32_t ASK_EVERY_MS = 100;        // 10 times a second (as the phone)
+static const uint32_t ANSWER_TIMEOUT_MS = 600;   // a lost answer: ask again soon
 static const uint32_t COMMAND_TIMEOUT_MS = 2000;
 static const int COMMAND_TRIES = 3;
 static const long FIRST_ID = 500000;             // the phone uses ids below this
@@ -443,6 +447,23 @@ static void connectToRod()
   }
 
   tx->registerForNotify(onNotify);
+
+  // Fast link, like the phone app (7.5-15 ms instead of 20-40 ms)
+#if defined(CONFIG_NIMBLE_ENABLED)
+  ble_gap_upd_params fast = {};
+  fast.itvl_min = 6;                 // x 1.25 ms
+  fast.itvl_max = 12;
+  fast.latency = 0;
+  fast.supervision_timeout = 400;    // x 10 ms
+  int rc = ble_gap_update_params(client->getConnId(), &fast);
+  Serial.printf("[BLE] fast link %s\n", rc == 0 ? "asked" : "not possible");
+#endif
+
+  // The size exchange may still be on its way
+  uint32_t waitMtu = millis();
+
+  while(client->getMTU() <= 23 && millis() - waitMtu < 1000)
+    delay(10);
 
   int mtu = client->getMTU();
   piece = mtu > 23 ? mtu - 3 : 20;
