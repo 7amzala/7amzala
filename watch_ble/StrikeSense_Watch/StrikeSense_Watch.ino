@@ -9,11 +9,14 @@
 // Partition Scheme "Huge APP (3MB No OTA/1MB SPIFFS)", PSRAM "OPI PSRAM",
 // USB CDC On Boot "Enabled" (for the [BLE] messages).
 // Library: lvgl 8.3.x (as for the Waveshare demo).
+// Optional: Pimoroni Haptic Bzzz for wrist vibration: SDA -> 43, SCL -> 44,
+// 2-5V -> 3V3, GND -> GND (see buzz.c).
 // =====================================================
 
 #include "lcd_bsp.h"
 #include "FT3168.h"
 #include "ble_link.h"
+#include "buzz.h"
 
 void setup()
 {
@@ -22,6 +25,7 @@ void setup()
 
   Touch_Init();
   lcd_lvgl_Init();          // screen + the StrikeSense screens (watch_ui.c)
+  buzz_begin();             // wrist vibration, if the Haptic Bzzz is wired (pins 43/44)
 
   ble_link_begin();         // Bluetooth to the rod
 }

@@ -10,12 +10,17 @@
 // the button 2 s). Swipe right: back. A strike always jumps to the main
 // page; after 30 s on another page the watch goes back by itself.
 //
+// Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
+// slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
+// strong buzz every 1.5 s until a button is pressed, rod lost = 3 buzzes.
+//
 // Data comes from the rod over Bluetooth (ble_link.cpp, "/watch").
 // =====================================================
 
 #include "watch_ui.h"
 #include "lvgl.h"
 #include "ble_link.h"
+#include "buzz.h"
 #include "strikesense_boot_fixed.h"
 #include <stdio.h>
 #include <string.h>
@@ -125,6 +130,14 @@ static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
 static uint32_t hold_from = 0;
 
+// vibration
+static long strike_seen = 0;          // strike id on the screen now
+static long strike_quiet = -1;        // strike id answered with a button: stop buzzing
+static uint32_t buzz_strike_at = 0;
+static uint32_t buzz_pull_at = 0;
+static bool drop_was = false;
+static bool was_connected = false;
+
 static const char *btn1_path = "";
 static const char *btn2_path = "";
 
@@ -186,7 +199,13 @@ static void button_clicked(lv_event_t *e)
   const char *path = (const char *)lv_event_get_user_data(e);
 
   if(path != NULL && path[0] != 0 && !swiped)
+  {
     ble_link_command(path);
+    buzz_play(BUZZ_TAP);
+
+    if(mode == MODE_STRIKE)
+      strike_quiet = strike_seen;     // answered: stop the strike buzz
+  }
 }
 
 static lv_obj_t *button(lv_obj_t **text, const char **path_slot)
@@ -424,10 +443,15 @@ static void swipe_timer(lv_timer_t *t)
   if(mode == MODE_BOOT || mode == MODE_LOOKING || mode == MODE_STRIKE)
     return;
 
+  int before = page;
+
   if(dx < 0 && page < 2)
     page++;
   else if(dx > 0 && page > 0)
     page--;
+
+  if(page != before)
+    buzz_play(BUZZ_TAP);
 
   page_since = lv_tick_get();
 }
@@ -482,6 +506,7 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
   if(held >= HOLD_MS)
   {
     ble_link_command("/relearn");
+    buzz_play(BUZZ_DROP);             // two ticks: done
     hold_from = 0;
     swiped = true;                    // this touch is used up: letting go presses nothing
     page = 0;                         // back to the main page: it shows LEARNING
@@ -509,6 +534,11 @@ static void ui_timer(lv_timer_t *t)
   }
 
   bool connected = s.phase == BLE_LINK_CONNECTED && s.seq > 0 && s.age_ms < 4000;
+
+  if(!connected && was_connected)
+    buzz_play(BUZZ_LOST);
+
+  was_connected = connected;
 
   if(!connected)
   {
@@ -560,10 +590,41 @@ static void ui_timer(lv_timer_t *t)
   }
 
   // a new knock: show it for 3 s
-  if(last_knock_id >= 0 && s.knockid != last_knock_id)
+  bool new_knock = last_knock_id >= 0 && s.knockid != last_knock_id;
+
+  if(new_knock)
     knock_until = now + 3000;
 
   last_knock_id = s.knockid;
+
+  // ---- vibration ----
+  strike_seen = s.strikeid;
+
+  if(s.strike)
+  {
+    if(s.strikeid != strike_quiet && now - buzz_strike_at >= 1500)
+    {
+      buzz_strike_at = now;
+      buzz_play(BUZZ_STRIKE);
+    }
+  }
+  else
+  {
+    buzz_strike_at = 0;
+    bool drop = s.dropwatch || s.drop >= PULL_SHOW;
+
+    if(drop && !drop_was)
+      buzz_play(BUZZ_DROP);
+    else if(new_knock)
+      buzz_play(BUZZ_KNOCK);
+    else if(s.bucket >= PULL_SHOW && now - buzz_pull_at >= (uint32_t)(s.bucket >= 90 ? 500 : 2000 - s.bucket * 15))
+    {
+      buzz_pull_at = now;
+      buzz_play(BUZZ_PULL);
+    }
+
+    drop_was = drop;
+  }
 
   char a[48];
   char b[48];

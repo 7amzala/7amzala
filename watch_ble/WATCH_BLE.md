@@ -53,3 +53,26 @@ The small text under the title says what is happening:
 
 Watch Serial (115200) lists every named device it sees (`[BLE]   saw ...`)
 and marks the rod with `<- THE ROD`.
+
+## Wrist vibration (optional): Pimoroni Haptic Bzzz
+
+| Bzzz pin | Watch header pin |
+|---|---|
+| 2-5V | 3V3 |
+| GND | GND |
+| SDA | 43 (TXD) |
+| SCL | 44 (RXD) |
+| TRIG | not connected |
+
+| Event | You feel |
+|---|---|
+| Knock | 1 tick |
+| Slow pull building (from 10%) | soft pulse every 2 s, faster as it grows |
+| Drop-back | 2 ticks |
+| STRIKE | strong buzz every 1.5 s until you press I'M WATCHING or REEL IN |
+| Rod lost | 3 slow buzzes |
+| Button / swipe | tiny click |
+
+At start the watch gives a double click and the Serial Monitor shows
+`[BUZZ] found`. Without the module: `[BUZZ] not found`, everything else
+works as before. Pins 45/46 are not used on purpose (start-up pins).

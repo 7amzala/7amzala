@@ -41,6 +41,12 @@ static uint32_t scene_start = 0;
 void ble_link_begin(void) {}
 void ble_link_poll(void) {}
 
+// fake vibration: count what was played
+#include "buzz.h"
+static int buzzed[8];
+bool buzz_begin(void) { return true; }
+void buzz_play(buzz_t what) { buzzed[what]++; }
+
 void ble_link_command(const char *path)
 {
   if(sent_n < 64)
@@ -219,6 +225,9 @@ int main(void)
   // tap each button where it is on the screen
   scene = 1; run_ms(500); press(233, 405);   // REEL IN (live)
   scene = 4; run_ms(500); press(233, 290);   // I'M WATCHING (strike)
+  int strike_before = buzzed[BUZZ_STRIKE];
+  run_ms(4000);
+  printf("%s: strike buzz stops after I'M WATCHING\n", buzzed[BUZZ_STRIKE] == strike_before ? "PASS" : "FAIL");
   press(233, 372);                           // REEL IN (strike)
   scene = 5; run_ms(500); press(233, 330);   // READY
   scene = 6; run_ms(500); press(233, 360);   // SKIP
@@ -234,6 +243,11 @@ int main(void)
   printf("before last swipe: %d sent\n", sent_n);
   swipe(380, 120, 405);                      // swipe starting on REEL IN: no /reelin
   printf("after last swipe: %d sent\n", sent_n);
+
+  printf("vibration: tap %d, knock %d, pull %d, drop %d, strike %d, lost %d\n",
+         buzzed[BUZZ_TAP], buzzed[BUZZ_KNOCK], buzzed[BUZZ_PULL], buzzed[BUZZ_DROP], buzzed[BUZZ_STRIKE], buzzed[BUZZ_LOST]);
+  int buzz_ok = buzzed[BUZZ_KNOCK] >= 1 && buzzed[BUZZ_PULL] >= 2 && buzzed[BUZZ_STRIKE] >= 1 && buzzed[BUZZ_TAP] >= 6;
+  printf("%s: vibration for knock, slow pull, strike, buttons\n", buzz_ok ? "PASS" : "FAIL");
 
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn" };
   int ok = sent_n == 6;
