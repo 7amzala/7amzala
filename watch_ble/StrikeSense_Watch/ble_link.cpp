@@ -1,0 +1,542 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEClient.h>
+#include <BLEScan.h>
+#include <string>
+
+#include "ble_link.h"
+
+// Same as the rod (StrikeSense .ino) and the phone app (RodLink.java)
+static BLEUUID SERVICE_UUID("6e8a0001-5f2d-4c8e-9a51-2b7c1d3e4f60");
+static BLEUUID RX_UUID("6e8a0002-5f2d-4c8e-9a51-2b7c1d3e4f60");   // watch -> rod
+static BLEUUID TX_UUID("6e8a0003-5f2d-4c8e-9a51-2b7c1d3e4f60");   // rod -> watch
+
+static const uint32_t ASK_EVERY_MS = 200;        // 5 times a second
+static const uint32_t ANSWER_TIMEOUT_MS = 1500;
+static const uint32_t COMMAND_TIMEOUT_MS = 2000;
+static const int COMMAND_TRIES = 3;
+static const long FIRST_ID = 500000;             // the phone uses ids below this
+
+static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+// Shared with the screen task (guarded by mux)
+static ble_link_status_t shared;
+static float peak = 0;
+static uint32_t lastAnswerMs = 0;
+static char commandPath[32] = "";
+static bool commandBusy = false;
+
+// Notifications from the rod (Bluetooth task) -> loop()
+static const size_t RING = 8192;
+static uint8_t ring[RING];
+static volatile size_t ringHead = 0;
+static volatile size_t ringTail = 0;
+
+// Link state (loop() only)
+static ble_link_phase_t phase = BLE_LINK_SEARCHING;
+static BLEClient *client = nullptr;
+static BLERemoteCharacteristic *rx = nullptr;
+static BLEAdvertisedDevice *found = nullptr;
+static volatile bool lostFlag = false;
+static size_t piece = 20;
+static std::string inbox;
+static long nextId = FIRST_ID;
+
+static long askId = -1;
+static uint32_t askedAt = 0;
+static uint32_t lastAsk = 0;
+
+static long cmdId = -1;
+static uint32_t cmdSentAt = 0;
+static int cmdTries = 0;
+static char cmdSending[32] = "";
+
+static uint32_t lastRssi = 0;
+static int rssi = 0;
+
+// ---------- scanning ----------
+
+class AdvCallbacks : public BLEAdvertisedDeviceCallbacks
+{
+  void onResult(BLEAdvertisedDevice d) override
+  {
+    if(found == nullptr && d.haveServiceUUID() && d.isAdvertisingService(SERVICE_UUID))
+    {
+      found = new BLEAdvertisedDevice(d);
+      BLEDevice::getScan()->stop();
+    }
+  }
+};
+
+class ClientCallbacks : public BLEClientCallbacks
+{
+  void onConnect(BLEClient *) override
+  {
+  }
+
+  void onDisconnect(BLEClient *) override
+  {
+    lostFlag = true;
+  }
+};
+
+static void onNotify(BLERemoteCharacteristic *, uint8_t *data, size_t length, bool)
+{
+  portENTER_CRITICAL(&mux);
+
+  for(size_t i = 0; i < length; i++)
+  {
+    size_t next = (ringHead + 1) % RING;
+
+    if(next == ringTail)
+      break;                 // full: drop (the answer will be asked again)
+
+    ring[ringHead] = data[i];
+    ringHead = next;
+  }
+
+  portEXIT_CRITICAL(&mux);
+}
+
+// ---------- small helpers ----------
+
+static long newId()
+{
+  long id = nextId++;
+
+  if(nextId > 999999)
+    nextId = FIRST_ID;
+
+  return id;
+}
+
+static bool send(long id, const char *path)
+{
+  if(rx == nullptr)
+    return false;
+
+  char line[64];
+  int n = snprintf(line, sizeof(line), "%ld|%s\n", id, path);
+
+  for(int i = 0; i < n; i += piece)
+  {
+    int len = n - i < (int)piece ? n - i : (int)piece;
+    rx->writeValue((uint8_t *)line + i, len, false);
+  }
+
+  return true;
+}
+
+// Value of "key" in a flat JSON object, as text (quotes removed)
+static bool jsonGet(const std::string &j, const char *key, char *out, size_t size)
+{
+  std::string k = std::string("\"") + key + "\":";
+  size_t p = j.find(k);
+
+  if(p == std::string::npos)
+    return false;
+
+  p += k.size();
+
+  bool quoted = p < j.size() && j[p] == '"';
+
+  if(quoted)
+    p++;
+
+  size_t n = 0;
+
+  while(p < j.size() && n + 1 < size)
+  {
+    char c = j[p];
+
+    if(quoted ? c == '"' : (c == ',' || c == '}'))
+      break;
+
+    out[n++] = c;
+    p++;
+  }
+
+  out[n] = 0;
+  return true;
+}
+
+static float jsonNum(const std::string &j, const char *key, float fallback)
+{
+  char v[24];
+  return jsonGet(j, key, v, sizeof(v)) ? atof(v) : fallback;
+}
+
+static bool jsonBool(const std::string &j, const char *key)
+{
+  char v[8];
+  return jsonGet(j, key, v, sizeof(v)) && strcmp(v, "true") == 0;
+}
+
+// ---------- answers ----------
+
+static void gotWatchData(const std::string &j)
+{
+  ble_link_status_t s;
+
+  portENTER_CRITICAL(&mux);
+  s = shared;
+  portEXIT_CRITICAL(&mux);
+
+  jsonGet(j, "state", s.state, sizeof(s.state));
+  jsonGet(j, "type", s.type, sizeof(s.type));
+  s.strike = jsonBool(j, "strike");
+  s.strikeid = (long)jsonNum(j, "strikeid", 0);
+  s.knockid = (long)jsonNum(j, "knockid", 0);
+  s.knockthr = jsonNum(j, "knockthr", 0.01);
+  s.tilt = jsonNum(j, "tilt", 0);
+  s.allow = jsonNum(j, "allow", 1);
+  s.ptdeg = jsonNum(j, "ptdeg", 0);
+  s.ptneed = jsonNum(j, "ptneed", 1);
+  s.bucket = (int)jsonNum(j, "bucket", 0);
+  s.drop = (int)jsonNum(j, "drop", 0);
+  s.knocks = (int)jsonNum(j, "knocks", 0);
+  s.wave = (int)jsonNum(j, "wave", 0);
+  s.wind = (int)jsonNum(j, "wind", 0);
+  s.bat = (int)jsonNum(j, "bat", -1);
+  s.dir = jsonBool(j, "dir");
+  s.dropwatch = jsonBool(j, "dropwatch");
+
+  float e = jsonNum(j, "energy", 0);
+
+  portENTER_CRITICAL(&mux);
+  s.seq = shared.seq + 1;
+  s.phase = shared.phase;
+  s.rssi = shared.rssi;
+  s.energy_peak = shared.energy_peak;
+  s.command_busy = shared.command_busy;
+  shared = s;
+
+  if(e > peak)
+    peak = e;
+
+  lastAnswerMs = millis();
+  portEXIT_CRITICAL(&mux);
+}
+
+static void answer(long id, int code, const std::string &body)
+{
+  if(id == askId)
+  {
+    askId = -1;
+
+    if(code == 200)
+      gotWatchData(body);
+  }
+  else if(id == cmdId)
+  {
+    Serial.printf("[BLE] %s -> %s\n", cmdSending, body.c_str());
+
+    cmdId = -1;
+    cmdSending[0] = 0;
+
+    portENTER_CRITICAL(&mux);
+    commandBusy = false;
+    portEXIT_CRITICAL(&mux);
+  }
+}
+
+// Answers start with "#<id> <code> <length>\n" and may come in pieces.
+// The phone's answers arrive here too: they are skipped.
+static void readAnswers()
+{
+  while(true)
+  {
+    uint8_t buf[512];
+    size_t n = 0;
+
+    portENTER_CRITICAL(&mux);
+
+    while(ringTail != ringHead && n < sizeof(buf))
+    {
+      buf[n++] = ring[ringTail];
+      ringTail = (ringTail + 1) % RING;
+    }
+
+    portEXIT_CRITICAL(&mux);
+
+    if(n == 0)
+      break;
+
+    inbox.append((const char *)buf, n);
+  }
+
+  while(true)
+  {
+    size_t start = inbox.find('#');
+
+    if(start == std::string::npos)
+    {
+      inbox.clear();
+      return;
+    }
+
+    size_t nl = inbox.find('\n', start);
+
+    if(nl == std::string::npos)
+    {
+      inbox.erase(0, start);
+
+      if(inbox.size() > 64)       // no header end: rubbish, skip the '#'
+        inbox.erase(0, 1);
+
+      return;
+    }
+
+    long id = 0;
+    int code = 0;
+    long len = 0;
+
+    if(sscanf(inbox.c_str() + start + 1, "%ld %d %ld", &id, &code, &len) != 3 || len < 0 || len > 200000)
+    {
+      inbox.erase(0, nl + 1);
+      continue;
+    }
+
+    if(inbox.size() - (nl + 1) < (size_t)len)
+    {
+      inbox.erase(0, start);      // wait for the rest
+      return;
+    }
+
+    std::string body = inbox.substr(nl + 1, len);
+    inbox.erase(0, nl + 1 + len);
+
+    if(id >= FIRST_ID)
+      answer(id, code, body);
+  }
+}
+
+// ---------- connecting ----------
+
+static void setPhase(ble_link_phase_t p)
+{
+  phase = p;
+
+  portENTER_CRITICAL(&mux);
+  shared.phase = p;
+
+  if(p != BLE_LINK_CONNECTED)
+    shared.rssi = 0;
+
+  portEXIT_CRITICAL(&mux);
+}
+
+static void lost()
+{
+  Serial.println("[BLE] rod lost, searching again");
+
+  if(client != nullptr)
+  {
+    if(client->isConnected())
+      client->disconnect();
+
+    delete client;
+    client = nullptr;
+  }
+
+  rx = nullptr;
+  askId = -1;
+  cmdId = -1;
+  inbox.clear();
+
+  portENTER_CRITICAL(&mux);
+  ringTail = ringHead;
+  portEXIT_CRITICAL(&mux);
+
+  setPhase(BLE_LINK_SEARCHING);
+}
+
+static void connectToRod()
+{
+  setPhase(BLE_LINK_CONNECTING);
+  lostFlag = false;
+
+  client = BLEDevice::createClient();
+  client->setClientCallbacks(new ClientCallbacks());
+
+  bool ok = client->connect(found);
+
+  delete found;
+  found = nullptr;
+
+  if(!ok)
+  {
+    lost();
+    return;
+  }
+
+  BLERemoteService *service = client->getService(SERVICE_UUID);
+  BLERemoteCharacteristic *tx = service != nullptr ? service->getCharacteristic(TX_UUID) : nullptr;
+
+  rx = service != nullptr ? service->getCharacteristic(RX_UUID) : nullptr;
+
+  if(rx == nullptr || tx == nullptr || !tx->canNotify())
+  {
+    lost();
+    return;
+  }
+
+  tx->registerForNotify(onNotify);
+
+  int mtu = client->getMTU();
+  piece = mtu > 23 ? mtu - 3 : 20;
+
+  if(piece > 512)
+    piece = 512;
+
+  // Tell the rod how big a piece may be (it uses the smallest of phone/watch)
+  char path[24];
+  snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
+  send(newId(), path);
+
+  setPhase(BLE_LINK_CONNECTED);
+  Serial.printf("[BLE] connected to the rod (MTU %d)\n", mtu);
+}
+
+// ---------- public ----------
+
+void ble_link_begin(void)
+{
+  memset(&shared, 0, sizeof(shared));
+  shared.bat = -1;
+  strcpy(shared.state, "");
+
+  BLEDevice::init("StrikeSense Watch");
+  BLEDevice::setMTU(517);
+
+  BLEScan *scan = BLEDevice::getScan();
+  scan->setAdvertisedDeviceCallbacks(new AdvCallbacks());
+  scan->setActiveScan(true);
+  scan->setInterval(100);
+  scan->setWindow(99);
+
+  Serial.println("[BLE] looking for the rod...");
+}
+
+void ble_link_poll(void)
+{
+  uint32_t now = millis();
+
+  if(phase == BLE_LINK_SEARCHING)
+  {
+    BLEDevice::getScan()->start(2, false);       // up to 2 s, stops early when found
+    BLEDevice::getScan()->clearResults();
+
+    if(found != nullptr)
+      connectToRod();
+
+    return;
+  }
+
+  if(phase != BLE_LINK_CONNECTED)
+    return;
+
+  if(lostFlag || client == nullptr || !client->isConnected())
+  {
+    lost();
+    return;
+  }
+
+  readAnswers();
+
+  // live data
+  if(askId >= 0 && now - askedAt > ANSWER_TIMEOUT_MS)
+    askId = -1;
+
+  if(askId < 0 && now - lastAsk >= ASK_EVERY_MS)
+  {
+    askId = newId();
+    askedAt = now;
+    lastAsk = now;
+    send(askId, "/watch");
+  }
+
+  // buttons: sent until the rod answers (3 tries)
+  char path[32] = "";
+
+  portENTER_CRITICAL(&mux);
+
+  if(commandPath[0] != 0)
+  {
+    strcpy(path, commandPath);
+    commandPath[0] = 0;
+  }
+
+  portEXIT_CRITICAL(&mux);
+
+  if(path[0] != 0)
+  {
+    strcpy(cmdSending, path);
+    cmdTries = 0;
+    cmdId = -1;
+  }
+
+  if(cmdSending[0] != 0 && cmdId < 0 && cmdTries == 0)
+  {
+    cmdId = newId();
+    cmdSentAt = now;
+    cmdTries = 1;
+    send(cmdId, cmdSending);
+  }
+  else if(cmdSending[0] != 0 && cmdId >= 0 && now - cmdSentAt > COMMAND_TIMEOUT_MS)
+  {
+    if(cmdTries < COMMAND_TRIES)
+    {
+      cmdId = newId();
+      cmdSentAt = now;
+      cmdTries++;
+      send(cmdId, cmdSending);
+    }
+    else
+    {
+      Serial.printf("[BLE] %s: no answer\n", cmdSending);
+      cmdSending[0] = 0;
+      cmdId = -1;
+
+      portENTER_CRITICAL(&mux);
+      commandBusy = false;
+      portEXIT_CRITICAL(&mux);
+    }
+  }
+
+  // signal strength every 2 s
+  if(now - lastRssi > 2000)
+  {
+    lastRssi = now;
+    rssi = client->getRssi();
+
+    portENTER_CRITICAL(&mux);
+    shared.rssi = rssi;
+    portEXIT_CRITICAL(&mux);
+  }
+}
+
+void ble_link_get(ble_link_status_t *out, bool take_peak)
+{
+  uint32_t now = millis();
+
+  portENTER_CRITICAL(&mux);
+  *out = shared;
+  out->energy_peak = peak;
+  out->age_ms = lastAnswerMs == 0 ? 0xFFFFFFFF : now - lastAnswerMs;
+  out->command_busy = commandBusy;
+
+  if(take_peak)
+    peak = 0;
+
+  portEXIT_CRITICAL(&mux);
+}
+
+void ble_link_command(const char *path)
+{
+  portENTER_CRITICAL(&mux);
+  strncpy(commandPath, path, sizeof(commandPath) - 1);
+  commandPath[sizeof(commandPath) - 1] = 0;
+  commandBusy = true;
+  portEXIT_CRITICAL(&mux);
+}

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Watch screens on the PC: the real watch_ui.c + LVGL 8.3.11, a scripted
+# rod instead of Bluetooth. Saves each screen (w*.raw, RGB565) and taps
+# every button.
+#
+#   git clone --depth 1 --branch v8.3.11 https://github.com/lvgl/lvgl.git /tmp/lvgl
+#   sh run.sh /tmp/lvgl
+set -e
+L=${1:-/tmp/lvgl}
+W=../../watch_ble/StrikeSense_Watch
+mkdir -p obj
+for f in $(find $L/src -name '*.c'); do
+  o=obj/$(echo $f | md5sum | cut -c1-12).o
+  [ -f $o ] || gcc -O1 -c -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L $f -o $o
+done
+gcc -O1 -Wall -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c $W/watch_ui.c -o watch_ui.o
+gcc -O1 -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c host.c -o host.o
+gcc -o host host.o watch_ui.o obj/*.o -lm
+./host

@@ -106,6 +106,7 @@ int main()
 
   srv->cb->onConnect(srv);
   step(1);
+  check(BLEDevice::adv().started == 2, "phone connected: rod keeps advertising so the watch can join");
 
   Answer a;
 
@@ -150,9 +151,10 @@ int main()
   // phone walks away in the middle of an answer
   write(20, "/");
   step(0.2);
+  int advBeforeLeave = BLEDevice::adv().started;
   srv->cb->onDisconnect(srv);
   step(0.2);
-  check(BLEDevice::adv().started == 2, "after a disconnect the rod advertises again");
+  check(BLEDevice::adv().started == advBeforeLeave + 1, "after a disconnect the rod advertises again");
 
   size_t before = txc->notified.size();
   step(1);
@@ -168,6 +170,40 @@ int main()
   // REEL IN and READY over Bluetooth
   check(ask(23, "/reelin", a) && rodState == ST_PAUSED, "/reelin: rod reeled in (paused)");
   check(ask(24, "/ready", a) && rodState != ST_PAUSED, "/ready: rod back to watching");
+
+  // ---------- the watch joins as a second device ----------
+  printf("\n=== PHONE + WATCH ===\n");
+  int advBefore = BLEDevice::adv().started;
+  srv->cb->onConnect(srv);                      // watch connects
+  step(0.1);
+  check(BLEDevice::adv().started == advBefore, "phone + watch connected: full, the rod stops advertising");
+
+  check(ask(500001, "/mtu?v=200", a) && a.code == 200, "watch says its MTU");
+  check(ask(25, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "phone /data still complete with both connected");
+  printf("        biggest piece now %zu bytes (smallest MTU wins)\n", biggestPiece);
+
+  ok = ask(500002, "/watch", a);
+  check(ok && a.code == 200 && a.body.front() == '{' && a.body.back() == '}', "/watch: complete JSON");
+  printf("        /watch = %zu bytes: %s\n", a.body.size(), a.body.c_str());
+  check(a.body.size() < 400, "/watch is small (watch-friendly)");
+  check(a.body.find("\"state\"") != std::string::npos && a.body.find("\"tilt\"") != std::string::npos &&
+        a.body.find("\"bat\"") != std::string::npos && a.body.find("\"ptneed\"") != std::string::npos, "/watch has state, tilt, battery, pull test");
+
+  // A knock: both the phone's /data and the watch's /watch must see it
+  energyPeakSincePoll = 0; energyPeakSinceWatch = 0;
+  knockEnergy = 0.5;
+  for (int i = 0; i < 3; i++) { simMillis++; processSample(); }
+  ask(26, "/data", a);
+  bool phoneSaw = a.body.find("\"energy\":0.0000") == std::string::npos;
+  ask(500003, "/watch", a);
+  bool watchSaw = a.body.find("\"energy\":0.0000") == std::string::npos;
+  check(phoneSaw && watchSaw, "a knock reaches both phone and watch (separate peaks)");
+
+  // the phone leaves: the watch keeps working
+  srv->cb->onDisconnect(srv);
+  step(0.2);
+  check(ask(500004, "/watch", a) && a.code == 200, "phone gone: watch still answered");
+  check(ask(500005, "/watching", a) && a.body == "OK", "watch button (I'M WATCHING) works");
 
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;

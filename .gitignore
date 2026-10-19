@@ -8,3 +8,7 @@ android/build/
 android/app/build/
 android/local.properties
 sim/ble_test
+sim/watch_ui_test/obj/
+sim/watch_ui_test/*.o
+sim/watch_ui_test/host
+sim/watch_ui_test/*.raw

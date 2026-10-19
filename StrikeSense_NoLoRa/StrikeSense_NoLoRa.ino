@@ -76,25 +76,34 @@ public:
 
   bool connected() const
   {
-    return isConnected;
+    return clients > 0;
   }
 
   // Called from loop(): answers one request at a time, sends the answer
   // in small pieces so the Bluetooth stack is never flooded
   void handleClient()
   {
-    if(restartAdvertising)
+    // Keep advertising while there is room for another phone/watch
+    if(advertiseAgain)
     {
-      restartAdvertising = false;
+      advertiseAgain = false;
+
+      if(clients < MAX_CLIENTS)
+        BLEDevice::startAdvertising();
+    }
+
+    if(clients == 0 && (out.length() > 0 || chunkKnown))
+    {
       out = "";
       outPos = 0;
       chunk = 20;
-      BLEDevice::startAdvertising();
+      chunkKnown = false;
+      chunkMin = 512;
     }
 
     if(outPos < out.length())
     {
-      if(isConnected && micros() - lastPiece >= PIECE_GAP_US)
+      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
       {
         size_t n = out.length() - outPos;
 
@@ -108,7 +117,7 @@ public:
         lastPiece = micros();
       }
 
-      if(outPos >= out.length() || !isConnected)
+      if(outPos >= out.length() || clients == 0)
       {
         out = "";
         outPos = 0;
@@ -176,9 +185,12 @@ private:
   Route routes[MAX_ROUTES];
   int routeCount = 0;
 
+  static const int MAX_CLIENTS = 2;         // phone + watch
+
   BLECharacteristic* tx = nullptr;
-  volatile bool isConnected = false;
-  volatile bool restartAdvertising = false;
+  volatile int clients = 0;
+  volatile bool advertiseAgain = false;
+  bool chunkKnown = false;
 
   // Lines written by the phone (Bluetooth task) -> loop()
   char queue[REQ_QUEUE][REQ_MAX];
@@ -191,6 +203,7 @@ private:
   String out;
   size_t outPos = 0;
   size_t chunk = 20;
+  size_t chunkMin = 512;
   unsigned long lastPiece = 0;
   String requestId = "0";
 
@@ -205,15 +218,19 @@ private:
 
     void onConnect(BLEServer*) override
     {
-      owner->isConnected = true;
-      Serial.println("Bluetooth: phone connected");
+      owner->clients++;
+      owner->chunk = 20;               // until the newcomer says its MTU
+      owner->advertiseAgain = true;
+      Serial.printf("Bluetooth: connected (%d)\n", (int)owner->clients);
     }
 
     void onDisconnect(BLEServer*) override
     {
-      owner->isConnected = false;
-      owner->restartAdvertising = true;
-      Serial.println("Bluetooth: phone disconnected");
+      if(owner->clients > 0)
+        owner->clients--;
+
+      owner->advertiseAgain = true;
+      Serial.printf("Bluetooth: disconnected (%d left)\n", (int)owner->clients);
     }
 
   private:
@@ -337,11 +354,18 @@ private:
       argCount++;
     }
 
-    // The app says how big one Bluetooth piece may be
+    // A phone/watch says how big one Bluetooth piece may be.
+    // Everyone gets every piece, so use the smallest.
     if(path == "/mtu")
     {
       int v = arg("v").toInt();
-      chunk = v < 20 ? 20 : (v > 512 ? 512 : v);
+      v = v < 20 ? 20 : (v > 512 ? 512 : v);
+
+      if(!chunkKnown || (size_t)v < chunkMin)
+        chunkMin = v;
+
+      chunkKnown = true;
+      chunk = chunkMin;
       send(200, "text/plain", "OK");
       return;
     }
@@ -360,7 +384,7 @@ private:
 
   void reply(int code, const char* body, size_t length)
   {
-    if(!isConnected)
+    if(clients == 0)
       return;
 
     out = "#" + requestId + " " + String(code) + " " + String((unsigned long)length) + "\n";
@@ -682,6 +706,7 @@ float sideDeg = 0;               // sideways (wind)
 float totalDeg = 0;              // total angle from rest
 
 float energyPeakSincePoll = 0;
+float energyPeakSinceWatch = 0;          // same, for the watch (its own poll)
 
 // =====================================================
 // REST POSITION + PULL DIRECTION
@@ -1253,6 +1278,9 @@ void updateSignals()
 
   if(knockEnergy > energyPeakSincePoll)
     energyPeakSincePoll = knockEnergy;
+
+  if(knockEnergy > energyPeakSinceWatch)
+    energyPeakSinceWatch = knockEnergy;
 
   // Ignore free fall / bad readings for the angle
   if(vLen(gravity) > 0.5)
@@ -7620,6 +7648,42 @@ void addField(String& json, const char* name, bool value)
   json += value ? "true" : "false";
 }
 
+// Only what the watch shows (much smaller than /data)
+void handleWatch()
+{
+  String json;
+  json.reserve(320);
+
+  json += "{\"state\":\"";
+  json += stateName();
+  json += "\",\"type\":\"";
+  json += strikeType;
+  json += "\"";
+
+  addField(json, "strike", strikeActive);
+  addField(json, "strikeid", (long)strikeEventID);
+  addField(json, "knockid", (long)knockAlertID);
+  addField(json, "energy", energyPeakSinceWatch, 4);
+  energyPeakSinceWatch = 0;
+  addField(json, "knockthr", knockThreshold, 4);
+  addField(json, "tilt", tiltDeg, 2);
+  addField(json, "allow", pullAllow, 2);
+  addField(json, "bucket", (long)(pullBucket / bucketSize * 100.0));
+  addField(json, "drop", (long)(dropBucket / bucketSize * 100.0));
+  addField(json, "knocks", (long)recentKnockCount());
+  addField(json, "dir", haveDir);
+  addField(json, "dropwatch", dropWatch);
+  addField(json, "ptdeg", totalDeg, 2);
+  addField(json, "ptneed", pullTestNeed(), 2);
+  addField(json, "wave", (long)waveLevel);
+  addField(json, "wind", (long)windLevel);
+  addField(json, "bat", (long)batPercent);
+
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
 void handleData()
 {
   unsigned long timeLeft = 0;
@@ -7800,6 +7864,7 @@ void setup()
   server.on("/", handleRoot);
   server.on("/logo.webp", handleLogo);
   server.on("/data", handleData);
+  server.on("/watch", handleWatch);
   server.on("/watching", handleWatching);
   server.on("/reelin", handleReelIn);
   server.on("/ready", handleReady);

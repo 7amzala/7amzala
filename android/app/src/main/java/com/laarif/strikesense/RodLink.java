@@ -229,7 +229,7 @@ final class RodLink
         if(state != State.CONNECTED)
             return null;
 
-        int id = nextId.getAndIncrement() % 1000000;
+        int id = nextId.getAndIncrement() % 500000;      // the watch uses 500000 and up
         Pending p = new Pending(path);
         pending.put(id, p);
 

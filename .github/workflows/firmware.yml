@@ -1,6 +1,6 @@
 name: Rod firmware
 
-# Compiles both rod sketches for the XIAO ESP32-S3 with arduino-cli (the
+# Compiles both rod sketches for the XIAO ESP32-S3 and the watch with arduino-cli (the
 # same compiler as the Arduino IDE), so a mistake shows up before you upload.
 
 on:
@@ -8,6 +8,7 @@ on:
     paths:
       - "StrikeSense/**"
       - "StrikeSense_NoLoRa/**"
+      - "watch_ble/**"
       - ".github/workflows/firmware.yml"
   workflow_dispatch:
 
@@ -34,7 +35,8 @@ jobs:
 
           arduino-cli core install esp32:esp32
           arduino-cli lib update-index
-          arduino-cli lib install "SparkFun LIS3DH Arduino Library" RadioLib
+          arduino-cli lib install "SparkFun LIS3DH Arduino Library" RadioLib "lvgl@8.3.11"
+          cp watch_ble/lv_conf.h ~/Arduino/libraries/lv_conf.h
           arduino-cli core list
 
       - name: Compile StrikeSense_NoLoRa
@@ -43,3 +45,7 @@ jobs:
       - name: Compile StrikeSense (LoRa)
         if: always()
         run: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --warnings default StrikeSense
+
+      - name: Compile the watch (Bluetooth)
+        if: always()
+        run: arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=huge_app,PSRAM=opi" --warnings default watch_ble/StrikeSense_Watch
