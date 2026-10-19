@@ -1,7 +1,7 @@
 name: Rod firmware
 
-# Compiles both rod sketches for the XIAO ESP32-S3 (the same as the
-# Arduino IDE does), so a mistake shows up before you upload.
+# Compiles both rod sketches for the XIAO ESP32-S3 with the ESP32 Arduino
+# core 3.x (as in the Arduino IDE), so a mistake shows up before you upload.
 
 on:
   push:
@@ -15,20 +15,25 @@ jobs:
   compile:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        sketch: [StrikeSense_NoLoRa, StrikeSense]
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: arduino/compile-sketches@v1
+      - uses: actions/setup-python@v5
         with:
-          fqbn: esp32:esp32:XIAO_ESP32S3
-          platforms: |
-            - name: esp32:esp32
-              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          libraries: |
-            - name: SparkFun LIS3DH Arduino Library
-            - name: RadioLib
-          sketch-paths: |
-            - StrikeSense_NoLoRa
-            - StrikeSense
-          enable-warnings-report: true
-          verbose: false
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Compile ${{ matrix.sketch }}
+        run: |
+          pio ci ${{ matrix.sketch }} \
+            --board seeed_xiao_esp32s3 \
+            --project-option="platform=https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip" \
+            --project-option="framework=arduino" \
+            --project-option="lib_deps=sparkfun/SparkFun LIS3DH Arduino Library, jgromes/RadioLib"
