@@ -469,6 +469,10 @@ bool batLowSaid = false;
 const unsigned long SAMPLE_MS = 10;      // 100 processed readings per second
 const float DT = 0.010;                  // seconds per reading
 const int SENSOR_RATE = 400;             // Hz, sensor output rate
+// Sensor cable up to ~3 m: 100 kHz (400 kHz only works with short wires).
+// With a 3 m cable also fit 2.2k pull-ups: SDA -> 3V3 and SCL -> 3V3 at the box.
+const uint32_t SENSOR_I2C_HZ = 100000;
+
 const unsigned long OVERSAMPLE_US = 2500; // read every 2.5 ms, average ~4 per step (less noise)
 
 // ---------- Signal filters ----------
@@ -1138,7 +1142,7 @@ bool startLIS3DH()
     return false;
 
   // After begin(), which may reset the bus speed
-  Wire.setClock(400000);
+  Wire.setClock(SENSOR_I2C_HZ);
 
   sensorType = SENSOR_LIS3DH;
 
@@ -8519,7 +8523,7 @@ void setup()
   Serial.println("=== LAARIF STRIKESENSE ROD - version 2.1 (Bluetooth: phone + watch) ===");
 
   Wire.begin();
-  Wire.setClock(400000);
+  Wire.setClock(SENSOR_I2C_HZ);
 
   // ADXL355 first, then LIS3DH. Keep trying until one answers.
   while(!startSensor())
