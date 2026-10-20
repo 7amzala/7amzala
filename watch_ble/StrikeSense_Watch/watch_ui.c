@@ -18,6 +18,7 @@
 // pull / drop-back builds, during a strike until you answer it, in the
 // pull test, 10 s after a touch (that touch only wakes it). A knock only
 // vibrates. Without the motion sensor: dark after 30 s, as before.
+// While dark nothing is drawn and the chip runs at 80 MHz (watch_power.cpp).
 //
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
@@ -32,6 +33,7 @@
 #include "buzz.h"
 #include "watch_bat.h"
 #include "watch_imu.h"
+#include "watch_power.h"
 
 void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #include "strikesense_boot_fixed.h"
@@ -194,8 +196,20 @@ static void screen_wake(uint32_t ms)
   if(!screen_on)
   {
     screen_on = true;
-    lcd_set_brightness(255);
+    power_screen(true);                              // full speed first
+    lv_disp_enable_invalidation(NULL, true);
+    lv_obj_invalidate(lv_scr_act());
+    lv_refr_now(NULL);                               // draw the current screen...
+    lcd_set_brightness(255);                         // ...then show it
   }
+}
+
+static void screen_dark(void)
+{
+  screen_on = false;
+  lcd_set_brightness(0);
+  lv_disp_enable_invalidation(NULL, false);           // nothing drawn while dark
+  power_screen(false);
 }
 
 static const char *btn1_path = "";
@@ -874,10 +888,7 @@ static void ui_timer(lv_timer_t *t)
   }
 
   if(screen_on && (int32_t)(now - screen_until) > 0)
-  {
-    screen_on = false;
-    lcd_set_brightness(0);
-  }
+    screen_dark();
 
   if(!connected)
   {

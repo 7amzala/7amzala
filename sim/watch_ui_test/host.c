@@ -61,6 +61,9 @@ void imu_teach_start(void) { fake_teach = 1; teach_started++; }
 int imu_teach_state(void) { return fake_teach; }
 float imu_teach_progress(void) { return fake_teach == 1 ? 0.5f : fake_teach == 2 ? 1.0f : 0.0f; }
 
+static int cpu_mhz = 240;
+void power_screen(bool on) { cpu_mhz = on ? 240 : 80; }
+
 #include "watch_ui.c"                 // the real screens (statics visible to the test)
 
 // fake watch battery
@@ -353,6 +356,11 @@ int main(void)
   SCREEN(brightness == 255, "still looking after 60 s: still on");
   fake_look = 0; run_ms(200);
   SCREEN(brightness == 0, "looked away: off at once");
+  flushed_px = 0; run_ms(5000);
+  SCREEN(flushed_px == 0 && cpu_mhz == 80, "dark: nothing drawn, chip at 80 MHz");
+  fake_look = 1; run_ms(200);
+  SCREEN(brightness == 255 && cpu_mhz == 240 && flushed_px >= W * H, "look again: full speed, whole screen drawn before it shows");
+  fake_look = 0; run_ms(200);
   int before = sent_n;
   press(233, 405);
   SCREEN(brightness == 255 && sent_n == before, "touch on the dark screen: on, REEL IN not pressed");

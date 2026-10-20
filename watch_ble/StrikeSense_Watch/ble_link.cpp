@@ -61,7 +61,11 @@ static uint32_t lastAskedAt = 0;
 static volatile bool wantLast = false;
 static ble_last_strike_t lastStrike;   // guarded by mux
 
-static uint32_t lastLiveMs = 0;          // last live message from the rod (0 = none yet)
+static uint32_t lastLiveMs = 0;
+
+// Bluetooth link speed: slower while the rod is calm and the signal strong
+static bool linkFast = true;
+static uint32_t calmSince = 0;          // last live message from the rod (0 = none yet)
 
 static uint32_t lastRssi = 0;
 static int rssi = 0;
@@ -532,6 +536,26 @@ static void lost()
   setPhase(BLE_LINK_SEARCHING);
 }
 
+// fast: 7.5-15 ms; calm: 90-110 ms (the live message comes every 100 ms anyway)
+static void setLinkFast(bool fast)
+{
+  if(fast == linkFast || client == nullptr)
+    return;
+
+  linkFast = fast;
+
+#if defined(CONFIG_NIMBLE_ENABLED)
+  ble_gap_upd_params p = {};
+  p.itvl_min = fast ? 6 : 72;          // x 1.25 ms
+  p.itvl_max = fast ? 12 : 88;
+  p.latency = 0;
+  p.supervision_timeout = 400;         // x 10 ms
+  ble_gap_update_params(client->getConnId(), &p);
+#endif
+
+  Serial.printf("[BLE] link %s\n", fast ? "fast (something moves, or weak signal)" : "calm (saves power)");
+}
+
 static void connectToRod()
 {
   setPhase(BLE_LINK_CONNECTING);
@@ -570,6 +594,9 @@ static void connectToRod()
   }
 
   tx->registerForNotify(onNotify);
+
+  linkFast = true;
+  calmSince = 0;
 
   // Fast link, like the phone app (7.5-15 ms instead of 20-40 ms)
 #if defined(CONFIG_NIMBLE_ENABLED)
@@ -681,6 +708,23 @@ void ble_link_poll(void)
   busy = shared.strike || shared.bucket >= 5 || shared.drop >= 5 || shared.dropwatch ||
          shared.knocks > 0 || commandBusy || strcmp(shared.state, "monitoring") != 0;
   portEXIT_CRITICAL(&mux);
+
+  // calm rod + strong signal for 10 s: slower link (saves power); anything else: fast at once
+  bool strong = rssi != 0 && rssi > -75;
+
+  if(busy || !strong || lastId >= 0 || wantLast)
+  {
+    calmSince = 0;
+    setLinkFast(true);
+  }
+  else
+  {
+    if(calmSince == 0)
+      calmSince = now;
+
+    if(now - calmSince > 10000)
+      setLinkFast(false);
+  }
 
   // the rod sends live messages by itself: no need to ask (older rods: ask)
   bool liveOn = lastLiveMs != 0 && now - lastLiveMs < 1000;
