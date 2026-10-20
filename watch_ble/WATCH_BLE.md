@@ -90,3 +90,12 @@ At start the watch gives a double click and the Serial Monitor shows
 `[BUZZ] found`. Without the module: `[BUZZ] not found`, everything else
 works as before. It shares the I2C bus with the touch
 screen (different address, no clash).
+
+## Screen: raise to wake
+
+The screen goes dark after 30 s with nothing happening. It comes on when
+you raise your wrist to look (QMI8658 motion sensor, `[IMU] ...` on the
+Serial Monitor), touch it (that touch only wakes it), on a knock (5 s),
+while a slow pull / drop-back builds, during a strike until you answer
+it, in the pull test, and when the rod is lost. Vibration works with the
+screen dark.

@@ -48,6 +48,13 @@ static int buzzed[8];
 bool buzz_begin(void) { return true; }
 void buzz_play(buzz_t what) { buzzed[what]++; }
 
+// fake screen brightness and motion sensor
+static int brightness = 255;
+static int bright_changes = 0;
+void lcd_set_brightness(uint8_t l) { if(l != brightness) bright_changes++; brightness = l; }
+static int raise_flag = 0;
+bool imu_take_raise(void) { if(raise_flag) { raise_flag = 0; return true; } return false; }
+
 #include "watch_ui.c"                 // the real screens (statics visible to the test)
 
 // fake watch battery
@@ -87,6 +94,7 @@ void ble_link_command(const char *path)
 }
 
 static float peak = 0;
+static long fake_strike_id = 3;       // a new strike gets a new number (as on the rod)
 
 void ble_link_get(ble_link_status_t *s, bool take_peak)
 {
@@ -127,7 +135,7 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
     case 4:                                     // strike
       s->strike = true;
       strcpy(s->type, "SLOW PULL");
-      s->strikeid = 3;
+      s->strikeid = fake_strike_id;
       s->bucket = 100;
       s->tilt = 3.6f;
       e += 0.004f;
@@ -326,6 +334,39 @@ int main(void)
          buzzed[BUZZ_TAP], buzzed[BUZZ_KNOCK], buzzed[BUZZ_PULL], buzzed[BUZZ_DROP], buzzed[BUZZ_STRIKE], buzzed[BUZZ_LOST]);
   int buzz_ok = buzzed[BUZZ_KNOCK] >= 1 && buzzed[BUZZ_PULL] >= 2 && buzzed[BUZZ_STRIKE] >= 1 && buzzed[BUZZ_TAP] >= 6;
   printf("%s: vibration for knock, slow pull, strike, buttons\n", buzz_ok ? "PASS" : "FAIL");
+
+  // ---- screen on / dark ----
+  printf("screen:\n");
+  int sfail = 0;
+#define SCREEN(cond, what) do { int ok_ = (cond); if(!ok_) sfail++; printf("  %s %s (brightness %d)\n", ok_ ? "ok  " : "FAIL", what, brightness); } while(0)
+  scene = 1; scene_start = sim_ms; run_ms(31000);
+  SCREEN(brightness == 0, "calm, nothing touched for 30 s: dark");
+  raise_flag = 1; run_ms(200);
+  SCREEN(brightness == 255, "wrist raised: on");
+  run_ms(11000);
+  SCREEN(brightness == 0, "10 s after the raise: dark again");
+  int before = sent_n;
+  press(233, 405);
+  SCREEN(brightness == 255 && sent_n == before, "touch on the dark screen: on, REEL IN not pressed");
+  press(233, 405);
+  SCREEN(sent_n == before + 1, "next touch presses REEL IN");
+  scene = 5; run_ms(300); scene = 1;           // (REEL IN answered: back to monitoring)
+  run_ms(31000);
+  SCREEN(brightness == 0, "dark again");
+  scene = 2; scene_start = sim_ms; run_ms(1300);
+  SCREEN(brightness == 255, "knock: on");
+  run_ms(6000);
+  SCREEN(brightness == 0, "5 s after the knock: dark");
+  scene = 3; scene_start = sim_ms; run_ms(40000);
+  SCREEN(brightness == 255, "slow pull building: stays on");
+  fake_strike_id = 4;                           // a new strike
+  scene = 4; scene_start = sim_ms; run_ms(40000);
+  SCREEN(brightness == 255, "strike: stays on (40 s)");
+  press(233, 290);                              // I'M WATCHING
+  run_ms(31000);
+  SCREEN(brightness == 0, "strike answered, 30 s later: dark");
+  printf("%s: screen on/dark, %d wrong, %d brightness changes\n", sfail ? "FAIL" : "PASS", sfail, bright_changes);
+  sent_n -= 2;                                  // (the REEL IN + I'M WATCHING above)
 
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn" };
   int ok = sent_n == 6;

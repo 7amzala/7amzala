@@ -40,6 +40,18 @@ static const sh8601_lcd_init_cmd_t co5300_lcd_init_cmds[] =
 };
 
 
+static esp_lcd_panel_io_handle_t lcd_io = NULL;
+
+// Screen brightness 0 (dark: AMOLED pixels off, almost no power) .. 255.
+// Call it from the screen task (watch_ui.c), like all drawing.
+void lcd_set_brightness(uint8_t level)
+{
+  if(lcd_io == NULL)
+    return;
+
+  esp_lcd_panel_io_tx_param(lcd_io, (0x02 << 24) | (0x51 << 8), &level, 1);
+}
+
 void lcd_lvgl_Init(void)
 {
   READ_LCD_ID = read_lcd_id();
@@ -67,6 +79,7 @@ void lcd_lvgl_Init(void)
     },
   };
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
+  lcd_io = io_handle;               // for lcd_set_brightness()
   esp_lcd_panel_handle_t panel_handle = NULL;
   const esp_lcd_panel_dev_config_t panel_config =
   {

@@ -13,6 +13,11 @@
 // A strike always jumps to the main page; after 30 s on another page the
 // watch goes back by itself.
 //
+// Screen: dark after 30 s with nothing happening (AMOLED black = almost no
+// power). On again when you raise your wrist to look (watch_imu.cpp), touch
+// it (that touch only wakes it), on a knock, while a slow pull / drop-back
+// builds, during a strike (until answered), pull test, or when the rod is lost.
+//
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
 // strong buzz every 1.5 s until a button is pressed, rod lost = 3 buzzes.
@@ -25,6 +30,9 @@
 #include "ble_link.h"
 #include "buzz.h"
 #include "watch_bat.h"
+#include "watch_imu.h"
+
+void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #include "strikesense_boot_fixed.h"
 #include <stdio.h>
 #include <string.h>
@@ -75,6 +83,11 @@
 
 // Slow pull / drop-back shown (orange ring, title) from this % (was 30)
 #define PULL_SHOW   10
+
+#define SCREEN_IDLE_MS  30000      // dark after this with nothing happening
+#define SCREEN_RAISE_MS 10000      // wrist raised: on this long
+#define SCREEN_KNOCK_MS 5000       // a knock: on this long
+#define SCREEN_LOST_MS  10000      // rod lost: on this long
 
 #define SWIPE_PX     70           // finger moved this far sideways = swipe
 #define PAGE_BACK_MS 30000        // other page: back to the main page after this
@@ -165,6 +178,24 @@ static uint32_t buzz_strike_at = 0;
 static uint32_t buzz_pull_at = 0;
 static bool drop_was = false;
 static bool was_connected = false;
+
+// screen on / dark
+static bool screen_on = true;
+static uint32_t screen_until = 0;
+
+static void screen_wake(uint32_t ms)
+{
+  uint32_t until = lv_tick_get() + ms;
+
+  if((int32_t)(until - screen_until) > 0)
+    screen_until = until;
+
+  if(!screen_on)
+  {
+    screen_on = true;
+    lcd_set_brightness(255);
+  }
+}
 
 static const char *btn1_path = "";
 static const char *btn2_path = "";
@@ -479,7 +510,8 @@ static void swipe_timer(lv_timer_t *t)
   {
     down = true;
     from = p;
-    swiped = false;
+    swiped = !screen_on;            // dark: this touch only wakes the screen
+    screen_wake(SCREEN_IDLE_MS);
     return;
   }
 
@@ -771,9 +803,36 @@ static void ui_timer(lv_timer_t *t)
   bool connected = s.phase == BLE_LINK_CONNECTED && s.seq > 0 && s.age_ms < 4000;
 
   if(!connected && was_connected)
+  {
     buzz_play(BUZZ_LOST);
+    screen_wake(SCREEN_LOST_MS);
+  }
 
   was_connected = connected;
+
+  // ---- screen on / dark ----
+  if(imu_take_raise())
+    screen_wake(SCREEN_RAISE_MS);
+
+  bool keep = now - started_ms < BOOT_MS + SCREEN_IDLE_MS;      // the first 30 s
+
+  if(connected)
+  {
+    if(s.strike && s.strikeid != strike_quiet)
+      keep = true;                                               // strike: until answered
+
+    if(!s.strike && (s.bucket >= PULL_SHOW || s.drop >= PULL_SHOW || s.dropwatch || strcmp(s.state, "pulltest") == 0))
+      keep = true;                                               // something building / pull test
+  }
+
+  if(keep)
+    screen_wake(1000);
+
+  if(screen_on && (int32_t)(now - screen_until) > 0)
+  {
+    screen_on = false;
+    lcd_set_brightness(0);
+  }
 
   if(!connected)
   {
@@ -843,7 +902,10 @@ static void ui_timer(lv_timer_t *t)
   bool new_knock = last_knock_id >= 0 && s.knockid != last_knock_id;
 
   if(new_knock)
+  {
     knock_until = now + 3000;
+    screen_wake(SCREEN_KNOCK_MS);
+  }
 
   last_knock_id = s.knockid;
 

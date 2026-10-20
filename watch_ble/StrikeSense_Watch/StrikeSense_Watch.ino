@@ -18,6 +18,7 @@
 #include "ble_link.h"
 #include "buzz.h"
 #include "watch_bat.h"
+#include "watch_imu.h"
 
 void setup()
 {
@@ -31,6 +32,7 @@ void setup()
   lcd_lvgl_Init();          // screen + the StrikeSense screens (watch_ui.c)
   buzz_begin();             // wrist vibration, if the Haptic Bzzz is wired (SDA/SCL)
   watch_bat_begin();        // the watch's own battery (BATTERY page)
+  imu_begin();              // raise to wake (screen goes dark after 30 s)
 
   ble_link_begin();         // Bluetooth to the rod
 }
@@ -39,5 +41,6 @@ void loop()
 {
   ble_link_poll();          // find/connect the rod, live data, buttons
   watch_bat_poll();
+  imu_poll();
   delay(2);
 }

@@ -27,6 +27,7 @@ static void example_lvgl_port_task(void *arg);
 static void example_lvgl_unlock(void);
 static bool example_lvgl_lock(int timeout_ms);
 void lcd_lvgl_Init(void);
+void lcd_set_brightness(uint8_t level);
 static void example_lvgl_touch_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);
 #ifdef __cplusplus
 }
