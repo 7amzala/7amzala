@@ -33,9 +33,11 @@ the rod tip, plus a live dashboard over Wi-Fi.
    by itself; no WiFi, and the phone keeps its internet.
 2. Tap **ENABLE SOUND** (this also keeps the phone screen on).
 3. **LEARNING (15 s):** keep the rod still in the rest.
-4. **PULL TEST:** pull the line gently toward the water once, then let go.
-   The dashboard shows how far the tip moved and how far it needs to move.
-   **SKIP** reuses the last saved direction.
+4. **PULL TEST (only the very first time):** pull the line gently toward the
+   water once, then let go. The rod saves the direction and turns it with
+   the rod, so there is no pull test again: not after switching on, casting
+   (READY) or RELEARN. Mounted the sensor differently? **NEW PULL DIRECTION**
+   (dashboard, or the watch's SETUP page) asks for one pull test.
 5. **ROD ARMED:** it is watching.
 
 After an alarm:
@@ -43,7 +45,7 @@ After an alarm:
 - **I'M WATCHING:** stops the alarm and learns the new rod position (max 8 s).
   Detection stays on.
 - **REEL IN:** pauses detection. Press **READY** when the rod is back in
-  the rest; you get a few seconds to place it, then a new pull test.
+  the rest; you get a few seconds to place it, then it watches again.
 
 ## What it detects
 

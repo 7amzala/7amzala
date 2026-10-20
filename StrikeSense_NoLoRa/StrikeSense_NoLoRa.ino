@@ -750,6 +750,8 @@ Vec3 sideDir = { 0, 1, 0 };
 
 bool haveDir = false;
 
+Vec3 storedRest = { 0, 0, 0 };   // rest position at that pull test (sensor frame)
+bool haveStoredRest = false;
 Vec3 storedDir = { 0, 0, 0 };    // last pull test result, sensor frame
 bool haveStoredDir = false;
 
@@ -877,6 +879,7 @@ unsigned long dropEpisodeStart = 0;
 // =====================================================
 
 bool pullTestAfterSettle = false;
+bool teachDirAsked = false;      // "new pull direction" asked: pull test after learning
 unsigned long settleGraceUntil = 0;
 unsigned long settleStart = 0;
 
@@ -1386,6 +1389,24 @@ void updateSignals()
 // REST POSITION + DIRECTION
 // =====================================================
 
+// v turned by the turn that takes unit vector a to unit vector b
+Vec3 vTurn(Vec3 v, Vec3 a, Vec3 b)
+{
+  Vec3 axis = vCross(a, b);
+  float s = vLen(axis);
+  float c = vDot(a, b);
+
+  if(s < 1e-6)
+    return v;
+
+  Vec3 k = vScale(axis, 1.0 / s);
+
+  return vAdd(
+    vAdd(vScale(v, c), vScale(vCross(k, v), s)),
+    vScale(k, vDot(k, v) * (1 - c))
+  );
+}
+
 void refreshDirection()
 {
   if(!haveStoredDir)
@@ -1394,8 +1415,12 @@ void refreshDirection()
     return;
   }
 
+  // turn the saved direction with the rod (from the rest at the pull test)
+  Vec3 aimed =
+    haveStoredRest ? vTurn(storedDir, storedRest, restDir) : storedDir;
+
   Vec3 d =
-    vPerp(storedDir, restDir);
+    vPerp(aimed, restDir);
 
   if(vLen(d) < 0.3)
   {
@@ -1428,6 +1453,14 @@ void loadStoredDirection()
   storedDir.x = prefs.getFloat("dx", 0);
   storedDir.y = prefs.getFloat("dy", 0);
   storedDir.z = prefs.getFloat("dz", 0);
+
+  haveStoredRest = prefs.getBool("hasrest", false);
+  storedRest.x = prefs.getFloat("rx", 0);
+  storedRest.y = prefs.getFloat("ry", 0);
+  storedRest.z = prefs.getFloat("rz", 0);
+
+  if(vLen(storedRest) < 0.5)
+    haveStoredRest = false;
 
   prefs.end();
 
@@ -1570,6 +1603,11 @@ void saveStoredDirection()
   prefs.putFloat("dx", storedDir.x);
   prefs.putFloat("dy", storedDir.y);
   prefs.putFloat("dz", storedDir.z);
+
+  prefs.putBool("hasrest", haveStoredRest);
+  prefs.putFloat("rx", storedRest.x);
+  prefs.putFloat("ry", storedRest.y);
+  prefs.putFloat("rz", storedRest.z);
 
   prefs.end();
 }
@@ -2270,6 +2308,15 @@ void learningStep()
   Serial.print("Sea state: ");
   Serial.println(SEA_NAMES[seaState]);
 
+  // The pull direction is kept from the first pull test: no test again
+  if(haveDir && !teachDirAsked)
+  {
+    Serial.println("PULL DIRECTION: the saved one (no pull test)");
+    goMonitoring();
+    return;
+  }
+
+  teachDirAsked = false;
   startPullTest();
 }
 
@@ -2332,6 +2379,8 @@ void pullTestStep()
   {
     storedDir = vNorm(pullTestVec);
     haveStoredDir = true;
+    storedRest = restDir;             // to turn the direction with the rod later
+    haveStoredRest = true;
 
     saveStoredDirection();
     refreshDirection();
@@ -2854,7 +2903,7 @@ void monitoringStep()
 
 void finishSettling()
 {
-  if(pullTestAfterSettle)
+  if(pullTestAfterSettle && !haveDir)
   {
     pullTestWaveDeg = 0;
     startPullTest();
@@ -4346,6 +4395,7 @@ AUDIO: <span id="audioStatus">OFF</span>
 <div class="details">
 <span id="details">&ndash;</span>
 <button class="action relearn" onclick="relearn()">RELEARN</button>
+<button class="action relearn" onclick="teachDir()">NEW PULL DIRECTION</button>
 </div>
 
 </div>
@@ -6800,6 +6850,16 @@ async function setView(v)
 // BUTTONS
 // =====================================================
 
+// Only needed when the sensor is mounted differently: one pull test
+async function teachDir()
+{
+  if(!confirm("New pull direction?\n\nOnly needed if the sensor is mounted differently.\nThe rod will ask you to pull the line gently once."))
+    return;
+
+  stopContinuousAlarm();
+  await fetch("/teachdir");
+}
+
 async function relearn()
 {
   stopContinuousAlarm();
@@ -7639,6 +7699,23 @@ void handleRelearn()
   server.send(200, "text/plain", "OK");
 }
 
+// NEW PULL DIRECTION (phone settings / watch): one pull test now
+void handleTeachDir()
+{
+  if(rodState == ST_LEARNING)
+  {
+    teachDirAsked = true;             // right after learning
+  }
+  else
+  {
+    Serial.println("NEW PULL DIRECTION ASKED");
+    pullTestWaveDeg = 0;
+    startPullTest();
+  }
+
+  server.send(200, "text/plain", "OK");
+}
+
 void handleSkipPull()
 {
   if(rodState == ST_PULLTEST)
@@ -8039,6 +8116,7 @@ void setup()
   server.on("/logo.webp", handleLogo);
   server.on("/data", handleData);
   server.on("/watch", handleWatch);
+  server.on("/teachdir", handleTeachDir);
 #if defined(ESP32)
   server.onLive(watchJson);
 #endif

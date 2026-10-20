@@ -221,6 +221,10 @@ int main()
   }
   check(ask(47, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "answers still complete between live messages");
 
+  // NEW PULL DIRECTION (phone settings / watch): a pull test on request
+  check(ask(48, "/teachdir", a) && a.body == "OK" && rodState == ST_PULLTEST, "/teachdir: pull test started on request");
+  check(ask(49, "/skippull", a) && rodState == ST_MONITORING, "skip it: back to watching");
+
   // the phone leaves: the watch keeps working
   srv->cb->onDisconnect(srv);
   step(0.2);

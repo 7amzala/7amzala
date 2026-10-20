@@ -139,6 +139,8 @@ static lv_obj_t *btn1;
 static lv_obj_t *btn1_label;
 static lv_obj_t *btn2;
 static lv_obj_t *btn2_label;
+static lv_obj_t *btn3;                // only on the RELEARN page
+static lv_obj_t *btn3_label;
 static lv_obj_t *bar;
 static lv_obj_t *dots[3];
 static lv_obj_t *sea_cap[2];
@@ -214,6 +216,8 @@ static void screen_dark(void)
 
 static const char *btn1_path = "";
 static const char *btn2_path = "";
+static const char *btn3_path = "";
+static lv_obj_t *hold_btn = NULL;     // the hold-2-s button being held
 
 static long last_knock_id = -1;
 static uint32_t knock_until = 0;
@@ -405,6 +409,7 @@ static void layout(ui_mode_t m)
   }
   show(btn1, false);
   show(btn2, false);
+  show(btn3, false);
 
   bool top = m != MODE_BOOT && m != MODE_LOOKING && m != MODE_BATTERY && m != MODE_LASTSTRIKE;
 
@@ -456,8 +461,8 @@ static void layout(ui_mode_t m)
 
     case MODE_RELEARN:
       lv_obj_set_style_text_font(title, FONT_BIG, 0);
-      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 84);
-      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 184);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 76);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 120);
       lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 302);
       break;
 
@@ -650,6 +655,7 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
   {
     show(btn1, false);
     show(btn2, false);
+    show(btn3, false);
     set_text(title, ts == 1 ? "HOLD STILL" : ts == 2 ? "LEARNED" : "MOVED");
     set_text_color(title, ts == 3 ? COL_ORANGE : COL_CYAN);
     set_text(subtitle, ts == 1 ? "hold the watch the way\nyou look at it" : ts == 2 ? "your looking angle\nis saved" : "try again,\nhold it still");
@@ -659,38 +665,56 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
     return;
   }
 
-  set_text(title, "RELEARN\nTHE SEA");
+  set_text(title, "SETUP");
   set_text_color(title, COL_ORANGE);
-  set_text(subtitle, "after moving the rod");
+  set_text(subtitle, "hold a button 2 seconds");
   set_text_color(subtitle, COL_DIM);
+  set_text(hint, "");
 
-  bool holding = lv_obj_has_state(btn1, LV_STATE_PRESSED) && !swiped;
+  // RELEARN THE SEA and NEW PULL DIRECTION: hold 2 s (no accidents)
+  lv_obj_t *held_now = NULL;
 
-  if(!holding)
-    hold_from = 0;
-  else if(hold_from == 0)
-    hold_from = now;
+  if(!swiped)
+  {
+    if(lv_obj_has_state(btn1, LV_STATE_PRESSED))
+      held_now = btn1;
+    else if(lv_obj_has_state(btn2, LV_STATE_PRESSED))
+      held_now = btn2;
+  }
 
-  uint32_t held = hold_from ? now - hold_from : 0;
+  if(held_now != hold_btn)
+  {
+    hold_btn = held_now;
+    hold_from = held_now ? now : 0;
+  }
+
+  uint32_t held = hold_btn ? now - hold_from : 0;
 
   if(held >= HOLD_MS)
   {
-    ble_link_command("/relearn");
+    bool sea = hold_btn == btn1;
+    ble_link_command(sea ? "/relearn" : "/teachdir");
     buzz_play(BUZZ_DROP);             // two ticks: done
+    hold_btn = NULL;
     hold_from = 0;
     swiped = true;                    // this touch is used up: letting go presses nothing
-    page = 0;                         // back to the main page: it shows LEARNING
+    page = 0;                         // back to the main page: LEARNING or PULL TEST
     vpage = 0;
     return;
   }
 
   ring_set((int)(held * 100 / HOLD_MS), COL_ORANGE);
-  set_button(btn1, btn1_label, &btn1_path, s->command_busy ? "..." : holding ? "KEEP HOLDING" : "RELEARN",
-             "", 262, 260, 62, holding ? COL_ORANGE : COL_BLUE, holding ? lv_color_hex(0x221400) : COL_TEXT);
-  set_text(hint, "hold 2 seconds");
+
+  bool h1 = hold_btn == btn1;
+  bool h2 = hold_btn == btn2;
+
+  set_button(btn1, btn1_label, &btn1_path, s->command_busy ? "..." : h1 ? "KEEP HOLDING" : "RELEARN THE SEA",
+             "", 182, 300, 58, h1 ? COL_ORANGE : COL_BLUE, h1 ? lv_color_hex(0x221400) : COL_TEXT);
+  set_button(btn2, btn2_label, &btn2_path, h2 ? "KEEP HOLDING" : "NEW PULL DIRECTION",
+             "", 258, 300, 58, h2 ? COL_ORANGE : COL_BLUE, h2 ? lv_color_hex(0x221400) : COL_TEXT);
 
   if(imu_present())
-    set_button(btn2, btn2_label, &btn2_path, "TEACH MY LOOK", "#teach", 368, 240, 52, COL_BTN, COL_TEXT);
+    set_button(btn3, btn3_label, &btn3_path, "TEACH MY LOOK", "#teach", 336, 250, 52, COL_BTN, COL_TEXT);
 }
 
 static void time_left(char *out, size_t size, int pct, long minutes)
@@ -1362,6 +1386,7 @@ void watch_ui_create(void)
   // buttons
   btn1 = button(&btn1_label, &btn1_path);
   btn2 = button(&btn2_label, &btn2_path);
+  btn3 = button(&btn3_label, &btn3_path);
 
   // boot logo on top of everything for the first seconds
   boot_img = lv_img_create(scr);

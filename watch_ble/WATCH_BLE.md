@@ -11,7 +11,7 @@ Waveshare ESP32-S3-Touch-AMOLED-1.43 talking to the rod over **Bluetooth**
 | Rod armed / Knock / Slow pull / Drop-back | live graph (knock top, tilt bottom, last 20 s), tilt, knocks or pull %, rod battery, signal | REEL IN |
 | STRIKE! | red, flashing, strike type | I'M WATCHING, REEL IN |
 | Reeled in | cast, then press READY | READY |
-| Pull test | what to do, progress bar | SKIP |
+| Pull test (only the first time, or after NEW PULL DIRECTION) | what to do, progress bar | SKIP |
 
 Outer ring: cyan = all fine, orange = something building, red = strike.
 
@@ -20,7 +20,7 @@ Outer ring: cyan = all fine, orange = something building, red = strike.
 | From | Swipe | Page |
 |---|---|---|
 | main | left | SEA STATE (waves, wind) |
-| main | right | RELEARN THE SEA (hold 2 s) |
+| main | right | SETUP: RELEARN THE SEA, NEW PULL DIRECTION (hold 2 s each), TEACH MY LOOK |
 | any page | down | LAST STRIKE: 20 s before + 10 s after, from the rod (fresh after a rod restart) |
 | any page | up | BATTERY: rod + watch %, time left (learned after ~15 min) |
 

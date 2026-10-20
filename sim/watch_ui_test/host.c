@@ -318,8 +318,10 @@ int main(void)
   swipe(120, 380, 300);  expect(0, 0, "right: main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn"); save("w9_relearn");
   swipe(120, 380, 300);  expect(-1, 0, "right again: stays on relearn");
-  hold(233, 262, 800);   expect(-1, 0, "short press on RELEARN: nothing");
-  hold(233, 262, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
+  hold(233, 182, 800);   expect(-1, 0, "short press on RELEARN: nothing");
+  hold(233, 182, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
+  swipe(120, 380, 300);  expect(-1, 0, "right: setup page");
+  hold(233, 258, 2300);  expect(0, 0, "hold NEW PULL DIRECTION 2 s: /teachdir sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn");
   swipe(380, 120, 300);  expect(0, 0, "left: main");
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
@@ -388,7 +390,7 @@ int main(void)
   // teach my look (relearn page)
   scene = 1; fake_look = 1; run_ms(300);
   swipe(120, 380, 300);                         // right: relearn page
-  press(233, 368);                              // TEACH MY LOOK
+  press(233, 336);                              // TEACH MY LOOK
   SCREEN(teach_started == 1, "TEACH MY LOOK starts teaching");
   fake_look = 0; run_ms(1000);
   SCREEN(brightness == 255 && page == -1, "while teaching: on, even if not looking");
@@ -405,9 +407,9 @@ int main(void)
   printf("%s: screen on/dark, %d wrong, %d brightness changes\n", sfail ? "FAIL" : "PASS", sfail, bright_changes);
   sent_n -= 2;                                  // (the REEL IN + I'M WATCHING above)
 
-  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn" };
-  int ok = sent_n == 6;
-  for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 6 || strcmp(sent[i], want[i])) ok = 0; }
+  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
+  int ok = sent_n == 7;
+  for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 7 || strcmp(sent[i], want[i])) ok = 0; }
   printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", sent_n, ok ? "all buttons send the right request" : "wrong");
   return 0;
 }

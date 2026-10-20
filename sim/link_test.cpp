@@ -75,13 +75,22 @@ void session(float loss)
   check(rodState == ST_PAUSED, "rod paused for the cast after learning");
   check(lora_link_get_status().rod_state == ROD_PAUSED, "watch knows the rod is paused");
 
+  // pull test only the very first time (then the direction is kept)
+  bool firstTime = !haveStoredDir;
   check(command(CMD_READY, "READY"), "READY confirmed");
-  for (int i = 0; i < 40 && rodState != ST_PULLTEST; i++) step(0.5);
-  for (int i = 0; i < 50 && lora_link_get_status().rod_state != ROD_PULLTEST; i++) step(0.1);
-  show("after settling:");
-  check(lora_link_get_status().rod_state == ROD_PULLTEST, "watch shows the PULL TEST screen");
 
-  pullTest(simMillis / 1000.0 + 0.5);
+  if (firstTime) {
+    for (int i = 0; i < 40 && rodState != ST_PULLTEST; i++) step(0.5);
+    for (int i = 0; i < 50 && lora_link_get_status().rod_state != ROD_PULLTEST; i++) step(0.1);
+    show("after settling:");
+    check(lora_link_get_status().rod_state == ROD_PULLTEST, "first time: watch shows the PULL TEST screen");
+  } else {
+    for (int i = 0; i < 40 && rodState != ST_MONITORING; i++) step(0.5);
+    show("after settling:");
+    check(rodState == ST_MONITORING, "direction already known: no pull test, straight to watching");
+  }
+
+  if (firstTime) pullTest(simMillis / 1000.0 + 0.5);
   for (int i = 0; i < 20 && rodState != ST_MONITORING; i++) step(0.5);
   for (int i = 0; i < 50 && lora_link_get_status().rod_state != ROD_MONITORING; i++) step(0.1);
   show("after pull test:");
@@ -98,7 +107,10 @@ void session(float loss)
   while (lora_link_get_status().strike_id != (uint16_t)strikeEventID && simMillis - strikeAt < 10000) step(0.01);
   printf("  rod: %s -> watch knows after %.2f s\n", strikeType.c_str(), (simMillis - strikeAt) / 1000.0);
   check(lora_link_get_status().strike_type == STRIKE_SLOW, "watch shows SLOW PULL");
-  step(3);
+  // with lost packets the confirmation may need a few tries: wait up to 10 s
+  unsigned long ackFrom = simMillis;
+  while (strikeNeedsAck && simMillis - ackFrom < 10000) step(0.05);
+  printf("  rod got the watch's confirmation after %.1f s\n", (simMillis - ackFrom) / 1000.0);
   check(!strikeNeedsAck, "rod got the watch's confirmation (stops repeating)");
 
   check(command(CMD_WATCHING, "WATCHING"), "I'M WATCHING confirmed");

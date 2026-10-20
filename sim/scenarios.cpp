@@ -139,7 +139,8 @@ void scenario(const char* title, Env e, bool doPullTest, float pullDeg, float fa
   env = e; events.clear(); strikes.clear();
   startEnvironmentLearning();
   run(15.5);
-  if (doPullTest) { pullTest(simMillis / 1000.0 + 1); for (int i = 0; i < 30 && rodState == ST_PULLTEST; i++) run(0.5); } else handleSkipPull();
+  // pull only when the rod asks for it (with a saved direction it does not)
+  if (doPullTest && rodState == ST_PULLTEST) { pullTest(simMillis / 1000.0 + 1); for (int i = 0; i < 30 && rodState == ST_PULLTEST; i++) run(0.5); } else if (rodState == ST_PULLTEST) handleSkipPull();
   printf("  after pull test: %s dir=%d dirdot=%.2f need=%.1f\n", stateName(), haveDir, truthDot(), pullTestNeed());
   if (!strcmp(stateName(), "pulltest")) handleSkipPull();
   char buf[80]; snprintf(buf, 80, "%.0f min no fish (false alarms?)", falseMinutes);
@@ -175,6 +176,7 @@ void scenario(const char* title, Env e, bool doPullTest, float pullDeg, float fa
 int main(int argc, char** argv)
 {
   Serial.quiet = argc < 2; verbose = argc > 2;
+  if (getenv("SIM_SEED")) rng.seed(atoi(getenv("SIM_SEED")));   // other random seas
   setup();
   Env calm; calm.waveA = 0.15; calm.waveP = 5; calm.windA = 1;
   scenario("CALM, pull 2 deg", calm, true, 2.0, 20);
