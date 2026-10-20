@@ -334,13 +334,13 @@ int main(void)
   scene = 6; scene_start = sim_ms; run_ms(1000);  save("w7_pulltest");
 
   // tap each button where it is on the screen
-  scene = 1; run_ms(500); press(233, 405);   // REEL IN (live)
+  scene = 1; run_ms(500); press(233, 362);   // REEL IN (live)
   scene = 4; run_ms(500); press(176, 354);   // I'M WATCHING (strike)
   int strike_before = buzzed[BUZZ_STRIKE];
   run_ms(4000);
   printf("%s: strike buzz stops after I'M WATCHING\n", buzzed[BUZZ_STRIKE] == strike_before ? "PASS" : "FAIL");
   press(290, 354);                           // REEL IN (strike)
-  scene = 5; run_ms(500); press(233, 330);   // READY
+  scene = 5; run_ms(500); press(233, 268);   // READY
   scene = 6; run_ms(500); press(233, 360);   // SKIP
   press(233, 120);                           // empty spot: nothing
 
@@ -352,10 +352,10 @@ int main(void)
   swipe(120, 380, 300);  expect(0, 0, "right: main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn"); save("w9_relearn");
   swipe(120, 380, 300);  expect(-1, 0, "right again: stays on relearn");
-  hold(233, 182, 800);   expect(-1, 0, "short press on RELEARN: nothing");
-  hold(233, 182, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
+  hold(233, 146, 800);   expect(-1, 0, "short press on RELEARN: nothing");
+  hold(233, 146, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: setup page");
-  hold(233, 258, 2300);  expect(0, 0, "hold NEW PULL DIRECTION 2 s: /teachdir sent, back to main");
+  hold(233, 226, 2300);  expect(0, 0, "hold NEW PULL DIRECTION 2 s: /teachdir sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn");
   swipe(380, 120, 300);  expect(0, 0, "left: main");
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
@@ -387,7 +387,7 @@ int main(void)
   printf("%s: swipe map, %d wrong\n", nav_fail ? "FAIL" : "PASS", nav_fail);
   printf("last strike asked %d times\n", ls_asks);
   printf("before last swipe: %d sent\n", sent_n);
-  swipe(380, 120, 405);                      // swipe starting on REEL IN: no /reelin
+  swipe(380, 120, 362);                      // swipe starting on REEL IN: no /reelin
   printf("after last swipe: %d sent\n", sent_n);
 
   printf("vibration: tap %d, knock %d, pull %d, drop %d, strike %d, lost %d\n",
@@ -413,9 +413,9 @@ int main(void)
   SCREEN(brightness == 255 && cpu_mhz == 240 && flushed_px >= W * H, "look again: full speed, whole screen drawn before it shows");
   fake_look = 0; run_ms(200);
   int before = sent_n;
-  press(233, 405);
+  press(233, 362);
   SCREEN(brightness == 255 && sent_n == before, "touch on the dark screen: on, REEL IN not pressed");
-  press(233, 405);
+  press(233, 362);
   SCREEN(sent_n == before + 1, "next touch presses REEL IN");
   scene = 5; run_ms(300); scene = 1;           // (REEL IN answered: back to monitoring)
   run_ms(10500);
@@ -439,7 +439,7 @@ int main(void)
   // teach my look (relearn page)
   scene = 1; fake_look = 1; run_ms(300);
   swipe(120, 380, 300);                         // right: relearn page
-  press(233, 336);                              // TEACH MY LOOK
+  press(233, 306);                              // TEACH MY LOOK
   SCREEN(teach_started == 1, "TEACH MY LOOK starts teaching");
   fake_look = 0; run_ms(1000);
   SCREEN(brightness == 255 && page == -1, "while teaching: on, even if not looking");
