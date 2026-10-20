@@ -52,8 +52,14 @@ void buzz_play(buzz_t what) { buzzed[what]++; }
 static int brightness = 255;
 static int bright_changes = 0;
 void lcd_set_brightness(uint8_t l) { if(l != brightness) bright_changes++; brightness = l; }
-static int raise_flag = 0;
-bool imu_take_raise(void) { if(raise_flag) { raise_flag = 0; return true; } return false; }
+// fake motion sensor: the test says when you look
+static int fake_imu = 1, fake_look = 1, fake_still = 0, fake_teach = 0, teach_started = 0;
+bool imu_present(void) { return fake_imu; }
+bool imu_looking(void) { return fake_look; }
+bool imu_still(void) { return fake_still; }
+void imu_teach_start(void) { fake_teach = 1; teach_started++; }
+int imu_teach_state(void) { return fake_teach; }
+float imu_teach_progress(void) { return fake_teach == 1 ? 0.5f : fake_teach == 2 ? 1.0f : 0.0f; }
 
 #include "watch_ui.c"                 // the real screens (statics visible to the test)
 
@@ -309,8 +315,8 @@ int main(void)
   swipe(120, 380, 300);  expect(0, 0, "right: main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn"); save("w9_relearn");
   swipe(120, 380, 300);  expect(-1, 0, "right again: stays on relearn");
-  hold(233, 300, 800);   expect(-1, 0, "short press on RELEARN: nothing");
-  hold(233, 300, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
+  hold(233, 262, 800);   expect(-1, 0, "short press on RELEARN: nothing");
+  hold(233, 262, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn");
   swipe(380, 120, 300);  expect(0, 0, "left: main");
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
@@ -339,32 +345,55 @@ int main(void)
   printf("screen:\n");
   int sfail = 0;
 #define SCREEN(cond, what) do { int ok_ = (cond); if(!ok_) sfail++; printf("  %s %s (brightness %d)\n", ok_ ? "ok  " : "FAIL", what, brightness); } while(0)
-  scene = 1; scene_start = sim_ms; run_ms(31000);
-  SCREEN(brightness == 0, "calm, nothing touched for 30 s: dark");
-  raise_flag = 1; run_ms(200);
-  SCREEN(brightness == 255, "wrist raised: on");
-  run_ms(11000);
-  SCREEN(brightness == 0, "10 s after the raise: dark again");
+  scene = 1; scene_start = sim_ms; fake_look = 0; run_ms(10500);
+  SCREEN(brightness == 0, "not looking (10 s after the last touch): dark");
+  fake_look = 1; run_ms(200);
+  SCREEN(brightness == 255, "looking: on");
+  run_ms(60000);
+  SCREEN(brightness == 255, "still looking after 60 s: still on");
+  fake_look = 0; run_ms(200);
+  SCREEN(brightness == 0, "looked away: off at once");
   int before = sent_n;
   press(233, 405);
   SCREEN(brightness == 255 && sent_n == before, "touch on the dark screen: on, REEL IN not pressed");
   press(233, 405);
   SCREEN(sent_n == before + 1, "next touch presses REEL IN");
   scene = 5; run_ms(300); scene = 1;           // (REEL IN answered: back to monitoring)
-  run_ms(31000);
-  SCREEN(brightness == 0, "dark again");
+  run_ms(10500);
+  SCREEN(brightness == 0, "10 s after the touch: dark");
   scene = 2; scene_start = sim_ms; run_ms(1300);
-  SCREEN(brightness == 255, "knock: on");
-  run_ms(6000);
-  SCREEN(brightness == 0, "5 s after the knock: dark");
-  scene = 3; scene_start = sim_ms; run_ms(40000);
+  SCREEN(brightness == 0, "knock, not looking: stays dark (vibrates)");
+  scene = 3; scene_start = sim_ms; run_ms(2000);
+  SCREEN(brightness == 255, "slow pull building: on");
+  run_ms(40000);
   SCREEN(brightness == 255, "slow pull building: stays on");
+  scene = 1; run_ms(300);
+  SCREEN(brightness == 0, "slow pull gone, not looking: off");
   fake_strike_id = 4;                           // a new strike
   scene = 4; scene_start = sim_ms; run_ms(40000);
   SCREEN(brightness == 255, "strike: stays on (40 s)");
   press(233, 290);                              // I'M WATCHING
-  run_ms(31000);
-  SCREEN(brightness == 0, "strike answered, 30 s later: dark");
+  run_ms(300);
+  SCREEN(brightness == 255, "strike answered with a touch: on 10 s more");
+  run_ms(10500);
+  SCREEN(brightness == 0, "then, not looking: off");
+  // teach my look (relearn page)
+  scene = 1; fake_look = 1; run_ms(300);
+  swipe(120, 380, 300);                         // right: relearn page
+  press(233, 368);                              // TEACH MY LOOK
+  SCREEN(teach_started == 1, "TEACH MY LOOK starts teaching");
+  fake_look = 0; run_ms(1000);
+  SCREEN(brightness == 255 && page == -1, "while teaching: on, even if not looking");
+  save("w12_teach");
+  fake_teach = 2; run_ms(1000);
+  save("w13_learned");
+  run_ms(2000); fake_look = 1; swipe(380, 120, 300);
+  // no motion sensor: the old timer
+  fake_imu = 0; fake_look = 0; scene = 1; run_ms(31000);
+  SCREEN(brightness == 0, "no motion sensor: dark after 30 s");
+  scene = 2; scene_start = sim_ms; run_ms(1300);
+  SCREEN(brightness == 255, "no motion sensor: a knock turns it on");
+  fake_imu = 1;
   printf("%s: screen on/dark, %d wrong, %d brightness changes\n", sfail ? "FAIL" : "PASS", sfail, bright_changes);
   sent_n -= 2;                                  // (the REEL IN + I'M WATCHING above)
 

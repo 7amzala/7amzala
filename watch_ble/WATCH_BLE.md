@@ -91,11 +91,15 @@ At start the watch gives a double click and the Serial Monitor shows
 works as before. It shares the I2C bus with the touch
 screen (different address, no clash).
 
-## Screen: raise to wake
+## Screen: on while you look
 
-The screen goes dark after 30 s with nothing happening. It comes on when
-you raise your wrist to look (QMI8658 motion sensor, `[IMU] ...` on the
-Serial Monitor), touch it (that touch only wakes it), on a knock (5 s),
-while a slow pull / drop-back builds, during a strike until you answer
-it, in the pull test, and when the rod is lost. Vibration works with the
-screen dark.
+The screen is on while you look at the watch and goes off as soon as you
+look away (QMI8658 accelerometer + gyroscope, `[IMU] ...` on the Serial
+Monitor). It only turns on after a real raise of the wrist, so lying face
+up on a table does not count, and lying perfectly still for 2 s turns it
+off. Also on: while a slow pull / drop-back builds, during a strike until
+you answer it, in the pull test, and 10 s after a touch (that touch only
+wakes it). A knock only vibrates.
+
+TEACH MY LOOK (RELEARN page, swipe right): hold the watch the way you look
+at it for 3 s; the watch keeps that angle (also after a restart).

@@ -13,10 +13,11 @@
 // A strike always jumps to the main page; after 30 s on another page the
 // watch goes back by itself.
 //
-// Screen: dark after 30 s with nothing happening (AMOLED black = almost no
-// power). On again when you raise your wrist to look (watch_imu.cpp), touch
-// it (that touch only wakes it), on a knock, while a slow pull / drop-back
-// builds, during a strike (until answered), pull test, or when the rod is lost.
+// Screen: on while you look at the watch (watch_imu.cpp), off as soon as
+// you look away (AMOLED black = almost no power). Also on: while a slow
+// pull / drop-back builds, during a strike until you answer it, in the
+// pull test, 10 s after a touch (that touch only wakes it). A knock only
+// vibrates. Without the motion sensor: dark after 30 s, as before.
 //
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
@@ -84,10 +85,10 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 // Slow pull / drop-back shown (orange ring, title) from this % (was 30)
 #define PULL_SHOW   10
 
-#define SCREEN_IDLE_MS  30000      // dark after this with nothing happening
-#define SCREEN_RAISE_MS 10000      // wrist raised: on this long
-#define SCREEN_KNOCK_MS 5000       // a knock: on this long
-#define SCREEN_LOST_MS  10000      // rod lost: on this long
+#define SCREEN_IDLE_MS  30000      // no motion sensor: dark after this with nothing happening
+#define SCREEN_TOUCH_MS 10000      // a touch: on this long (watch lying on a table)
+#define SCREEN_KNOCK_MS 5000       // no motion sensor only: a knock turns it on this long
+#define SCREEN_LOST_MS  5000       // rod lost: on this long
 
 #define SWIPE_PX     70           // finger moved this far sideways = swipe
 #define PAGE_BACK_MS 30000        // other page: back to the main page after this
@@ -256,6 +257,13 @@ static void set_font(lv_obj_t *o, const lv_font_t *f)
 static void button_clicked(lv_event_t *e)
 {
   const char *path = (const char *)lv_event_get_user_data(e);
+
+  if(path != NULL && strcmp(path, "#teach") == 0 && !swiped)
+  {
+    imu_teach_start();              // TEACH MY LOOK (not sent to the rod)
+    buzz_play(BUZZ_TAP);
+    return;
+  }
 
   if(path != NULL && path[0] != 0 && !swiped)
   {
@@ -434,9 +442,9 @@ static void layout(ui_mode_t m)
 
     case MODE_RELEARN:
       lv_obj_set_style_text_font(title, FONT_BIG, 0);
-      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 92);
-      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 196);
-      lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 350);
+      lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 84);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 184);
+      lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 302);
       break;
 
     case MODE_BATTERY:
@@ -511,7 +519,7 @@ static void swipe_timer(lv_timer_t *t)
     down = true;
     from = p;
     swiped = !screen_on;            // dark: this touch only wakes the screen
-    screen_wake(SCREEN_IDLE_MS);
+    screen_wake(imu_present() ? SCREEN_TOUCH_MS : SCREEN_IDLE_MS);
     return;
   }
 
@@ -608,13 +616,38 @@ static void sea_page(const ble_link_status_t *s)
   sea_row(1, wind_name(s->wind), s->wind, COL_VIOLET);
 }
 
+static uint32_t teach_shown = 0;       // when the teach result appeared
+
 static void relearn_page(const ble_link_status_t *s, uint32_t now)
 {
   layout(MODE_RELEARN);
 
+  // teaching the looking angle: show only that
+  int ts = imu_teach_state();
+
+  if(ts == 1)
+    teach_shown = 0;
+  else if((ts == 2 || ts == 3) && teach_shown == 0)
+    teach_shown = now;                // the result: shown for 2.5 s
+
+  bool result = (ts == 2 || ts == 3) && now - teach_shown < 2500;
+
+  if(ts == 1 || result)
+  {
+    show(btn1, false);
+    show(btn2, false);
+    set_text(title, ts == 1 ? "HOLD STILL" : ts == 2 ? "LEARNED" : "MOVED");
+    set_text_color(title, ts == 3 ? COL_ORANGE : COL_CYAN);
+    set_text(subtitle, ts == 1 ? "hold the watch the way\nyou look at it" : ts == 2 ? "your looking angle\nis saved" : "try again,\nhold it still");
+    set_text_color(subtitle, COL_TEXT);
+    set_text(hint, "");
+    ring_set((int)(imu_teach_progress() * 100), ts == 3 ? COL_ORANGE : COL_CYAN);
+    return;
+  }
+
   set_text(title, "RELEARN\nTHE SEA");
   set_text_color(title, COL_ORANGE);
-  set_text(subtitle, "use after moving the rod\nor when the sea changes a lot");
+  set_text(subtitle, "after moving the rod");
   set_text_color(subtitle, COL_DIM);
 
   bool holding = lv_obj_has_state(btn1, LV_STATE_PRESSED) && !swiped;
@@ -639,8 +672,11 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
 
   ring_set((int)(held * 100 / HOLD_MS), COL_ORANGE);
   set_button(btn1, btn1_label, &btn1_path, s->command_busy ? "..." : holding ? "KEEP HOLDING" : "RELEARN",
-             "", 300, 260, 70, holding ? COL_ORANGE : COL_BLUE, holding ? lv_color_hex(0x221400) : COL_TEXT);
-  set_text(hint, "hold 2 seconds,\nthen keep the rod still");
+             "", 262, 260, 62, holding ? COL_ORANGE : COL_BLUE, holding ? lv_color_hex(0x221400) : COL_TEXT);
+  set_text(hint, "hold 2 seconds");
+
+  if(imu_present())
+    set_button(btn2, btn2_label, &btn2_path, "TEACH MY LOOK", "#teach", 368, 240, 52, COL_BTN, COL_TEXT);
 }
 
 static void time_left(char *out, size_t size, int pct, long minutes)
@@ -811,10 +847,13 @@ static void ui_timer(lv_timer_t *t)
   was_connected = connected;
 
   // ---- screen on / dark ----
-  if(imu_take_raise())
-    screen_wake(SCREEN_RAISE_MS);
+  bool keep = now - started_ms < BOOT_MS + 10000;               // the first 10 s
 
-  bool keep = now - started_ms < BOOT_MS + SCREEN_IDLE_MS;      // the first 30 s
+  if(imu_present() && imu_looking())
+    keep = true;                                                 // you are looking
+
+  if(imu_teach_state() == 1)
+    keep = true;                                                 // teaching your looking angle
 
   if(connected)
   {
@@ -826,7 +865,13 @@ static void ui_timer(lv_timer_t *t)
   }
 
   if(keep)
-    screen_wake(1000);
+  {
+    // on now; with the motion sensor it goes off at once when this ends
+    screen_wake(imu_present() ? 0 : 1000);
+
+    if((int32_t)(screen_until - now) < 150)
+      screen_until = now + 150;
+  }
 
   if(screen_on && (int32_t)(now - screen_until) > 0)
   {
@@ -904,7 +949,9 @@ static void ui_timer(lv_timer_t *t)
   if(new_knock)
   {
     knock_until = now + 3000;
-    screen_wake(SCREEN_KNOCK_MS);
+
+    if(!imu_present())
+      screen_wake(SCREEN_KNOCK_MS);   // with the motion sensor a knock only vibrates
   }
 
   last_knock_id = s.knockid;
