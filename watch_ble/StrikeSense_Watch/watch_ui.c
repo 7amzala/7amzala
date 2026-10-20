@@ -20,6 +20,12 @@
 // vibrates. Without the motion sensor: dark after 30 s, as before.
 // While dark nothing is drawn and the chip runs at 80 MHz (watch_power.cpp).
 //
+// STRIKE screen: what the fish does now - RUN (pulling the line), KNOCK,
+// SLACK (line went loose), QUIET (and for how long) - with a trend arrow
+// (stronger / weaker), a strength ring, PULL % and TILT, the live graph with
+// the strike marked, and a 30 s story bar. Each state has its own vibration;
+// unanswered: a reminder every 30 s.
+//
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
 // strong buzz every 1.5 s until a button is pressed, rod lost = 3 buzzes.
@@ -39,6 +45,7 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #include "strikesense_boot_fixed.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 // ---------- fonts: bigger ones if they are switched on in lv_conf.h ----------
 
@@ -184,6 +191,54 @@ static uint32_t buzz_strike_at = 0;
 static uint32_t buzz_pull_at = 0;
 static bool drop_was = false;
 static bool was_connected = false;
+
+// ---------- what the fish does (from the live data, every 100 ms) ----------
+typedef enum { FISH_QUIET, FISH_KNOCK, FISH_SLACK, FISH_RUN } fish_t;
+
+#define STORY_CELLS 30                // 30 s, one cell per second
+
+static fish_t fish = FISH_QUIET;
+static fish_t fish_was = FISH_QUIET;
+static uint32_t fish_run_ms = 0;      // last time it pulled / slacked / knocked
+static uint32_t fish_slack_ms = 0;
+static uint32_t fish_knock_ms = 0;
+static uint32_t fish_quiet_since = 0;
+static float fish_fast = 0;           // strength, quick average
+static float fish_slow = 0;           // strength, slow average (for the trend)
+static int fish_trend = 0;            // +1 stronger, -1 weaker, 0 steady
+static fish_t story[STORY_CELLS];
+static int story_head = 0;
+static fish_t story_cell = FISH_QUIET;
+static uint32_t story_at = 0;
+static uint32_t strike_ms = 0;        // when the strike on the screen started
+static long strike_ms_id = -1;
+static uint32_t buzz_state_at = 0;
+static uint32_t buzz_remind_at = 0;
+
+// STRIKE screen objects
+static lv_obj_t *ring_glow;
+static lv_obj_t *st_time;
+static lv_obj_t *st_pill;
+static lv_obj_t *st_dot;
+static lv_obj_t *st_state;
+static lv_obj_t *st_trend;
+static lv_obj_t *st_val[2];
+static lv_obj_t *st_unit[2];
+static lv_obj_t *st_cap[2];
+static lv_obj_t *st_panel;
+static lv_obj_t *st_bars;
+static lv_obj_t *st_lines;
+static lv_chart_series_t *st_bar_ser;
+static lv_chart_series_t *st_knock_ser;
+static lv_chart_series_t *st_tilt_ser;
+static lv_obj_t *st_mark;
+static lv_obj_t *st_mark_dot;
+static lv_obj_t *st_now;
+static lv_obj_t *st_story;
+static lv_obj_t *st_cell[STORY_CELLS];
+static lv_obj_t *st_btn[2];
+static lv_obj_t *st_btn_icon[2];
+static lv_obj_t *st_btn_cap[2];
 
 // screen on / dark
 static bool screen_on = true;
@@ -424,7 +479,32 @@ static void layout(ui_mode_t m)
   show(btn2, false);
   show(btn3, false);
 
-  bool top = m != MODE_BOOT && m != MODE_LOOKING && m != MODE_BATTERY && m != MODE_LASTSTRIKE;
+  // STRIKE screen: its own objects, a 270 degree gauge ring
+  bool st = m == MODE_STRIKE;
+
+  show(title, !st);
+  show(subtitle, !st);
+  show(ring_glow, st);
+  show(st_time, st);
+  show(st_pill, st);
+  show(st_trend, st);
+  show(st_panel, st);
+  show(st_story, st);
+
+  for(int i = 0; i < 2; i++)
+  {
+    show(st_val[i], st);
+    show(st_unit[i], st);
+    show(st_cap[i], st);
+    show(st_btn[i], st);
+    show(st_btn_cap[i], st);
+  }
+
+  lv_arc_set_bg_angles(ring, st ? 135 : 0, st ? 45 : 360);
+  lv_arc_set_rotation(ring, st ? 0 : 270);
+  spinning = false;
+
+  bool top = m != MODE_BOOT && m != MODE_LOOKING && m != MODE_BATTERY && m != MODE_LASTSTRIKE && !st;
 
   show(bt_icon, top);
   show(bat_label, top);
@@ -438,7 +518,8 @@ static void layout(ui_mode_t m)
   show(ring, m != MODE_BOOT);
 
   lv_obj_set_style_bg_color(scr, COL_BG, 0);
-  lv_obj_set_style_arc_width(ring, m == MODE_STRIKE || m == MODE_PULLTEST ? 14 : 10, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(ring, m == MODE_STRIKE ? 12 : m == MODE_PULLTEST ? 14 : 10, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(ring, m == MODE_STRIKE ? 12 : 10, LV_PART_MAIN);
 
   switch(m)
   {
@@ -730,6 +811,171 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
 
   if(imu_present())
     set_button(btn3, btn3_label, &btn3_path, "TEACH MY LOOK", "#teach", 336, 250, 52, COL_BTN, COL_TEXT);
+}
+
+// ---------- STRIKE screen ----------
+
+static lv_color_t fish_color(fish_t f)
+{
+  return f == FISH_RUN ? COL_RED : f == FISH_KNOCK ? COL_ORANGE : f == FISH_SLACK ? COL_VIOLET : COL_CYAN;
+}
+
+// Every 100 ms (graph_timer): what the fish does, how strong, the trend, the story
+static void fish_track(const ble_link_status_t *s, int k)
+{
+  uint32_t now = lv_tick_get();
+  float allow = s->allow > 0.2f ? s->allow : 0.2f;
+
+  if(s->bucket >= PULL_SHOW || s->tilt > allow)
+    fish_run_ms = now;                          // pulling the line beyond the waves
+
+  if(s->dropwatch || s->drop >= PULL_SHOW || s->tilt < -allow)
+    fish_slack_ms = now;                        // line went loose
+
+  if(k >= KNOCK_LIMIT)
+    fish_knock_ms = now;
+
+  fish_t f = FISH_QUIET;
+
+  if(fish_run_ms && now - fish_run_ms < 1500)
+    f = FISH_RUN;
+  else if(fish_slack_ms && now - fish_slack_ms < 1500)
+    f = FISH_SLACK;
+  else if(fish_knock_ms && now - fish_knock_ms < 3000)
+    f = FISH_KNOCK;
+
+  if(f != FISH_QUIET)
+    fish_quiet_since = 0;
+  else if(fish_quiet_since == 0)
+    fish_quiet_since = now;
+
+  fish = f;
+
+  // strength 0..1: pull %, tilt beyond the waves, knock size - the biggest
+  float st = s->bucket / 100.0f;
+  float tl = fabsf(s->tilt) / (allow * 3);
+  float kk = k / 300.0f;
+
+  if(tl > st) st = tl;
+  if(kk > st) st = kk;
+  if(st > 1) st = 1;
+
+  fish_fast += (st - fish_fast) * 0.3f;
+  fish_slow += (st - fish_slow) * 0.04f;
+  fish_trend = fish_fast > fish_slow + 0.08f ? 1 : (fish_fast < fish_slow - 0.08f ? -1 : 0);
+
+  // story: the strongest state of each second, last 30 s
+  if(f > story_cell)
+    story_cell = f;
+
+  if(now - story_at >= 1000)
+  {
+    story[story_head] = story_cell;
+    story_head = (story_head + 1) % STORY_CELLS;
+    story_cell = f;
+    story_at = now;
+  }
+}
+
+static void strike_page(const ble_link_status_t *s, uint32_t now)
+{
+  layout(MODE_STRIKE);
+  set_bg_color(scr, COL_BG);
+
+  if(s->strikeid != strike_ms_id)
+  {
+    strike_ms_id = s->strikeid;
+    strike_ms = now;
+  }
+
+  lv_color_t c = fish_color(fish);
+  int strength = (int)(fish_fast * 100);
+
+  // strength ring + soft glow
+  ring_set(strength < 3 ? 3 : strength, c);
+  lv_arc_set_value(ring_glow, strength < 3 ? 3 : strength);
+
+  if(lv_obj_get_style_arc_color(ring_glow, LV_PART_INDICATOR).full != c.full)
+    lv_obj_set_style_arc_color(ring_glow, c, LV_PART_INDICATOR);
+
+  // time since the strike
+  char a[32];
+  uint32_t secs = (now - strike_ms) / 1000;
+  snprintf(a, sizeof(a), "%lu:%02lu", (unsigned long)(secs / 60), (unsigned long)(secs % 60));
+  set_text(st_time, a);
+
+  // state pill: RUN / KNOCK / SLACK / QUIET m:ss
+  if(fish == FISH_QUIET)
+  {
+    uint32_t q = fish_quiet_since ? (now - fish_quiet_since) / 1000 : 0;
+    snprintf(a, sizeof(a), "QUIET  %lu:%02lu", (unsigned long)(q / 60), (unsigned long)(q % 60));
+  }
+  else
+  {
+    snprintf(a, sizeof(a), "%s", fish == FISH_RUN ? "RUN" : fish == FISH_KNOCK ? "KNOCK" : "SLACK");
+  }
+
+  set_text(st_state, a);
+  set_text_color(st_state, c);
+  set_bg_color(st_dot, c);
+  set_bg_color(st_pill, c);
+
+  if(lv_obj_get_style_border_color(st_pill, 0).full != c.full)
+    lv_obj_set_style_border_color(st_pill, c, 0);
+
+  // trend arrow next to the pill
+  set_text(st_trend, fish_trend > 0 ? LV_SYMBOL_UP : fish_trend < 0 ? LV_SYMBOL_DOWN : "");
+  set_text_color(st_trend, fish_trend > 0 ? COL_ORANGE : COL_CYAN);
+  lv_obj_update_layout(st_pill);
+  lv_obj_align_to(st_trend, st_pill, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+
+  // PULL % and TILT, each number centred with its unit right after it
+  for(int i = 0; i < 2; i++)
+  {
+    if(i == 0)
+      snprintf(a, sizeof(a), "%d", s->bucket);
+    else
+      snprintf(a, sizeof(a), "%+.1f", s->tilt);
+
+    if(strcmp(lv_label_get_text(st_val[i]), a) != 0)
+    {
+      lv_label_set_text(st_val[i], a);
+      lv_obj_update_layout(st_val[i]);
+      lv_obj_update_layout(st_unit[i]);
+
+      lv_coord_t w = lv_obj_get_width(st_val[i]) + 4 + lv_obj_get_width(st_unit[i]);
+      lv_coord_t cx = i == 0 ? -73 : 73;
+      lv_obj_align(st_val[i], LV_ALIGN_TOP_MID, cx - w / 2 + lv_obj_get_width(st_val[i]) / 2, 104);
+      lv_obj_align_to(st_unit[i], st_val[i], LV_ALIGN_OUT_RIGHT_BOTTOM, 4, -6);
+    }
+  }
+
+  // strike marker on the graph (100 ms per point)
+  int idx = GRAPH_POINTS - 1 - (int)((now - strike_ms) / 100);
+  show(st_mark, idx >= 0);
+  show(st_mark_dot, idx >= 0);
+
+  if(idx >= 0)
+  {
+    int x = 10 + idx * (354 - 20) / (GRAPH_POINTS - 1);
+    lv_obj_set_x(st_mark, x - 1);
+    lv_obj_set_x(st_mark_dot, x - 5);
+  }
+
+  // "now" dot at the end of the tilt line
+  lv_coord_t *ty = lv_chart_get_y_array(chart, ser_tilt);
+  int last = (lv_chart_get_x_start_point(chart, ser_tilt) + GRAPH_POINTS - 1) % GRAPH_POINTS;
+  int tv = ty[last] == LV_CHART_POINT_NONE ? 0 : ty[last];
+  lv_obj_set_y(st_now, 10 + (900 - tv) * (126 - 20) / 1200 - 6);
+
+  // story bar: the last 30 s, oldest left
+  for(int i = 0; i < STORY_CELLS; i++)
+  {
+    fish_t f = story[(story_head + i) % STORY_CELLS];
+    set_bg_color(st_cell[i], f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color(f));
+  }
+
+  set_text(st_btn_cap[0], s->command_busy ? "..." : "WATCHING");
 }
 
 static void time_left(char *out, size_t size, int pct, long minutes)
@@ -1032,15 +1278,55 @@ static void ui_timer(lv_timer_t *t)
 
   if(s.strike)
   {
-    if(s.strikeid != strike_quiet && now - buzz_strike_at >= 1500)
+    // a vibration for each state, until you answer; reminder every 30 s
+    if(s.strikeid != strike_quiet)
     {
-      buzz_strike_at = now;
-      buzz_play(BUZZ_STRIKE);
+      if(buzz_strike_at == 0)
+      {
+        buzz_play(BUZZ_STRIKE);           // the strike itself
+        buzz_strike_at = now;
+        buzz_state_at = now;
+        buzz_remind_at = now;
+      }
+      else if(fish != fish_was)
+      {
+        buzz_play(fish == FISH_RUN ? BUZZ_STRIKE : fish == FISH_KNOCK ? BUZZ_KNOCK :
+                  fish == FISH_SLACK ? BUZZ_DROP : BUZZ_TAP);
+        buzz_state_at = now;
+
+        if(fish != FISH_QUIET)
+          buzz_remind_at = now;
+      }
+      else if(fish == FISH_RUN && now - buzz_state_at >= 1500)
+      {
+        buzz_play(BUZZ_STRIKE);           // still running: long buzz every 1.5 s
+        buzz_state_at = now;
+        buzz_remind_at = now;
+      }
+      else if(fish == FISH_SLACK && now - buzz_state_at >= 3000)
+      {
+        buzz_play(BUZZ_DROP);
+        buzz_state_at = now;
+        buzz_remind_at = now;
+      }
+      else if(fish == FISH_KNOCK && new_knock)
+      {
+        buzz_play(BUZZ_KNOCK);
+        buzz_remind_at = now;
+      }
+      else if(now - buzz_remind_at >= 30000)
+      {
+        buzz_play(BUZZ_STRIKE);           // reminder: not answered yet
+        buzz_remind_at = now;
+      }
     }
+
+    fish_was = fish;
   }
   else
   {
     buzz_strike_at = 0;
+    fish_was = fish;
     bool drop = s.dropwatch || s.drop >= PULL_SHOW;
 
     if(drop && !drop_was)
@@ -1061,21 +1347,7 @@ static void ui_timer(lv_timer_t *t)
 
   if(s.strike)
   {
-    layout(MODE_STRIKE);
-
-    bool on = (now / 350) % 2 == 0;     // flashing
-
-    set_bg_color(scr, on ? lv_color_hex(0x5a000c) : lv_color_hex(0x220004));
-    ring_set(100, on ? COL_RED : lv_color_hex(0x7a0010));
-
-    set_text(title, "STRIKE!");
-    set_text_color(title, COL_TEXT);
-    set_text(subtitle, s.type[0] ? s.type : "FISH ON");
-    set_text_color(subtitle, COL_RED);
-    set_font(subtitle, FONT_MID);
-
-    set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : "I'M WATCHING", "/watching", 290, 300, 66, COL_CYAN, lv_color_hex(0x001226));
-    set_button(btn2, btn2_label, &btn2_path, "REEL IN", "/reelin", 372, 300, 66, COL_TEXT, lv_color_hex(0x7a0010));
+    strike_page(&s, now);
     return;
   }
 
@@ -1221,6 +1493,19 @@ static void graph_timer(lv_timer_t *t)
   lv_chart_set_next_value(chart, ser_knock, k > 300 ? 300 : k);
   lv_chart_set_next_value(chart, ser_limit, KNOCK_LIMIT);
   lv_chart_set_next_value(chart, ser_tilt, tl > 300 ? 300 : (tl < -300 ? -300 : tl));
+
+  fish_track(&s, k);
+
+  // the STRIKE graph shows the same data (shared arrays, same start point)
+  if(mode == MODE_STRIKE)
+  {
+    uint16_t sp = lv_chart_get_x_start_point(chart, ser_knock);
+    lv_chart_set_x_start_point(st_bars, st_bar_ser, sp);
+    lv_chart_set_x_start_point(st_lines, st_knock_ser, sp);
+    lv_chart_set_x_start_point(st_lines, st_tilt_ser, sp);
+    lv_chart_refresh(st_bars);
+    lv_chart_refresh(st_lines);
+  }
 }
 
 // ---------- building the screen ----------
@@ -1230,6 +1515,20 @@ void watch_ui_create(void)
   scr = lv_scr_act();
   lv_obj_set_style_bg_color(scr, COL_BG, 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+  // soft glow behind the ring (STRIKE screen)
+  ring_glow = lv_arc_create(scr);
+  lv_obj_set_size(ring_glow, 452, 452);
+  lv_obj_center(ring_glow);
+  lv_arc_set_range(ring_glow, 0, 100);
+  lv_arc_set_bg_angles(ring_glow, 135, 45);
+  lv_arc_set_rotation(ring_glow, 0);
+  lv_obj_remove_style(ring_glow, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(ring_glow, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_arc_opa(ring_glow, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(ring_glow, 24, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_opa(ring_glow, LV_OPA_10, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(ring_glow, true, LV_PART_INDICATOR);
 
   // outer ring
   ring = lv_arc_create(scr);
@@ -1429,6 +1728,195 @@ void watch_ui_create(void)
   btn1 = button(&btn1_label, &btn1_path);
   btn2 = button(&btn2_label, &btn2_path);
   btn3 = button(&btn3_label, &btn3_path);
+
+  // ---------- STRIKE screen ----------
+  st_time = label(scr, FONT_TINY, COL_DIM);
+  lv_obj_align(st_time, LV_ALIGN_TOP_MID, 0, 42);
+
+  st_pill = lv_obj_create(scr);
+  lv_obj_remove_style_all(st_pill);
+  lv_obj_set_size(st_pill, LV_SIZE_CONTENT, 30);
+  lv_obj_set_style_radius(st_pill, 15, 0);
+  lv_obj_set_style_bg_opa(st_pill, LV_OPA_20, 0);
+  lv_obj_set_style_border_width(st_pill, 1, 0);
+  lv_obj_set_style_border_opa(st_pill, LV_OPA_60, 0);
+  lv_obj_set_style_pad_hor(st_pill, 12, 0);
+  lv_obj_set_flex_flow(st_pill, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(st_pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(st_pill, 7, 0);
+  lv_obj_clear_flag(st_pill, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_align(st_pill, LV_ALIGN_TOP_MID, -10, 66);
+
+  st_dot = lv_obj_create(st_pill);
+  lv_obj_remove_style_all(st_dot);
+  lv_obj_set_size(st_dot, 8, 8);
+  lv_obj_set_style_radius(st_dot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(st_dot, LV_OPA_COVER, 0);
+
+  st_state = label(st_pill, FONT_TINY, COL_RED);
+
+  st_trend = label(scr, FONT_SMALL, COL_ORANGE);
+
+  const char *caps[2] = { "PULL", "TILT" };
+  const char *units[2] = { "%", "deg" };
+
+  for(int i = 0; i < 2; i++)
+  {
+    int cx = i == 0 ? -73 : 73;
+
+    st_val[i] = label(scr, FONT_BIG, i == 0 ? COL_TEXT : COL_VIOLET);
+    lv_obj_align(st_val[i], LV_ALIGN_TOP_MID, cx - 10, 104);
+
+    st_unit[i] = label(scr, FONT_TINY, i == 0 ? COL_TEXT : COL_VIOLET);
+    lv_label_set_text(st_unit[i], units[i]);
+    lv_obj_align(st_unit[i], LV_ALIGN_TOP_MID, cx + 38, 120);
+
+    st_cap[i] = label(scr, FONT_TINY, COL_DIM);
+    lv_label_set_text(st_cap[i], caps[i]);
+    lv_obj_align(st_cap[i], LV_ALIGN_TOP_MID, cx, 144);
+  }
+
+  // graph panel: knock as a filled area (bars), tilt as a line
+  st_panel = lv_obj_create(scr);
+  lv_obj_remove_style_all(st_panel);
+  lv_obj_set_size(st_panel, 354, 126);
+  lv_obj_align(st_panel, LV_ALIGN_TOP_MID, 0, 172);
+  lv_obj_set_style_radius(st_panel, 18, 0);
+  lv_obj_set_style_bg_opa(st_panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(st_panel, lv_color_hex(0x0c101a), 0);
+  lv_obj_set_style_border_width(st_panel, 1, 0);
+  lv_obj_set_style_border_color(st_panel, lv_color_hex(0x1e2432), 0);
+  lv_obj_set_style_clip_corner(st_panel, true, 0);
+  lv_obj_clear_flag(st_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+  // knock area: bars in the top half (0..300 = knock limit at 100)
+  st_bars = lv_chart_create(st_panel);
+  lv_obj_remove_style_all(st_bars);
+  lv_obj_set_size(st_bars, 354, 10 + 53);
+  lv_obj_set_pos(st_bars, 0, 0);
+  lv_obj_set_style_pad_top(st_bars, 10, 0);
+  lv_obj_set_style_pad_hor(st_bars, 10, 0);
+  lv_chart_set_type(st_bars, LV_CHART_TYPE_BAR);
+  lv_chart_set_point_count(st_bars, GRAPH_POINTS);
+  lv_chart_set_div_line_count(st_bars, 0, 0);
+  lv_chart_set_range(st_bars, LV_CHART_AXIS_PRIMARY_Y, 0, 300);
+  lv_obj_set_style_pad_column(st_bars, 0, 0);
+  lv_obj_set_style_radius(st_bars, 0, LV_PART_ITEMS);
+  lv_obj_set_style_bg_grad_color(st_bars, lv_color_hex(0x0b3346), LV_PART_ITEMS);
+  lv_obj_set_style_bg_grad_dir(st_bars, LV_GRAD_DIR_VER, LV_PART_ITEMS);
+  lv_obj_clear_flag(st_bars, LV_OBJ_FLAG_CLICKABLE);
+  st_bar_ser = lv_chart_add_series(st_bars, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
+  lv_chart_set_ext_y_array(st_bars, st_bar_ser, lv_chart_get_y_array(chart, ser_knock));
+
+  // knock edge + tilt line, same scales as the main graph
+  st_lines = lv_chart_create(st_panel);
+  lv_obj_remove_style_all(st_lines);
+  lv_obj_set_size(st_lines, 354, 126);
+  lv_obj_set_pos(st_lines, 0, 0);
+  lv_obj_set_style_pad_all(st_lines, 10, 0);
+  lv_chart_set_type(st_lines, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(st_lines, GRAPH_POINTS);
+  lv_chart_set_div_line_count(st_lines, 0, 0);
+  lv_chart_set_range(st_lines, LV_CHART_AXIS_PRIMARY_Y, -300, 300);
+  lv_chart_set_range(st_lines, LV_CHART_AXIS_SECONDARY_Y, -300, 900);
+  lv_obj_set_style_size(st_lines, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_line_width(st_lines, 3, LV_PART_ITEMS);
+  lv_obj_clear_flag(st_lines, LV_OBJ_FLAG_CLICKABLE);
+  st_knock_ser = lv_chart_add_series(st_lines, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
+  st_tilt_ser = lv_chart_add_series(st_lines, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
+  lv_chart_set_ext_y_array(st_lines, st_knock_ser, lv_chart_get_y_array(chart, ser_knock));
+  lv_chart_set_ext_y_array(st_lines, st_tilt_ser, lv_chart_get_y_array(chart, ser_tilt));
+
+  // knock limit: dashed amber line
+  static lv_point_t limit_pts[2] = { { 10, 0 }, { 344, 0 } };
+  lv_obj_t *limit = lv_line_create(st_panel);
+  lv_line_set_points(limit, limit_pts, 2);
+  lv_obj_set_y(limit, 10 + (300 - KNOCK_LIMIT) * 106 / 600);
+  lv_obj_set_style_line_color(limit, COL_ORANGE, 0);
+  lv_obj_set_style_line_opa(limit, LV_OPA_50, 0);
+  lv_obj_set_style_line_width(limit, 1, 0);
+  lv_obj_set_style_line_dash_width(limit, 5, 0);
+  lv_obj_set_style_line_dash_gap(limit, 5, 0);
+
+  // strike marker: dashed red line with a dot on top
+  static lv_point_t mark_pts[2] = { { 1, 0 }, { 1, 106 } };
+  st_mark = lv_line_create(st_panel);
+  lv_line_set_points(st_mark, mark_pts, 2);
+  lv_obj_set_y(st_mark, 12);
+  lv_obj_set_style_line_color(st_mark, COL_RED, 0);
+  lv_obj_set_style_line_width(st_mark, 2, 0);
+  lv_obj_set_style_line_dash_width(st_mark, 5, 0);
+  lv_obj_set_style_line_dash_gap(st_mark, 4, 0);
+
+  st_mark_dot = lv_obj_create(st_panel);
+  lv_obj_remove_style_all(st_mark_dot);
+  lv_obj_set_size(st_mark_dot, 10, 10);
+  lv_obj_set_y(st_mark_dot, 4);
+  lv_obj_set_style_radius(st_mark_dot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(st_mark_dot, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(st_mark_dot, COL_RED, 0);
+
+  // "now": dot at the end of the tilt line
+  st_now = lv_obj_create(st_panel);
+  lv_obj_remove_style_all(st_now);
+  lv_obj_set_size(st_now, 12, 12);
+  lv_obj_set_x(st_now, 354 - 10 - 6);
+  lv_obj_set_style_radius(st_now, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(st_now, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(st_now, lv_color_white(), 0);
+  lv_obj_set_style_border_width(st_now, 3, 0);
+  lv_obj_set_style_border_color(st_now, COL_VIOLET, 0);
+  lv_obj_set_style_shadow_width(st_now, 12, 0);
+  lv_obj_set_style_shadow_color(st_now, COL_VIOLET, 0);
+  lv_obj_set_style_shadow_opa(st_now, LV_OPA_60, 0);
+
+  // story bar: last 30 s, one cell per second
+  st_story = lv_obj_create(scr);
+  lv_obj_remove_style_all(st_story);
+  lv_obj_set_size(st_story, 334, 6);
+  lv_obj_align(st_story, LV_ALIGN_TOP_MID, 0, 306);
+  lv_obj_set_style_radius(st_story, 3, 0);
+  lv_obj_set_style_clip_corner(st_story, true, 0);
+  lv_obj_clear_flag(st_story, LV_OBJ_FLAG_CLICKABLE);
+
+  for(int i = 0; i < STORY_CELLS; i++)
+  {
+    st_cell[i] = lv_obj_create(st_story);
+    lv_obj_remove_style_all(st_cell[i]);
+    lv_obj_set_style_bg_opa(st_cell[i], LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(st_cell[i], lv_color_hex(0x343a4a), 0);
+    lv_obj_set_pos(st_cell[i], i * 334 / STORY_CELLS, 0);
+    lv_obj_set_size(st_cell[i], (i + 1) * 334 / STORY_CELLS - i * 334 / STORY_CELLS - 1, 6);
+    story[i] = FISH_QUIET;
+  }
+
+  // round icon buttons: I'M WATCHING, REEL IN
+  static const char *st_paths[2] = { "/watching", "/reelin" };
+  const char *icons[2] = { LV_SYMBOL_EYE_OPEN, LV_SYMBOL_REFRESH };
+  const char *bcaps[2] = { "WATCHING", "REEL IN" };
+
+  for(int i = 0; i < 2; i++)
+  {
+    lv_color_t bc = i == 0 ? COL_CYAN : COL_RED;
+
+    st_btn[i] = lv_btn_create(scr);
+    lv_obj_set_size(st_btn[i], 64, 64);
+    lv_obj_align(st_btn[i], LV_ALIGN_TOP_MID, i == 0 ? -57 : 57, 322);
+    lv_obj_set_style_radius(st_btn[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(st_btn[i], lv_color_hex(0x141924), 0);
+    lv_obj_set_style_border_width(st_btn[i], 2, 0);
+    lv_obj_set_style_border_color(st_btn[i], bc, 0);
+    lv_obj_set_style_shadow_width(st_btn[i], 0, 0);
+    lv_obj_add_event_cb(st_btn[i], button_clicked, LV_EVENT_CLICKED, (void *)st_paths[i]);
+
+    st_btn_icon[i] = label(st_btn[i], FONT_SMALL, bc);
+    lv_label_set_text(st_btn_icon[i], icons[i]);
+    lv_obj_center(st_btn_icon[i]);
+
+    st_btn_cap[i] = label(scr, FONT_TINY, COL_DIM);
+    lv_label_set_text(st_btn_cap[i], bcaps[i]);
+    lv_obj_align(st_btn_cap[i], LV_ALIGN_TOP_MID, i == 0 ? -57 : 57, 392);
+  }
 
   // boot logo on top of everything for the first seconds
   boot_img = lv_img_create(scr);

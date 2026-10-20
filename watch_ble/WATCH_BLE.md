@@ -9,7 +9,7 @@ Waveshare ESP32-S3-Touch-AMOLED-1.43 talking to the rod over **Bluetooth**
 |---|---|---|
 | Looking for the rod | searching / connecting | – |
 | Rod armed / Knock / Slow pull / Drop-back | live graph (knock top, tilt bottom, last 20 s), tilt, knocks or pull %, rod battery, signal | REEL IN |
-| STRIKE! | red, flashing, strike type | I'M WATCHING, REEL IN |
+| STRIKE | what the fish does now: RUN / KNOCK / SLACK / QUIET m:ss, trend arrow, strength ring, PULL % and TILT, live graph with the strike marked, 30 s story bar | WATCHING (eye), REEL IN |
 | Reeled in | cast, then press READY | READY |
 | Pull test (only the first time, or after NEW PULL DIRECTION) | what to do, progress bar | SKIP |
 
@@ -103,3 +103,13 @@ wakes it). A knock only vibrates.
 
 TEACH MY LOOK (RELEARN page, swipe right): hold the watch the way you look
 at it for 3 s; the watch keeps that angle (also after a restart).
+
+## Strike vibrations (until you answer)
+
+| Fish | You feel |
+|---|---|
+| RUN (pulling the line) | long buzz, every 1.5 s |
+| KNOCK | a tick for each knock |
+| SLACK (line went loose) | double tick, every 3 s |
+| QUIET | one soft tick when it stops |
+| not answered | a reminder buzz every 30 s |

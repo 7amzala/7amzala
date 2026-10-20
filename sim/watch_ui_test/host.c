@@ -130,6 +130,7 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
   s->bat = 78;
   s->batleft = 580;
   s->knockthr = 0.004f;
+  s->allow = 1.0f;
   s->wave = 2;
   s->wind = 0;
   s->dir = true;
@@ -163,6 +164,28 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
 
     case 5:                                     // reeled in
       strcpy(s->state, "paused");
+      break;
+
+    case 7:                                     // strike, fish quiet
+      s->strike = true;
+      strcpy(s->type, "SLOW PULL");
+      s->strikeid = fake_strike_id;
+      break;
+
+    case 8:                                     // strike, fish knocking
+      s->strike = true;
+      strcpy(s->type, "REPEATED BITE");
+      s->strikeid = fake_strike_id;
+      if(((int)(t * 10)) % 12 == 0) e += 0.009f;
+      s->knocks = 2;
+      break;
+
+    case 9:                                     // strike, line went slack
+      s->strike = true;
+      strcpy(s->type, "DROP-BACK + PULL");
+      s->strikeid = fake_strike_id;
+      s->drop = 60;
+      s->tilt = -1.6f;
       break;
 
     case 6:                                     // pull test
@@ -312,11 +335,11 @@ int main(void)
 
   // tap each button where it is on the screen
   scene = 1; run_ms(500); press(233, 405);   // REEL IN (live)
-  scene = 4; run_ms(500); press(233, 290);   // I'M WATCHING (strike)
+  scene = 4; run_ms(500); press(176, 354);   // I'M WATCHING (strike)
   int strike_before = buzzed[BUZZ_STRIKE];
   run_ms(4000);
   printf("%s: strike buzz stops after I'M WATCHING\n", buzzed[BUZZ_STRIKE] == strike_before ? "PASS" : "FAIL");
-  press(233, 372);                           // REEL IN (strike)
+  press(290, 354);                           // REEL IN (strike)
   scene = 5; run_ms(500); press(233, 330);   // READY
   scene = 6; run_ms(500); press(233, 360);   // SKIP
   press(233, 120);                           // empty spot: nothing
@@ -408,7 +431,7 @@ int main(void)
   fake_strike_id = 4;                           // a new strike
   scene = 4; scene_start = sim_ms; run_ms(40000);
   SCREEN(brightness == 255, "strike: stays on (40 s)");
-  press(233, 290);                              // I'M WATCHING
+  press(176, 354);                              // I'M WATCHING
   run_ms(300);
   SCREEN(brightness == 255, "strike answered with a touch: on 10 s more");
   run_ms(10500);
@@ -432,6 +455,37 @@ int main(void)
   fake_imu = 1;
   printf("%s: screen on/dark, %d wrong, %d brightness changes\n", sfail ? "FAIL" : "PASS", sfail, bright_changes);
   sent_n -= 2;                                  // (the REEL IN + I'M WATCHING above)
+
+  // ---- STRIKE screen: what the fish does ----
+  printf("strike screen:\n");
+  int ffail = 0;
+#define FISH(cond, what) do { int ok_ = (cond); if(!ok_) ffail++; printf("  %s %s (state %d, strength %.2f, trend %d)\n", ok_ ? "ok  " : "FAIL", what, fish, fish_fast, fish_trend); } while(0)
+  fake_look = 1;
+  fake_strike_id = 10; scene = 4; scene_start = sim_ms;
+  int b0 = buzzed[BUZZ_STRIKE];
+  run_ms(4000);
+  FISH(fish == FISH_RUN && fish_fast > 0.5f, "pulling hard: RUN, strong");
+  FISH(buzzed[BUZZ_STRIKE] - b0 >= 2, "RUN: long buzz repeated");
+  save("w14_strike_run");
+  scene = 9; scene_start = sim_ms; int d0 = buzzed[BUZZ_DROP]; run_ms(4000);
+  FISH(fish == FISH_SLACK && buzzed[BUZZ_DROP] > d0, "line went loose: SLACK, double tick");
+  save("w15_strike_slack");
+  scene = 8; scene_start = sim_ms; int k0 = buzzed[BUZZ_KNOCK]; run_ms(4000);
+  FISH(fish == FISH_KNOCK && buzzed[BUZZ_KNOCK] > k0, "bites: KNOCK, ticks");
+  save("w16_strike_knock");
+  scene = 7; scene_start = sim_ms; int t0 = buzzed[BUZZ_TAP]; run_ms(6000);
+  FISH(fish == FISH_QUIET && buzzed[BUZZ_TAP] > t0 && fish_trend <= 0, "fish stopped: QUIET, one soft tick, not stronger");
+  save("w17_strike_quiet");
+  int r0 = buzzed[BUZZ_STRIKE]; run_ms(31000);
+  FISH(buzzed[BUZZ_STRIKE] > r0, "not answered: reminder buzz within 30 s");
+  int st_ok = !lv_obj_has_flag(st_panel, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(title, LV_OBJ_FLAG_HIDDEN);
+  FISH(st_ok, "strike screen shows the graph panel (no flashing red page)");
+  press(176, 354);                              // I'M WATCHING
+  r0 = buzzed[BUZZ_STRIKE]; run_ms(31000);
+  FISH(buzzed[BUZZ_STRIKE] == r0, "answered: no more buzzing");
+  sent_n--;                                     // (that I'M WATCHING)
+  scene = 1; run_ms(500);
+  printf("%s: strike screen, %d wrong\n", ffail ? "FAIL" : "PASS", ffail);
 
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
   int ok = sent_n == 7;
