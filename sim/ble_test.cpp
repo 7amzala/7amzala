@@ -241,8 +241,19 @@ int main()
   strikeActive = false;
   rodState = ST_MONITORING;
   startStrike("SLOW PULL");
-  step(2);
-  check(ask(500008, "/laststrike", a) && a.body.find("\"recording\":true") != std::string::npos, "strike: being recorded (10 s after)");
+  step(2.5);
+  ok = ask(500008, "/laststrike", a);
+  {
+    size_t kp = a.body.find("\"k\":["), zp = a.body.find("\"zk\":[");
+    int kn0 = 0, zn0 = 0;
+    for (size_t i = kp; kp != std::string::npos && i < a.body.find(']', kp); i++) if (a.body[i] == ',') kn0++;
+    for (size_t i = zp; zp != std::string::npos && i < a.body.find(']', zp); i++) if (a.body[i] == ',') zn0++;
+    printf("        2.5 s after the strike: %d points, zoom %d points\n", kn0 + 1, zn0 + 1);
+    check(ok && a.body.find("\"recording\":true") != std::string::npos && a.body.find("\"have\":true") != std::string::npos &&
+          kn0 + 1 >= 100 && a.body.find("SLOW PULL") != std::string::npos,
+          "strike shown at once while recording (graph before + after so far)");
+    check(zn0 + 1 >= 200, "zoom: 2 s before + 2 s after already there");
+  }
   step(10);
   ok = ask(500009, "/laststrike", a);
   size_t kpos = a.body.find("\"k\":["), tpos = a.body.find("\"t\":[");
@@ -253,7 +264,13 @@ int main()
   check(ok && a.body.find("\"have\":true") != std::string::npos && a.body.find("SLOW PULL") != std::string::npos &&
         a.body.find("\"count\":1") != std::string::npos, "/laststrike: type, count after a strike");
   check(kn == tn && kn + 1 == 150 && a.body.find("\"pre\":100") != std::string::npos, "/laststrike: 150 points, 100 before (20 s) + 50 after (10 s)");
-  check(a.body.size() < 3000, "/laststrike small enough for the watch");
+  {
+    size_t zp = a.body.find("\"zk\":["); int zn0 = 0;
+    for (size_t i = zp; zp != std::string::npos && i < a.body.find(']', zp); i++) if (a.body[i] == ',') zn0++;
+    check(zn0 + 1 == 200 && a.body.find("\"zpre\":100") != std::string::npos, "zoom: 200 points at 50 a second, strike in the middle");
+  }
+  printf("        /laststrike = %zu bytes, zoom part: %.120s\n", a.body.size(), a.body.c_str() + a.body.find("\"zpre\""));
+  check(a.body.size() < 4500, "/laststrike small enough for the watch");
 
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;

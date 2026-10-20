@@ -172,6 +172,7 @@ static uint32_t ls_shown_ms = 0;      // which answer is drawn
 static uint32_t ls_asked = 0;
 static uint32_t ls_entered = 0;
 static long ls_strikeid = -1;
+static int ls_view = 0;               // 0 = ZOOM (2 s + 2 s), 1 = 30 s overview; tap the graph to switch
 static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
 static uint32_t hold_from = 0;
@@ -270,6 +271,18 @@ static void set_font(lv_obj_t *o, const lv_font_t *f)
 {
   if(lv_obj_get_style_text_font(o, 0) != f)
     lv_obj_set_style_text_font(o, f, 0);
+}
+
+static void ls_chart_clicked(lv_event_t *e)
+{
+  (void)e;
+
+  if(swiped)
+    return;
+
+  ls_view = 1 - ls_view;
+  ls_shown_ms = 0;                    // draw again
+  buzz_play(BUZZ_TAP);
 }
 
 static void button_clicked(lv_event_t *e)
@@ -595,6 +608,8 @@ static void swipe_timer(lv_timer_t *t)
 
   if(vpage == 1 && vbefore != 1)
   {
+    ls_view = 0;                      // ZOOM first
+    ls_shown_ms = 0;
     ble_link_ask_last_strike();
     ls_asked = lv_tick_get();
     ls_entered = ls_asked;
@@ -776,8 +791,11 @@ static void last_strike_page(const ble_link_status_t *s, uint32_t now)
   static ble_last_strike_t ls;        // big: not on the stack
   bool got = ble_link_get_last_strike(&ls);
 
-  // ask again every 5 s (every 1.5 s while nothing came), and at once after a new strike
-  if(now - ls_asked > (got ? 5000u : 1500u) || s->strikeid != ls_strikeid)
+  // ask again every 5 s, every 1 s while the strike is still recorded (the
+  // rest comes in), every 1.5 s while nothing came; at once after a new strike
+  uint32_t every = !got ? 1500u : (ls.recording ? 1000u : 5000u);
+
+  if(now - ls_asked > every || s->strikeid != ls_strikeid)
   {
     ls_strikeid = s->strikeid;
     ls_asked = now;
@@ -810,10 +828,10 @@ static void last_strike_page(const ble_link_status_t *s, uint32_t now)
 
   if(!ls.have)
   {
-    set_text(subtitle, ls.recording ? "recording the strike..." : "No strike yet");
+    set_text(subtitle, "No strike yet");
     set_text_color(subtitle, COL_TEXT);
     set_text(ls_info[0], "");
-    set_text(ls_info[1], ls.recording ? "ready 10 s after the strike" : "since the rod was switched on");
+    set_text(ls_info[1], "since the rod was switched on");
     set_text(ls_info[2], "");
     return;
   }
@@ -831,31 +849,49 @@ static void last_strike_page(const ble_link_status_t *s, uint32_t now)
   set_text(subtitle, a);
   set_text_color(subtitle, COL_TEXT);
 
-  // draw the graph once per answer
+  // which view: ZOOM (50 a second around the strike) or the 30 s overview
+  bool zoom = ls_view == 0 && ls.zn > 1;
+  int n = zoom ? ls.zn : ls.n;
+  int pre = zoom ? ls.zpre : ls.pre;
+  const short *kk = zoom ? ls.zk : ls.k;
+  const short *tt = zoom ? ls.zt : ls.t;
+
+  // draw the graph once per answer (and when the view changes)
   if(ls.got_ms != ls_shown_ms)
   {
     ls_shown_ms = ls.got_ms;
-    lv_chart_set_point_count(ls_chart, ls.n);
+    lv_chart_set_point_count(ls_chart, n);
 
-    for(int i = 0; i < ls.n; i++)
+    for(int i = 0; i < n; i++)
     {
-      lv_chart_set_value_by_id(ls_chart, ls_knock, i, ls.k[i]);
+      lv_chart_set_value_by_id(ls_chart, ls_knock, i, kk[i]);
       lv_chart_set_value_by_id(ls_chart, ls_limit, i, KNOCK_LIMIT);
-      lv_chart_set_value_by_id(ls_chart, ls_tilt, i, ls.t[i]);
+      lv_chart_set_value_by_id(ls_chart, ls_tilt, i, tt[i]);
     }
 
     lv_chart_refresh(ls_chart);
 
-    // red line where the strike was (inside the chart's 8 px padding)
-    int x = 8 + (ls.n > 1 ? ls.pre * (360 - 16) / (ls.n - 1) : 0);
-    lv_obj_align_to(ls_mark, ls_chart, LV_ALIGN_TOP_LEFT, x, 0);
-    lv_obj_align_to(ls_mark_label, ls_chart, LV_ALIGN_TOP_LEFT, x + 5, 4);
+    // red line where the strike was (in the chart's drawing area)
+    int x = n > 1 ? pre * (360 - 16) / (n - 1) : 0;
+    lv_obj_set_pos(ls_mark, x, 0);
+    lv_obj_set_pos(ls_mark_label, x + 5 > 360 - 16 - 60 ? x - 62 : x + 5, 0);
   }
 
-  snprintf(a, sizeof(a), "%d s before          %d s after", ls.pre / 5, (ls.n - ls.pre) / 5);
+  if(zoom)
+    snprintf(a, sizeof(a), "ZOOM  %.1f s before | %.1f s after  (tap)", pre / 50.0f, (n - pre) / 50.0f);
+  else
+    snprintf(a, sizeof(a), "%d s before | %d s after  (tap: zoom)", pre / 5, (n - pre) / 5);
+
   set_text(ls_info[0], a);
   snprintf(a, sizeof(a), "tilt peak %+.1f     pull %d%%", ls.tiltpeak, ls.pull);
   set_text(ls_info[1], a);
+
+  if(ls.recording)
+  {
+    set_text(ls_info[2], "recording - the rest comes in...");
+    return;
+  }
+
   snprintf(a, sizeof(a), "%d strike%s since the rod started", ls.count, ls.count == 1 ? "" : "s");
   set_text(ls_info[2], a);
 }
@@ -1351,19 +1387,25 @@ void watch_ui_create(void)
   lv_obj_set_style_pad_all(ls_chart, 8, 0);
   lv_obj_set_style_size(ls_chart, 0, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(ls_chart, 3, LV_PART_ITEMS);
-  lv_obj_clear_flag(ls_chart, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(ls_chart, LV_OBJ_FLAG_CLICKABLE);              // tap: ZOOM <-> 30 s
+  lv_obj_clear_flag(ls_chart, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_event_cb(ls_chart, ls_chart_clicked, LV_EVENT_CLICKED, NULL);
 
   ls_limit = lv_chart_add_series(ls_chart, lv_color_hex(0x6b5426), LV_CHART_AXIS_PRIMARY_Y);
   ls_tilt = lv_chart_add_series(ls_chart, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
   ls_knock = lv_chart_add_series(ls_chart, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
 
-  ls_mark = lv_obj_create(scr);
+  // red strike line + label: inside the graph (can never stick out of it)
+  ls_mark = lv_obj_create(ls_chart);
   lv_obj_remove_style_all(ls_mark);
+  lv_obj_add_flag(ls_mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_clear_flag(ls_mark, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(ls_mark, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(ls_mark, COL_RED, 0);
-  lv_obj_set_size(ls_mark, 2, 150);
+  lv_obj_set_size(ls_mark, 2, 150 - 16);
 
-  ls_mark_label = label(scr, FONT_TINY, COL_RED);
+  ls_mark_label = label(ls_chart, FONT_TINY, COL_RED);
+  lv_obj_add_flag(ls_mark_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_label_set_text(ls_mark_label, "STRIKE");
 
   for(int i = 0; i < 3; i++)

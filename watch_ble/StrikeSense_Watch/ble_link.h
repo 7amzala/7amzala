@@ -61,6 +61,7 @@ typedef struct
 
 // The rod's last strike (LAST STRIKE page). Fresh after a rod restart.
 #define LS_MAX 150
+#define LS_ZOOM 200         // 2 s before + 2 s after at 50 a second
 
 typedef struct
 {
@@ -78,6 +79,10 @@ typedef struct
   int n;                    // points
   short k[LS_MAX];          // knock, % of the knock limit
   short t[LS_MAX];          // tilt x 100
+  int zn;                   // ZOOM points (50 a second)
+  int zpre;                 // ZOOM points before the strike
+  short zk[LS_ZOOM];
+  short zt[LS_ZOOM];
 } ble_last_strike_t;
 
 void ble_link_ask_last_strike(void);                        // safe from the screen task

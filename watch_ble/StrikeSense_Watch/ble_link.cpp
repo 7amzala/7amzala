@@ -324,6 +324,15 @@ static void gotLastStrike(const std::string &j)
   if(nt < ls.n)
     ls.n = nt;
 
+  // ZOOM: 2 s before + 2 s after at 50 a second
+  ls.zpre = (int)jsonNum(j, "zpre", 0);
+  ls.zn = jsonList(j, "zk", ls.zk, LS_ZOOM);
+
+  int zt = jsonList(j, "zt", ls.zt, LS_ZOOM);
+
+  if(zt < ls.zn)
+    ls.zn = zt;
+
   portENTER_CRITICAL(&mux);
   lastStrike = ls;
   portEXIT_CRITICAL(&mux);

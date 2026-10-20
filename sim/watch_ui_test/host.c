@@ -74,6 +74,8 @@ long watch_bat_left_min(void) { return 195; }
 
 // fake last strike from the rod
 static int ls_asks = 0;
+static int fake_ls_recording = 0;
+static uint32_t fake_ls_got = 1;
 void ble_link_ask_last_strike(void) { ls_asks++; }
 bool ble_link_get_last_strike(ble_last_strike_t *o)
 {
@@ -82,17 +84,26 @@ bool ble_link_get_last_strike(ble_last_strike_t *o)
   o->have = true;
   strcpy(o->type, "SLOW PULL");
   o->ago_s = 725;
-  o->got_ms = 1;
   o->count = 3;
   o->tiltpeak = 3.6f;
   o->pull = 100;
   o->pre = 100;
-  o->n = 150;
+  o->n = fake_ls_recording ? 112 : 150;      // recording: only 12 points after so far
+  o->recording = fake_ls_recording;
   for(int i = 0; i < 150; i++)
   {
     o->k[i] = 5 + (i % 7) + (i == 60 ? 120 : 0);
     o->t[i] = i < 70 ? 0 : (i - 70) * 4;
   }
+  // zoom: 2 s + 2 s at 50 a second, a sharp hit at the strike
+  o->zn = 200;
+  o->zpre = 100;
+  for(int i = 0; i < 200; i++)
+  {
+    o->zk[i] = 8 + (i % 5) + (i >= 98 && i <= 103 ? 220 - abs(i - 100) * 30 : 0);
+    o->zt[i] = i < 100 ? 20 : 20 + (i - 100) * 2;
+  }
+  o->got_ms = fake_ls_got;
   return true;
 }
 
@@ -326,6 +337,21 @@ int main(void)
   swipe(380, 120, 300);  expect(0, 0, "left: main");
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
   vswipe(150, 400, 233); expect(1, 1, "down: last strike"); save("w10_laststrike");
+  {
+    int zoom_first = lv_chart_get_point_count(ls_chart) == 200;
+    press(233, 200);                          // tap the graph
+    int over = lv_chart_get_point_count(ls_chart) == 150;
+    save("w10b_overview");
+    press(233, 200);
+    int back = lv_chart_get_point_count(ls_chart) == 200;
+    fake_ls_recording = 1; fake_ls_got = 2; run_ms(300);
+    int rec = !lv_obj_has_flag(ls_chart, LV_OBJ_FLAG_HIDDEN);
+    save("w10c_recording");
+    fake_ls_recording = 0; fake_ls_got = 3; run_ms(300);
+    printf("  %s ZOOM first (200 points), tap: 30 s (150), tap: ZOOM again\n", zoom_first && over && back ? "ok  " : "FAIL");
+    printf("  %s strike still recording: graph shown at once\n", rec ? "ok  " : "FAIL");
+    if(!(zoom_first && over && back && rec)) nav_fail++;
+  }
   vswipe(150, 400, 233); expect(1, 1, "down again: stays");
   swipe(380, 120, 300);  expect(1, 1, "left/right on last strike: nothing");
   vswipe(400, 150, 233); expect(1, 0, "up: back to sea state");
