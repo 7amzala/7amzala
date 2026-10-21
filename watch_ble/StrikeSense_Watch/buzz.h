@@ -23,11 +23,13 @@ typedef enum
   BUZZ_HELLO,        // start-up: the module was found
   BUZZ_KNOCKS,       // 3 quick clicks: fish knocking (strike reminder)
   BUZZ_SLACK,        // buzz - click - buzz: line went slack
-  BUZZ_QUIET         // 2 soft pulses: fish stopped, still not answered
+  BUZZ_ALARM,        // 3 long strong buzzes: fish stopped, not answered (wake up)
+  BUZZ_ALARM2        // same, longer: still not answered after 30 s
 } buzz_t;
 
 bool buzz_begin(void);         // false = no module found
 void buzz_play(buzz_t what);   // starts it and returns at once
+void buzz_live(int level);     // live vibration 0..255 (follows the rod), 0 = off
 
 #ifdef __cplusplus
 }

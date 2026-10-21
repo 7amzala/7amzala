@@ -20,16 +20,19 @@
 // vibrates. Without the motion sensor: dark after 30 s, as before.
 // While dark nothing is drawn and the chip runs at 80 MHz (watch_power.cpp).
 //
-// The ring on the home and STRIKE screens mirrors the rod tip live: it
-// fills right from the mark at the top when the tip is pulled toward the
-// sea, left (violet) when it springs back, empty at rest. Full = strike level.
+// The ring on the home and STRIKE screens shows live how hard the rod tip
+// is pulled: it fills from the far-left end and moves with the tip (up,
+// down, bouncing). Empty at rest and when the tip springs back. Full =
+// strike level.
 //
-// STRIKE screen: what the fish does now - RUN (pulling the line), KNOCK,
-// SLACK (line went loose), QUIET (and for how long) - with a trend arrow
-// (stronger / weaker), PULL % and TILT, the live graph with the strike
-// marked, and a 30 s story bar. Each state has its own vibration, repeated
-// until WATCHING or REEL IN: RUN long buzz / 1.5 s, KNOCK click per kick +
-// 3 clicks / 5 s, SLACK buzz-click-buzz / 4 s, QUIET 2 soft pulses / 10 s.
+// STRIKE screen: what the fish does now - RUN (the rod is moving: bouncing,
+// jerking, swinging more than the waves - or bent strongly and held there),
+// KNOCK, SLACK (tip sprang back, line loose), QUIET (calm for 2 s: stopped,
+// or swimming toward you) - with a trend arrow, PULL % and TILT, the live
+// graph with the strike marked, and a 30 s story bar. Until WATCHING or
+// REEL IN: RUN = live vibration that follows the rod; KNOCK click per kick
+// + 3 clicks / 5 s; SLACK buzz-click-buzz / 4 s; QUIET wake-up alarm, 3
+// long strong buzzes / 5 s, after 30 s longer ones / 4 s.
 //
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
@@ -237,6 +240,13 @@ static uint32_t fish_slack_ms = 0;
 static uint32_t fish_knock_ms = 0;
 static uint32_t fish_quiet_since = 0;
 static float fish_fast = 0;           // strength, quick average
+static bool fish_mov_init = false;
+static float fish_avg = 0;            // tip angle, 0.5 s average
+static float fish_mov2 = 0;           // movement around it, squared
+static float fish_mov = 0;            // movement (deg RMS)
+static float fish_mov_base = 0.1f;    // the waves' normal movement
+#define FISH_MOVE_MIN 0.25f           // deg: at least this much movement = moving
+#define FISH_CALM_MS  2000            // calm this long = not running
 static float fish_slow = 0;           // strength, slow average (for the trend)
 static int fish_trend = 0;            // +1 stronger, -1 weaker, 0 steady
 static fish_t story[STORY_CELLS];
@@ -246,6 +256,7 @@ static uint32_t story_at = 0;
 static uint32_t strike_ms = 0;        // when the strike on the screen started
 static long strike_ms_id = -1;
 static uint32_t buzz_state_at = 0;
+static uint32_t quiet_from = 0;       // the fish went quiet (strike alarm gets stronger after 30 s)
 
 // STRIKE screen objects
 static lv_obj_t *ring_glow;
@@ -516,48 +527,40 @@ static void ring_set(int value, lv_color_t colour)
   set_arc(ring_glow, value, colour);
 }
 
-// ---- mirror ring (home, strike): where the rod tip is right now ----
-// It fills from the mark at the top: to the right when the tip is pulled
-// toward the sea, to the left when it springs back. Full = 3x the wave
-// allowance (strike level). The rod sends the tip 10x a second; the ring
-// slides there in 3 even steps (one per 33 ms frame), so it moves as fast
-// or as slowly as the tip - nothing is added or smoothed away.
-static lv_obj_t *ring_mark;
-static bool ring_mirrored = false;
+// ---- live ring (home, strike): how hard the rod tip is pulled, now ----
+// It fills from the far-left end like a gauge as the tip is pulled toward
+// the sea, and follows it live: up, down, bouncing with the rod. Empty at
+// rest and when the tip springs back (the label says SLACK). Full = 3x the
+// wave allowance (strike level). The rod sends the tip 10x a second; the
+// ring slides there in 3 even steps (one per 33 ms frame), so it moves as
+// fast or as slowly as the tip - nothing is added or smoothed away.
+static bool ring_live = false;
 static int ring_cur = 0, ring_from = 0, ring_to = 0, ring_step = 0;
+
+// live vibration during a strike (RUN, not answered): follows the ring
+static bool haptic_live = false;
+static uint32_t haptic_kick_until = 0;          // a knock: one strong kick
 
 #define RING_STEPS 3
 
-static void ring_mode(bool mirror)
+static void ring_mode(bool live)
 {
-  if(mirror == ring_mirrored)
+  if(live == ring_live)
     return;
 
-  ring_mirrored = mirror;
-  lv_obj_t *arcs[2] = { ring, ring_glow };
-
-  for(int i = 0; i < 2; i++)
-  {
-    lv_arc_set_mode(arcs[i], mirror ? LV_ARC_MODE_SYMMETRICAL : LV_ARC_MODE_NORMAL);
-    lv_arc_set_range(arcs[i], mirror ? -100 : 0, 100);
-    lv_arc_set_value(arcs[i], 0);
-  }
-
+  ring_live = live;
   ring_cur = ring_from = ring_to = 0;
   ring_step = RING_STEPS;
+  lv_arc_set_value(ring, 0);
+  lv_arc_set_value(ring_glow, 0);
 }
 
-static void ring_mirror(float tip_deg, float allow, lv_color_t forward)
+static void ring_pull(float tip_deg, float allow, lv_color_t c)
 {
   float full = 3 * (allow > 0.2f ? allow : 0.2f);
   int v = (int)(tip_deg / full * 100);
 
-  v = v > 100 ? 100 : (v < -100 ? -100 : v);
-
-  if(v > -2 && v < 2)
-    v = 0;                            // at rest: empty
-
-  lv_color_t c = v < 0 ? COL_VIOLET : forward;
+  v = v > 100 ? 100 : (v < 2 ? 0 : v);           // at rest or springing back: empty
 
   for(int i = 0; i < 2; i++)
   {
@@ -579,13 +582,28 @@ static void ring_timer(lv_timer_t *tm)
 {
   (void)tm;
 
-  if(!ring_mirrored || ring_step >= RING_STEPS)
-    return;
+  if(ring_live && ring_step < RING_STEPS)
+  {
+    ring_step++;
+    ring_cur = ring_from + (ring_to - ring_from) * ring_step / RING_STEPS;
+    lv_arc_set_value(ring, ring_cur);
+    lv_arc_set_value(ring_glow, ring_cur);
+  }
 
-  ring_step++;
-  ring_cur = ring_from + (ring_to - ring_from) * ring_step / RING_STEPS;
-  lv_arc_set_value(ring, ring_cur);
-  lv_arc_set_value(ring_glow, ring_cur);
+  // live vibration: stronger the harder the tip is pulled, pulsing as the
+  // rod bounces, a strong kick on each knock
+  if(!haptic_live)
+  {
+    buzz_live(0);
+    return;
+  }
+
+  int level = 50 + ring_cur * 160 / 100 + (int)(fish_mov * 80);
+
+  if((int32_t)(haptic_kick_until - lv_tick_get()) > 0)
+    level = 255;
+
+  buzz_live(level > 255 ? 255 : level);
 }
 
 // the state pill at the top: [dot] TEXT, tinted in its colour
@@ -683,7 +701,6 @@ static void layout(ui_mode_t m)
   show(ring, live || st || m == MODE_REELED || m == MODE_PULLTEST || m == MODE_RELEARN);
   show(ring_glow, live || st || m == MODE_PULLTEST);
   ring_mode(live || st);
-  show(ring_mark, live || st);
   lv_obj_set_style_arc_width(ring, st || m == MODE_PULLTEST ? 12 : 10, LV_PART_INDICATOR);
   lv_obj_set_style_arc_width(ring, st || m == MODE_PULLTEST ? 12 : 10, LV_PART_MAIN);
 
@@ -1111,10 +1128,34 @@ static void fish_track(const ble_link_status_t *s, int k)
   uint32_t now = lv_tick_get();
   float allow = s->allow > 0.2f ? s->allow : 0.2f;
 
-  // from where the tip is now (the rod's pull % and drop-back stay
-  // latched during a strike, so they would say RUN / SLACK forever)
-  if(s->ftilt > allow)
-    fish_run_ms = now;                          // tip pulled toward the sea beyond the waves
+  // How much the rod MOVES: the tip angle minus its 0.35 s average (slow
+  // tide / bending removed), as RMS over ~0.5 s. Waves move it too, but
+  // smoothly: their normal level is learned while nothing happens, and
+  // the fish must move it clearly more (bouncing, jerking, swinging).
+  if(!fish_mov_init)
+  {
+    fish_avg = s->ftilt;
+    fish_mov_init = true;
+  }
+
+  fish_avg += (s->ftilt - fish_avg) * 0.25f;            // ~0.35 s at 10 a second
+  float hp = s->ftilt - fish_avg;
+  fish_mov2 += (hp * hp - fish_mov2) * 0.2f;            // ~0.5 s
+  fish_mov = sqrtf(fish_mov2);
+
+  if(!s->strike && s->bucket < PULL_SHOW && s->drop < PULL_SHOW && k < KNOCK_LIMIT)
+    fish_mov_base += (fish_mov - fish_mov_base) * 0.004f; // ~25 s: the waves' normal level
+
+  float moving_level = 2.0f * fish_mov_base;
+
+  if(moving_level < FISH_MOVE_MIN)
+    moving_level = FISH_MOVE_MIN;
+
+  // RUN: the rod is moving (still pulling), or bent strongly forward and
+  // held there (a steady run makes no bounce). The rod's pull % / drop-back
+  // stay latched during a strike, so they are not used here.
+  if(fish_mov > moving_level || s->ftilt > 2 * allow)
+    fish_run_ms = now;
 
   if(s->ftilt < -allow)
     fish_slack_ms = now;                        // tip sprang back: line went loose
@@ -1124,10 +1165,10 @@ static void fish_track(const ble_link_status_t *s, int k)
 
   fish_t f = FISH_QUIET;
 
-  if(fish_run_ms && now - fish_run_ms < 1000)
-    f = FISH_RUN;
-  else if(fish_slack_ms && now - fish_slack_ms < 1000)
+  if(fish_slack_ms && now - fish_slack_ms < 1000)
     f = FISH_SLACK;
+  else if(fish_run_ms && now - fish_run_ms < FISH_CALM_MS)
+    f = FISH_RUN;                               // calm for 2 s = not running any more
   else if(fish_knock_ms && now - fish_knock_ms < 3000)
     f = FISH_KNOCK;
 
@@ -1175,8 +1216,8 @@ static void strike_page(const ble_link_status_t *s, uint32_t now)
 
   lv_color_t c = fish_color(fish);
 
-  // the ring: where the tip is now (red forward, violet back)
-  ring_mirror(s->ftilt, s->allow, COL_RED);
+  // the ring: how hard the tip is pulled now (red: a strike)
+  ring_pull(s->ftilt, s->allow, COL_RED);
 
   // time since the strike
   char a[32];
@@ -1470,6 +1511,7 @@ static void ui_timer(lv_timer_t *t)
 
   if(!connected)
   {
+    haptic_live = false;              // no rod: no live vibration
     layout(MODE_LOOKING);
 
     spin = (spin + 12) % 360;
@@ -1545,25 +1587,41 @@ static void ui_timer(lv_timer_t *t)
 
   if(s.strike)
   {
-    // each state its own pattern, repeated until you answer:
-    //   RUN   long buzz every 1.5 s
+    // until you answer:
+    //   RUN   live: the wrist feels the rod (stronger the harder it pulls,
+    //         pulsing as it bounces, a kick on each knock)
     //   KNOCK a click per kick + click click click every 5 s
     //   SLACK buzz . click . buzz every 4 s
-    //   QUIET 2 soft pulses every 10 s
-    if(s.strikeid != strike_quiet)
+    //   QUIET wake-up alarm: 3 long strong buzzes every 5 s, after 30 s
+    //         longer ones every 4 s
+    bool answered = s.strikeid == strike_quiet;
+
+    haptic_live = !answered && fish == FISH_RUN && buzz_strike_at != 0 && now - buzz_strike_at > 1200;
+
+    if(!answered)
     {
-      static const buzz_t pattern[] = { BUZZ_QUIET, BUZZ_KNOCKS, BUZZ_SLACK, BUZZ_STRIKE };   // by fish_t
-      static const uint32_t every[] = { 10000, 5000, 4000, 1500 };
+      if(fish == FISH_QUIET && fish_was != FISH_QUIET)
+        quiet_from = now;
+
+      bool late = fish == FISH_QUIET && now - quiet_from >= 30000;
+      static const buzz_t pattern[] = { BUZZ_ALARM, BUZZ_KNOCKS, BUZZ_SLACK, BUZZ_STRIKE };   // by fish_t
+      uint32_t every = fish == FISH_QUIET ? (late ? 4000 : 5000) : fish == FISH_KNOCK ? 5000 : 4000;
 
       if(buzz_strike_at == 0)
       {
         buzz_play(BUZZ_STRIKE);           // the strike itself
         buzz_strike_at = now;
         buzz_state_at = now;
+        quiet_from = now;
       }
-      else if(fish != fish_was || now - buzz_state_at >= every[fish])
+      else if(fish == FISH_RUN)
       {
-        buzz_play(pattern[fish]);         // the state changed, or again: not answered yet
+        if(new_knock)
+          haptic_kick_until = now + 80;   // (live vibration does the rest)
+      }
+      else if(fish != fish_was || now - buzz_state_at >= every)
+      {
+        buzz_play(late ? BUZZ_ALARM2 : pattern[fish]);   // changed, or again: not answered yet
         buzz_state_at = now;
       }
       else if(fish == FISH_KNOCK && new_knock)
@@ -1577,6 +1635,7 @@ static void ui_timer(lv_timer_t *t)
   else
   {
     buzz_strike_at = 0;
+    haptic_live = false;
     fish_was = fish;
     bool drop = s.dropwatch || s.drop >= PULL_SHOW;
 
@@ -1712,7 +1771,7 @@ static void ui_timer(lv_timer_t *t)
 
   pill_set(pill, c, true);
   set_text_color(subtitle, warn ? COL_ORANGE : COL_DIM);
-  ring_mirror(s.ftilt, s.allow, c);
+  ring_pull(s.ftilt, s.allow, c);
 
   // TILT left, KNOCKS (or PULL while it builds) right
   snprintf(a, sizeof(a), "%+.1f", s.tilt);
@@ -1787,10 +1846,6 @@ void watch_ui_create(void)
   // outer gauge ring: 270 degrees, open at the bottom
   ring = gauge_arc(scr, 452, 10, COL_RING_BG);
   lv_obj_center(ring);
-
-  // the rest mark at the top: the mirror ring fills right / left from here
-  ring_mark = box(scr, 3, 20, 1, COL_DIM);
-  lv_obj_align(ring_mark, LV_ALIGN_TOP_MID, 0, 2);
 
   // top: Bluetooth signal bars, rod battery
   for(int i = 0; i < 4; i++)

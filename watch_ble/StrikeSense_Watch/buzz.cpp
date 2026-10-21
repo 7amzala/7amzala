@@ -207,10 +207,58 @@ bool buzz_begin(void)
   return found;
 }
 
+static bool live = false;
+static int live_level = 0;
+
+// Live vibration: the motor strength is set directly (real-time mode),
+// many times a second, so the wrist feels the rod as the fish pulls it.
+void buzz_live(int level)
+{
+  if(!found)
+    return;
+
+  level = level < 0 ? 0 : (level > 255 ? 255 : level);
+
+  if(level == 0)
+  {
+    if(live)
+    {
+      put(REG_RTP, 0);
+      put(REG_MODE, 0x00);          // back to effects
+      live = false;
+      live_level = 0;
+    }
+
+    return;
+  }
+
+  if(!live)
+  {
+    put(REG_GO, 0);
+    put(REG_MODE, 0x05);            // real-time playback (unsigned, set in buzz_begin)
+    live = true;
+    live_level = -1;
+  }
+
+  if(level != live_level)
+  {
+    put(REG_RTP, (uint8_t)level);
+    live_level = level;
+  }
+}
+
 void buzz_play(buzz_t what)
 {
   if(!found)
     return;
+
+  if(live)
+  {
+    put(REG_RTP, 0);                // an effect stops the live vibration
+    put(REG_MODE, 0x00);
+    live = false;
+    live_level = 0;
+  }
 
   // effect numbers from the DRV2605L effect list
   static const uint8_t seq[][8] = {
@@ -223,7 +271,8 @@ void buzz_play(buzz_t what)
     { 47, 0x80 | 15, 47, 0 },                  // HELLO: 2 clear buzzes
     { 1, 0x80 | 8, 1, 0x80 | 8, 1, 0 },        // KNOCKS: click click click
     { 47, 0x80 | 12, 1, 0x80 | 12, 47, 0 },    // SLACK: buzz . click . buzz
-    { 7, 0x80 | 25, 7, 0 },                    // QUIET: soft bump . soft bump
+    { 15, 0x80 | 25, 15, 0x80 | 25, 15, 0 },   // ALARM: 3 x 750 ms strong alert
+    { 16, 0x80 | 15, 16, 0x80 | 15, 16, 0 },   // ALARM2: 3 x 1 s strong alert
   };
 
   put(REG_GO, 0);                 // stop what is playing

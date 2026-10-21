@@ -47,6 +47,8 @@ void ble_link_poll(void) {}
 static int buzzed[16];
 bool buzz_begin(void) { return true; }
 void buzz_play(buzz_t what) { buzzed[what]++; }
+static int live_level = 0, live_max = 0, live_frames = 0, live_changes = 0;
+void buzz_live(int level) { if(level != live_level) live_changes++; live_level = level; if(level > live_max) live_max = level; if(level > 0) live_frames++; }
 
 // fake screen brightness and motion sensor
 static int brightness = 255;
@@ -194,6 +196,14 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
       s->strikeid = fake_strike_id;
       s->bucket = 100;                          // (stays at 100 on the rod during a strike)
       s->tilt = t < 2 ? 3.6f : 0.1f;
+      break;
+
+    case 11:                                    // strike: rod bouncing (fish pulling), then still but a bit bent
+      s->strike = true;
+      strcpy(s->type, "SLOW PULL");
+      s->strikeid = fake_strike_id;
+      s->bucket = 100;
+      s->tilt = t < 5 ? 0.6f + 0.8f * sinf(2 * 3.14159f * 2 * t) : 1.2f;
       break;
 
     case 6:                                     // pull test
@@ -502,7 +512,7 @@ int main(void)
   int b0 = buzzed[BUZZ_STRIKE];
   run_ms(4000);
   FISH(fish == FISH_RUN && fish_fast > 0.5f, "pulling hard: RUN, strong");
-  FISH(buzzed[BUZZ_STRIKE] - b0 >= 2, "RUN: long buzz repeated");
+  FISH(buzzed[BUZZ_STRIKE] - b0 >= 1 && live_level >= 150, "RUN: strike buzz, then live vibration (strong pull = strong)");
   save("w14_strike_run");
   scene = 9; scene_start = sim_ms; int d0 = buzzed[BUZZ_SLACK]; run_ms(4000);
   FISH(fish == FISH_SLACK && buzzed[BUZZ_SLACK] > d0, "line went loose: SLACK, buzz-click-buzz");
@@ -510,11 +520,13 @@ int main(void)
   scene = 8; scene_start = sim_ms; int k0 = buzzed[BUZZ_KNOCK] + buzzed[BUZZ_KNOCKS]; run_ms(4000);
   FISH(fish == FISH_KNOCK && buzzed[BUZZ_KNOCK] + buzzed[BUZZ_KNOCKS] > k0, "bites: KNOCK, click click click");
   save("w16_strike_knock");
-  scene = 7; scene_start = sim_ms; int t0 = buzzed[BUZZ_QUIET]; run_ms(6000);
-  FISH(fish == FISH_QUIET && buzzed[BUZZ_QUIET] > t0 && fish_trend <= 0, "fish stopped: QUIET, 2 soft pulses, not stronger");
+  scene = 7; scene_start = sim_ms; int t0 = buzzed[BUZZ_ALARM]; run_ms(6000);
+  FISH(fish == FISH_QUIET && buzzed[BUZZ_ALARM] > t0 && fish_trend <= 0 && live_level == 0, "fish stopped: QUIET, wake-up alarm, live vibration off");
   save("w17_strike_quiet");
-  int r0 = buzzed[BUZZ_QUIET]; run_ms(21000);
-  FISH(buzzed[BUZZ_QUIET] >= r0 + 2, "still quiet, not answered: soft pulses again every 10 s");
+  int r0 = buzzed[BUZZ_ALARM]; run_ms(21000);
+  FISH(buzzed[BUZZ_ALARM] >= r0 + 3, "still quiet, not answered: alarm every 5 s");
+  int r2 = buzzed[BUZZ_ALARM2]; run_ms(10000);
+  FISH(buzzed[BUZZ_ALARM2] >= r2 + 2, "after 30 s quiet: longer alarm every 4 s");
   int st_ok = !lv_obj_has_flag(st_panel, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(title, LV_OBJ_FLAG_HIDDEN);
   FISH(st_ok, "strike screen shows the graph panel (no flashing red page)");
   press(176, 354);                              // I'M WATCHING
@@ -532,7 +544,6 @@ int main(void)
 #define RING(cond, what) do { int ok_ = (cond); if(!ok_) rfail++; printf("  %s %s (ring %d, fish %d)\n", ok_ ? "ok  " : "FAIL", what, lv_arc_get_value(ring), fish); } while(0)
   scene = 1; scene_start = sim_ms; run_ms(3000);
   RING(abs(lv_arc_get_value(ring)) <= 22, "armed, waves only: ring small");
-  RING(!lv_obj_has_flag(ring_mark, LV_OBJ_FLAG_HIDDEN), "rest mark at the top");
   scene = 3; scene_start = sim_ms; run_ms(6000);
   RING(lv_arc_get_value(ring) >= 50, "slow pull (tip ~2.5 of 3 deg): ring filled to the right");
   scene = 1; run_ms(400);
@@ -540,11 +551,20 @@ int main(void)
   fake_strike_id = 20; scene = 10; scene_start = sim_ms; run_ms(1500);
   RING(lv_arc_get_value(ring) == 100 && fish == FISH_RUN, "strike, pulled hard: ring full, RUN");
   run_ms(2000);
-  RING(abs(lv_arc_get_value(ring)) <= 5 && fish == FISH_QUIET, "tip settled back: ring empty, QUIET (not RUN)");
+  run_ms(2500);
+  RING(abs(lv_arc_get_value(ring)) <= 5 && fish == FISH_QUIET && live_level == 0, "tip settled back + calm 2 s: ring empty, QUIET, live vibration off");
   press(176, 354); sent_n--;                    // I'M WATCHING
   fake_strike_id = 21; scene = 9; scene_start = sim_ms; run_ms(1500);
-  RING(lv_arc_get_value(ring) < -40 && lv_obj_get_style_arc_color(ring, LV_PART_INDICATOR).full == COL_VIOLET.full,
-       "line went slack: ring fills to the left, violet");
+  RING(lv_arc_get_value(ring) == 0 && fish == FISH_SLACK, "line went slack: ring empty, SLACK");
+  press(176, 354); sent_n--;
+  fake_strike_id = 22; scene = 11; scene_start = sim_ms; run_ms(3000);
+  int ch0 = live_changes; run_ms(1500);
+  RING(fish == FISH_RUN && live_level > 0 && live_changes - ch0 >= 10, "rod bouncing (not strongly bent): RUN, live vibration pulsing");
+  run_ms(3500);
+  RING(fish == FISH_QUIET && live_level == 0, "rod still but a bit bent: QUIET (calm = not running)");
+  press(176, 354); sent_n--;
+  fake_strike_id = 23; scene = 4; scene_start = sim_ms; run_ms(6000);
+  RING(fish == FISH_RUN && lv_arc_get_value(ring) == 100, "rod still but strongly bent (steady run): still RUN");
   press(176, 354); sent_n--;
   scene = 1; run_ms(500);
   printf("%s: ring, %d wrong\n", rfail ? "FAIL" : "PASS", rfail);
