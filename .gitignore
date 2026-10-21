@@ -14,3 +14,5 @@ sim/watch_ui_test/host
 sim/watch_ui_test/*.raw
 __pycache__/
 StrikeSense_Watch.zip
+sim/rod_sim
+sim/rod_sim_shake

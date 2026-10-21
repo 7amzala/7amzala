@@ -40,12 +40,12 @@ Cond conds[3] = {
 };
 const double T0 = 3.0;            // N: line tension at rest (grip lead + current)
 const double LINE_WIND = 0.008;   // N per (m/s)^2: wind on ~100 m of line
-const double WIND_DIR = 0.5;      // rad from straight across
+double WIND_DIR = 0.5;            // rad from straight across (env WIND_DIR: 1.4 = blowing along the line)
 double BUFFET = 0.06;             // local flutter strength (fraction of the wind force)
 double MIDGUST = 0.4;             // short gusts, relative to the slow gusts
 
 // ---------------- fish and hand events (extra line tension) ----------------
-struct Ev { double t0; int kind; double a, b, c; };  // 0 knock(N,dur) 1 pull(N,rise,hold) 2 drop(frac,rise,hold)
+struct Ev { double t0; int kind; double a, b, c; };  // 0 knock(N,dur) 1 pull(N,rise,hold) 2 drop(frac,rise,hold) 3 snake(mean N, shake N, s)
 std::vector<Ev> evs;
 
 double eventTension(double t)
@@ -58,6 +58,16 @@ double eventTension(double t)
       double v;
       if (dt < e.b) v = dt / e.b; else if (dt < e.b + e.c) v = 1; else if (dt < e.b + e.c + 1) v = 1 - (dt - e.b - e.c); else v = 0;
       d += (e.kind == 1 ? e.a : -e.a * T0) * v;
+    }
+    // "snake": a hooked fish shaking its head - the line is tugged back
+    // and forth 2-3 times a second, in bursts, on top of a pull (a) that
+    // builds in 1 s. a < 0 = the fish swims toward the angler (slack).
+    if (e.kind == 3 && dt < e.c) {
+      double ramp = dt < 1 ? dt : 1;
+      double f = 2.5 + 0.6 * sin(0.7 * dt + e.t0);              // 1.9 .. 3.1 Hz, wandering
+      static double ph = 0; ph += 2 * M_PI * f * 0.001;          // (one snake at a time)
+      double burst = 0.55 + 0.45 * sin(2 * M_PI * dt / 2.3);     // shakes come in bursts
+      d += (e.a >= 0 ? e.a : e.a * T0) * ramp + e.b * burst * sin(ph);
     }
   }
   return d;
@@ -200,6 +210,8 @@ int doRun(const char* condName, double fromTip, const char* sensor, int seed)
   double t = simMillis / 1000.0;
   run(600);
   int falseStrikes = countIn(t, t + 600, false), falseBeeps = countIn(t, t + 600, true);
+  int falseShake = 0;
+  for (auto& h : hits) if (h.t >= t && h.t < t + 600 && h.what == "SHAKING FISH") falseShake++;
 
   struct Test { const char* name; std::vector<Ev> e; };
   std::vector<Test> tests = {
@@ -209,9 +221,19 @@ int doRun(const char* condName, double fromTip, const char* sensor, int seed)
     { "slow_pull",    { { 1, 1, 1.00, 3.0, 8 } } },
     { "drop_back",    { { 1, 2, 0.70, 1.5, 8 } } },
     { "sharp",        { { 1, 0, 2.50, 0.08, 0 }, { 1.05, 1, 2.5, 0.3, 4 } } },
+    { "snake_shake",  { { 1, 3, 0.00, 0.60, 10 } } },   // shaking on the spot
+    { "snake_small",  { { 1, 3, 0.30, 0.60, 10 } } },   // shaking + small pull
+    { "snake_big",    { { 1, 3, 0.80, 1.50, 10 } } },   // shaking + real run
+    { "snake_slack",  { { 1, 3, -0.40, 0.60, 10 } } },  // shaking toward the angler
+    { "shake_02",     { { 1, 3, 0.00, 0.20, 10 } } },   // gentler and gentler shaking, no pull
+    { "shake_01",     { { 1, 3, 0.00, 0.10, 10 } } },
+    { "shake_005",    { { 1, 3, 0.00, 0.05, 10 } } },
+    { "shake_0025",   { { 1, 3, 0.00, 0.025, 10 } } },
+    { "knock_tiny",   { { 1, 0, 0.10, 0.06, 0 } } },    // for comparison: a gentle single knock
+    { "knock_005",    { { 1, 0, 0.05, 0.06, 0 } } },
   };
-  printf("{\"cond\":\"%s\",\"pos\":%.2f,\"sensor\":\"%s\",\"seed\":%d,\"pulltest\":%s,\"tries\":%d,\"need\":%.2f,\"false10min\":%d,\"beeps10min\":%d",
-         condName, fromTip, sensor, seed, pullOk ? "true" : "false", tries, pullTestNeed(), falseStrikes, falseBeeps);
+  printf("{\"cond\":\"%s\",\"pos\":%.2f,\"sensor\":\"%s\",\"seed\":%d,\"pulltest\":%s,\"tries\":%d,\"need\":%.2f,\"false10min\":%d,\"shakefalse\":%d,\"beeps10min\":%d",
+         condName, fromTip, sensor, seed, pullOk ? "true" : "false", tries, pullTestNeed(), falseStrikes, falseShake, falseBeeps);
   for (auto& ts : tests) {
     waitArmed();
     double t0 = simMillis / 1000.0;
@@ -314,8 +336,44 @@ void survey()
   printf("]\n");
 }
 
+// shaking level along the line / sideways, wind only, then gentle fish shakes
+void shakeTrace(const char* condName, double fromTip, const char* sensor, int seed)
+{
+  rng.seed(seed);
+  Serial.quiet = true;
+  W.init(condFor(condName), fromTip, sigmaFor(sensor));
+  for (int i = 0; i < 20000; i++) W.step(i * 0.001);
+  setup();
+  run(16);
+  if (rodState == ST_PULLTEST) { double t = simMillis / 1000.0; evs.push_back({ t + 0.5, 1, 2.5, 0.5, 1.5 }); for (int i = 0; i < 16 && rodState == ST_PULLTEST; i++) run(0.5); }
+  if (rodState == ST_PULLTEST) handleSkipPull();
+  waitArmed();
+  double peakWind = 0, peakWindRatio = 0, maxBase = 0;
+  for (int i = 0; i < 1800; i++) {            // 3 min wind + waves only
+    run(0.1);
+    if (i > 300) { peakWind = std::max(peakWind, (double)shakeRmsIn); if (shakeRmsSide > 0) peakWindRatio = std::max(peakWindRatio, (double)(shakeRmsIn / shakeRmsSide)); maxBase = std::max(maxBase, (double)shakeBase); }
+  }
+  printf("%s %s dir=%.1f  wind only: base %.4f g, peak along-line %.4f g (= %.1f x base), peak along/side %.1f\n",
+         condName, sensor, WIND_DIR, shakeBase, peakWind, peakWind / std::max(1e-6, (double)shakeBase), peakWindRatio);
+  double amps[] = { 0.025, 0.05, 0.1, 0.2 };
+  for (double a : amps) {
+    waitArmed();
+    double t0 = simMillis / 1000.0;
+    evs.push_back({ t0 + 1, 3, 0.0, a, 8 });
+    double pk = 0, ratio = 0, base = shakeBase; int over = 0;
+    for (int i = 0; i < 90; i++) { run(0.1); if (i > 20) { pk = std::max(pk, (double)shakeRmsIn); ratio = std::max(ratio, (double)(shakeRmsIn / std::max(1e-6f, shakeRmsSide))); } }
+    printf("   shake %.3f N: peak along-line %.4f g = %.1f x base, along/side %.1f\n", a, pk, pk / std::max(1e-6, base), ratio);
+  }
+}
+
 int main(int argc, char** argv)
 {
+  if (getenv("WIND_DIR")) WIND_DIR = atof(getenv("WIND_DIR"));
+  if (getenv("SHAKE_K")) SHAKE_K = atof(getenv("SHAKE_K"));
+  if (getenv("SHAKE_FLOOR")) SHAKE_FLOOR = atof(getenv("SHAKE_FLOOR"));
+  if (getenv("SHAKE_SIDE")) SHAKE_SIDE_RATIO = atof(getenv("SHAKE_SIDE"));
+  if (getenv("SHAKE_HOLD")) SHAKE_HOLD_MS = atol(getenv("SHAKE_HOLD"));
+  if (argc >= 5 && !strcmp(argv[1], "strace")) { shakeTrace(argv[2], atof(argv[3]), argv[4], argc > 5 ? atoi(argv[5]) : 1); return 0; }
   if (argc >= 2 && !strcmp(argv[1], "survey")) { survey(); return 0; }
   if (argc >= 5 && (!strcmp(argv[1], "run") || !strcmp(argv[1], "trace"))) {
     if (!strcmp(argv[1], "trace")) traceOut = stdout;

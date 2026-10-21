@@ -517,6 +517,22 @@ const float SUSTAIN_PERIOD_PART = 0.60;  // bucket must stay filled this part of
 const float GUST_SIDE_MIN = 0.50;        // deg, sideways move that counts as a gust
 const float GUST_FACTOR = 0.40;          // bucket fills slower during a gust
 
+// SHAKING FISH (test, off by default): a hooked fish shaking its head
+// tugs the line back and forth 1-4 times a second. The tilt (0.3 s
+// smoothing) and the knock detector (faster than ~4 Hz) both miss most
+// of that. This watches 0.8-4 Hz shaking along the line's direction:
+// a fish shakes the rod toward the sea and back, wind mostly sideways.
+#ifndef SHAKE_DETECT
+#define SHAKE_DETECT 0
+#endif
+float SHAKE_K = 3.0;                     // shaking this many times the normal level...
+float SHAKE_FLOOR = 0.004;               // g, ...and at least this
+float SHAKE_SIDE_RATIO = 1.5;            // along the line at least this x sideways
+unsigned long SHAKE_HOLD_MS = 3000;      // for this long
+const float SHAKE_MID_TAU = 0.20;        // s, band 0.8-4 Hz = 4 Hz part minus 0.8 Hz part
+const float SHAKE_RMS_TAU = 1.0;         // s
+const float SHAKE_BASE_TAU = 30.0;       // s, normal level (wind, waves) learned this slowly
+
 // ---------- Settling ----------
 
 const float SETTLE_TOL_MIN = 0.60;       // deg, allowed wobble while settling
@@ -840,6 +856,12 @@ Vec3 learnSum = { 0, 0, 0 };
 // =====================================================
 
 bool knockActive = false;
+
+Vec3 shakeMid = { 0, 0, 1 };
+bool shakeFirst = true;
+float shakeInSq = 0, shakeSideSq = 0, shakeBase = 0;
+unsigned long shakeSince = 0;
+float shakeRmsIn = 0, shakeRmsSide = 0;
 int knockAbove = 0;
 
 unsigned long knockStart = 0;
@@ -2867,12 +2889,67 @@ void updateDropWatch()
 }
 
 // =====================================================
+// SHAKING FISH (see SHAKE_DETECT)
+// =====================================================
+
+void updateShake()
+{
+  if(shakeFirst)
+  {
+    shakeMid = slowPart;
+    shakeFirst = false;
+  }
+
+  shakeMid = vAdd(shakeMid, vScale(vSub(slowPart, shakeMid), alphaFor(SHAKE_MID_TAU)));
+
+  Vec3 band = vSub(slowPart, shakeMid);
+  float in = vDot(band, pullDir);
+  float side = vDot(band, sideDir);
+
+  shakeInSq += (in * in - shakeInSq) * alphaFor(SHAKE_RMS_TAU);
+  shakeSideSq += (side * side - shakeSideSq) * alphaFor(SHAKE_RMS_TAU);
+  shakeRmsIn = sqrt(shakeInSq);
+  shakeRmsSide = sqrt(shakeSideSq);
+
+  float level = SHAKE_K * shakeBase;
+
+  if(level < SHAKE_FLOOR)
+    level = SHAKE_FLOOR;
+
+  bool shaking =
+    haveDir &&
+    shakeRmsIn > level &&
+    shakeRmsIn > SHAKE_SIDE_RATIO * shakeRmsSide;
+
+  if(!shaking)
+  {
+    shakeSince = 0;
+
+    // learn the normal level (wind, waves) only below the limit
+    if(shakeBase <= 0)
+      shakeBase = shakeRmsIn;
+    else if(shakeRmsIn < level)
+      shakeBase += (shakeRmsIn - shakeBase) * alphaFor(SHAKE_BASE_TAU);
+
+    return;
+  }
+
+  if(shakeSince == 0)
+    shakeSince = millis();
+
+  if(SHAKE_DETECT && millis() - shakeSince >= SHAKE_HOLD_MS)
+    startStrike("SHAKING FISH");
+}
+
+// =====================================================
 // MONITORING STEP
 // =====================================================
 
 void monitoringStep()
 {
   bool knock = updateKnockDetector();
+
+  updateShake();                        // also during a strike: is the fish still shaking?
 
   if(strikeActive)
   {
