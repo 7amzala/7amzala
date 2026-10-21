@@ -373,6 +373,7 @@ int main(int argc, char** argv)
   if (getenv("SHAKE_FLOOR")) SHAKE_FLOOR = atof(getenv("SHAKE_FLOOR"));
   if (getenv("SHAKE_SIDE")) SHAKE_SIDE_RATIO = atof(getenv("SHAKE_SIDE"));
   if (getenv("SHAKE_HOLD")) SHAKE_HOLD_MS = atol(getenv("SHAKE_HOLD"));
+  if (getenv("SHAKE_KP")) SHAKE_KNOCK_PART = atof(getenv("SHAKE_KP"));
   if (argc >= 5 && !strcmp(argv[1], "strace")) { shakeTrace(argv[2], atof(argv[3]), argv[4], argc > 5 ? atoi(argv[5]) : 1); return 0; }
   if (argc >= 2 && !strcmp(argv[1], "survey")) { survey(); return 0; }
   if (argc >= 5 && (!strcmp(argv[1], "run") || !strcmp(argv[1], "trace"))) {

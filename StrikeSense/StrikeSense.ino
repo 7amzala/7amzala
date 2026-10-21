@@ -528,7 +528,10 @@ const float GUST_FACTOR = 0.40;          // bucket fills slower during a gust
 float SHAKE_K = 3.0;                     // shaking this many times the normal level...
 float SHAKE_FLOOR = 0.004;               // g, ...and at least this
 float SHAKE_SIDE_RATIO = 1.5;            // along the line at least this x sideways
-unsigned long SHAKE_HOLD_MS = 3000;      // for this long
+unsigned long SHAKE_HOLD_MS = 3000;      // for this long in total (pauses between bursts allowed)
+float SHAKE_KNOCK_PART = 0.3;            // and at least this part of the knock limit (rough sea)
+const float SHAKE_LEAK = 0.5;            // shaking time forgotten this fast during a pause
+const unsigned long SHAKE_WARMUP_MS = 5000; // first seconds of watching: learn the normal level only
 const float SHAKE_MID_TAU = 0.20;        // s, band 0.8-4 Hz = 4 Hz part minus 0.8 Hz part
 const float SHAKE_RMS_TAU = 1.0;         // s
 const float SHAKE_BASE_TAU = 30.0;       // s, normal level (wind, waves) learned this slowly
@@ -860,7 +863,8 @@ bool knockActive = false;
 Vec3 shakeMid = { 0, 0, 1 };
 bool shakeFirst = true;
 float shakeInSq = 0, shakeSideSq = 0, shakeBase = 0;
-unsigned long shakeSince = 0;
+unsigned long shakeSince = 0;          // watching started (warm-up)
+float shakeScore = 0;                  // seconds of shaking, leaks away in pauses
 float shakeRmsIn = 0, shakeRmsSide = 0;
 int knockAbove = 0;
 
@@ -2911,34 +2915,47 @@ void updateShake()
   shakeRmsIn = sqrt(shakeInSq);
   shakeRmsSide = sqrt(shakeSideSq);
 
+  if(shakeSince == 0)
+    shakeSince = millis();
+
+  // warm-up: learn the normal level (wind, waves) quickly, no alarm
+  if(millis() - shakeSince < SHAKE_WARMUP_MS)
+  {
+    shakeBase += (shakeRmsIn - shakeBase) * alphaFor(1.0);
+    shakeScore = 0;
+    return;
+  }
+
   float level = SHAKE_K * shakeBase;
 
   if(level < SHAKE_FLOOR)
     level = SHAKE_FLOOR;
+
+  if(level < SHAKE_KNOCK_PART * knockThreshold)
+    level = SHAKE_KNOCK_PART * knockThreshold;
 
   bool shaking =
     haveDir &&
     shakeRmsIn > level &&
     shakeRmsIn > SHAKE_SIDE_RATIO * shakeRmsSide;
 
-  if(!shaking)
+  if(shaking)
+    shakeScore += DT;
+  else
+    shakeScore -= DT * SHAKE_LEAK;
+
+  if(shakeScore < 0)
+    shakeScore = 0;
+
+  // the normal level follows wind and waves, but not a fish
+  if(shakeScore == 0)
+    shakeBase += (shakeRmsIn - shakeBase) * alphaFor(SHAKE_BASE_TAU);
+
+  if(SHAKE_DETECT && shakeScore >= SHAKE_HOLD_MS / 1000.0)
   {
-    shakeSince = 0;
-
-    // learn the normal level (wind, waves) only below the limit
-    if(shakeBase <= 0)
-      shakeBase = shakeRmsIn;
-    else if(shakeRmsIn < level)
-      shakeBase += (shakeRmsIn - shakeBase) * alphaFor(SHAKE_BASE_TAU);
-
-    return;
-  }
-
-  if(shakeSince == 0)
-    shakeSince = millis();
-
-  if(SHAKE_DETECT && millis() - shakeSince >= SHAKE_HOLD_MS)
+    shakeScore = 0;
     startStrike("SHAKING FISH");
+  }
 }
 
 // =====================================================
