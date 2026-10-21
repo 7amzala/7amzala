@@ -209,6 +209,19 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
 
 // ---------- run ----------
 
+// LVGL memory: the most ever used (the watch has 48 KB)
+static int mem_peak = 0;
+static int mem_low_biggest = 1 << 30;
+
+static void mem_check(void)
+{
+  lv_mem_monitor_t m;
+  lv_mem_monitor(&m);
+  int used = (int)(m.total_size - m.free_size);
+  if(used > mem_peak) mem_peak = used;
+  if((int)m.free_biggest_size < mem_low_biggest) mem_low_biggest = (int)m.free_biggest_size;
+}
+
 static void run_ms(uint32_t ms)
 {
   for(uint32_t i = 0; i < ms; i += 5)
@@ -216,6 +229,9 @@ static void run_ms(uint32_t ms)
     lv_tick_inc(5);
     sim_ms += 5;
     lv_timer_handler();
+
+    if(sim_ms % 50 == 0)
+      mem_check();
   }
 }
 
@@ -319,6 +335,11 @@ int main(void)
   lv_indev_drv_register(&in);
 
   watch_ui_create();
+  {
+    lv_mem_monitor_t m; lv_mem_monitor(&m);
+    printf("LVGL memory after start: %d of %d bytes used (%d%%), biggest free %d\n",
+           (int)(m.total_size - m.free_size), (int)m.total_size, m.used_pct, (int)m.free_biggest_size);
+  }
 
   run_ms(1000);           save("w0_boot");
   scene = 0; run_ms(3000); save("w1_looking");
@@ -490,6 +511,16 @@ int main(void)
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
   int ok = sent_n == 7;
   for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 7 || strcmp(sent[i], want[i])) ok = 0; }
+  {
+    lv_mem_monitor_t m; lv_mem_monitor(&m);
+    printf("LVGL memory at the end: %d%% used; most ever used %d bytes, smallest biggest free block %d\n",
+           m.used_pct, mem_peak, mem_low_biggest);
+    // 64-bit PC numbers: the version before the pro theme peaked at 49.4 KB
+    // here and ran on the watch (48 KB on its 32-bit chip); the new look
+    // first needed 14 KB more and froze on the boot logo. Stay at that level.
+    printf("%s: LVGL memory no more than the version that runs on the watch (%d bytes, limit 50000)\n",
+           mem_peak <= 50000 ? "PASS" : "FAIL", mem_peak);
+  }
   printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", sent_n, ok ? "all buttons send the right request" : "wrong");
   return 0;
 }

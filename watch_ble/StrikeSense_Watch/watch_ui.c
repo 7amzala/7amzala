@@ -174,7 +174,6 @@ static lv_obj_t *sea_cap[2];
 // setup: three list cells
 static lv_obj_t *cell[3];
 static lv_obj_t *cell_fill[3];         // fills up while held
-static lv_obj_t *cell_ico_bg[3];
 static lv_obj_t *cell_ico[3];
 static lv_obj_t *cell_name[3];
 static lv_obj_t *cell_sub[3];
@@ -202,7 +201,6 @@ static lv_obj_t *ls_mark;             // red line: the strike moment
 static lv_obj_t *ls_mark_dot;
 static lv_obj_t *ls_info[3];
 static lv_obj_t *ls_story;
-static lv_obj_t *ls_cell[30];
 static uint32_t ls_shown_ms = 0;      // which answer is drawn
 static uint32_t ls_asked = 0;
 static uint32_t ls_entered = 0;
@@ -263,7 +261,6 @@ static lv_obj_t *st_mark;
 static lv_obj_t *st_mark_dot;
 static lv_obj_t *st_now;
 static lv_obj_t *st_story;
-static lv_obj_t *st_cell[STORY_CELLS];
 static lv_obj_t *st_btn[2];
 static lv_obj_t *st_btn_icon[2];
 static lv_obj_t *st_btn_cap[2];
@@ -431,6 +428,43 @@ static lv_obj_t *gauge_arc(lv_obj_t *parent, int size, int width, lv_color_t tra
   lv_obj_set_style_arc_rounded(a, true, LV_PART_INDICATOR);
   lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
   return a;
+}
+
+// Story bars (30 cells, one colour each) are drawn into a small picture:
+// one object instead of 30 (the watch has only 48 KB for the screens).
+#define STORY_W 334
+#define STORY_H 6
+
+static lv_color_t st_story_buf[STORY_W * STORY_H];
+static lv_color_t ls_story_buf[STORY_W * STORY_H];
+static signed char st_story_drawn[30];
+static signed char ls_story_drawn[30];
+
+static lv_obj_t *story_canvas(lv_color_t *buf, signed char *drawn, int y)
+{
+  lv_obj_t *cv = lv_canvas_create(scr);
+  lv_canvas_set_buffer(cv, buf, STORY_W, STORY_H, LV_IMG_CF_TRUE_COLOR);
+  lv_obj_align(cv, LV_ALIGN_TOP_MID, 0, y);
+  memset(buf, 0, sizeof(lv_color_t) * STORY_W * STORY_H);          // black
+  memset(drawn, -1, 30);
+  return cv;
+}
+
+static void story_paint(lv_obj_t *cv, lv_color_t *buf, signed char *drawn, int i, lv_color_t c, int kind)
+{
+  if(drawn[i] == kind)
+    return;                           // same as on the screen: no redraw
+
+  drawn[i] = (signed char)kind;
+
+  int x0 = i * STORY_W / 30;
+  int x1 = (i + 1) * STORY_W / 30 - 1;     // 1 px gap between cells
+
+  for(int y = 0; y < STORY_H; y++)
+    for(int x = x0; x < x1; x++)
+      buf[y * STORY_W + x] = c;
+
+  lv_obj_invalidate(cv);
 }
 
 static void set_arc(lv_obj_t *a, int value, lv_color_t c)
@@ -685,10 +719,10 @@ static void layout(ui_mode_t m)
       place(subtitle, FONT_SMALL, 148);
       lv_obj_set_style_text_font(btn1_label, FONT_BIG, 0);
       lv_obj_set_style_border_width(btn1, 0, 0);
-      lv_obj_set_style_shadow_width(btn1, 40, 0);
-      lv_obj_set_style_shadow_spread(btn1, 2, 0);
-      lv_obj_set_style_shadow_color(btn1, COL_CYAN, 0);
-      lv_obj_set_style_shadow_opa(btn1, LV_OPA_40, 0);
+      lv_obj_set_style_outline_width(btn1, 10, 0);       // soft halo (a shadow needs too much memory)
+      lv_obj_set_style_outline_pad(btn1, 2, 0);
+      lv_obj_set_style_outline_color(btn1, COL_CYAN, 0);
+      lv_obj_set_style_outline_opa(btn1, LV_OPA_20, 0);
       lv_obj_align(btn1_cap, LV_ALIGN_TOP_MID, 0, 336);
       set_text_color(btn1_cap, COL_CYAN);
       set_font(btn1_cap, FONT_TINY);
@@ -701,7 +735,7 @@ static void layout(ui_mode_t m)
       lv_obj_set_style_text_font(btn1_label, FONT_SMALL, 0);
       lv_obj_set_style_border_width(btn1, 2, 0);
       lv_obj_set_style_border_color(btn1, lv_color_hex(0x4a5872), 0);
-      lv_obj_set_style_shadow_width(btn1, 0, 0);
+      lv_obj_set_style_outline_width(btn1, 0, 0);
       lv_obj_align(btn1_cap, LV_ALIGN_TOP_MID, 0, 384);
       set_text_color(btn1_cap, COL_DIM);
       set_font(btn1_cap, FONT_MICRO);
@@ -1092,7 +1126,7 @@ static void strike_page(const ble_link_status_t *s, uint32_t now)
   for(int i = 0; i < STORY_CELLS; i++)
   {
     fish_t f = story[(story_head + i) % STORY_CELLS];
-    set_bg_color(st_cell[i], f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color(f));
+    story_paint(st_story, st_story_buf, st_story_drawn, i, f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color(f), f);
   }
 
   set_text(st_btn_cap[0], s->command_busy ? "..." : "WATCHING");
@@ -1154,7 +1188,7 @@ static void ls_story_draw(const short *kk, const short *tt, int n, float allow)
         f = g;
     }
 
-    set_bg_color(ls_cell[c], f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color(f));
+    story_paint(ls_story, ls_story_buf, ls_story_drawn, c, f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color(f), f);
   }
 }
 
@@ -1813,13 +1847,15 @@ void watch_ui_create(void)
     lv_obj_set_style_bg_opa(cell_fill[i], LV_OPA_30, 0);
     lv_obj_add_flag(cell_fill[i], LV_OBJ_FLAG_HIDDEN);
 
-    cell_ico_bg[i] = box(cell[i], 40, 40, LV_RADIUS_CIRCLE, cell_cols[i]);
-    lv_obj_set_style_bg_opa(cell_ico_bg[i], LV_OPA_20, 0);
-    lv_obj_align(cell_ico_bg[i], LV_ALIGN_LEFT_MID, 14, 0);
-
-    cell_ico[i] = label(cell_ico_bg[i], FONT_SMALL, cell_cols[i]);
+    // the icon in a tinted circle: one label with its own background
+    cell_ico[i] = label(cell[i], FONT_SMALL, cell_cols[i]);
     lv_label_set_text(cell_ico[i], cell_icons[i]);
-    lv_obj_center(cell_ico[i]);
+    lv_obj_set_size(cell_ico[i], 40, 40);
+    lv_obj_set_style_radius(cell_ico[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(cell_ico[i], LV_OPA_20, 0);
+    lv_obj_set_style_bg_color(cell_ico[i], cell_cols[i], 0);
+    lv_obj_set_style_pad_top(cell_ico[i], 10, 0);
+    lv_obj_align(cell_ico[i], LV_ALIGN_LEFT_MID, 14, 0);
 
     cell_name[i] = label(cell[i], FONT_SMALL, COL_TEXT);
     lv_label_set_text(cell_name[i], cell_names[i]);
@@ -1899,15 +1935,7 @@ void watch_ui_create(void)
   lv_obj_add_flag(ls_mark_dot, LV_OBJ_FLAG_IGNORE_LAYOUT);
 
   // its story bar: what the fish did, left to right
-  ls_story = box(scr, 334, 6, 3, COL_BG);
-  lv_obj_set_style_clip_corner(ls_story, true, 0);
-  lv_obj_align(ls_story, LV_ALIGN_TOP_MID, 0, 262);
-
-  for(int i = 0; i < 30; i++)
-  {
-    ls_cell[i] = box(ls_story, (i + 1) * 334 / 30 - i * 334 / 30 - 1, 6, 0, lv_color_hex(0x343a4a));
-    lv_obj_set_pos(ls_cell[i], i * 334 / 30, 0);
-  }
+  ls_story = story_canvas(ls_story_buf, ls_story_drawn, 262);
 
   ls_info[0] = label(scr, FONT_MICRO, COL_DIM);          // ZOOM 2 s | 2 s - tap
   lv_obj_align(ls_info[0], LV_ALIGN_TOP_MID, 0, 274);
@@ -2069,24 +2097,10 @@ void watch_ui_create(void)
   lv_obj_set_style_shadow_opa(st_now, LV_OPA_60, 0);
 
   // story bar: last 30 s, one cell per second
-  st_story = lv_obj_create(scr);
-  lv_obj_remove_style_all(st_story);
-  lv_obj_set_size(st_story, 334, 6);
-  lv_obj_align(st_story, LV_ALIGN_TOP_MID, 0, 306);
-  lv_obj_set_style_radius(st_story, 3, 0);
-  lv_obj_set_style_clip_corner(st_story, true, 0);
-  lv_obj_clear_flag(st_story, LV_OBJ_FLAG_CLICKABLE);
+  st_story = story_canvas(st_story_buf, st_story_drawn, 306);
 
   for(int i = 0; i < STORY_CELLS; i++)
-  {
-    st_cell[i] = lv_obj_create(st_story);
-    lv_obj_remove_style_all(st_cell[i]);
-    lv_obj_set_style_bg_opa(st_cell[i], LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(st_cell[i], lv_color_hex(0x343a4a), 0);
-    lv_obj_set_pos(st_cell[i], i * 334 / STORY_CELLS, 0);
-    lv_obj_set_size(st_cell[i], (i + 1) * 334 / STORY_CELLS - i * 334 / STORY_CELLS - 1, 6);
     story[i] = FISH_QUIET;
-  }
 
   // round icon buttons: I'M WATCHING, REEL IN
   static const char *st_paths[2] = { "/watching", "/reelin" };
@@ -2124,6 +2138,12 @@ void watch_ui_create(void)
   started_ms = lv_tick_get();
   mode = MODE_LIVE;               // force the first layout
   layout(MODE_BOOT);
+
+  // how full LVGL's memory is (Serial Monitor): if it is full the screen freezes
+  lv_mem_monitor_t mm;
+  lv_mem_monitor(&mm);
+  printf("[UI] LVGL memory: %u of %u bytes used (%d%%)\n",
+         (unsigned)(mm.total_size - mm.free_size), (unsigned)mm.total_size, mm.used_pct);
 
   lv_timer_create(ui_timer, 100, NULL);
   lv_timer_create(graph_timer, 100, NULL);
