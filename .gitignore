@@ -13,3 +13,4 @@ sim/watch_ui_test/*.o
 sim/watch_ui_test/host
 sim/watch_ui_test/*.raw
 __pycache__/
+StrikeSense_Watch.zip
