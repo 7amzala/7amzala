@@ -219,19 +219,6 @@ void buzz_live(int level)
 
   level = level < 0 ? 0 : (level > 255 ? 255 : level);
 
-  if(level == 0)
-  {
-    if(live)
-    {
-      put(REG_RTP, 0);
-      put(REG_MODE, 0x00);          // back to effects
-      live = false;
-      live_level = 0;
-    }
-
-    return;
-  }
-
   if(!live)
   {
     put(REG_GO, 0);
@@ -245,6 +232,17 @@ void buzz_live(int level)
     put(REG_RTP, (uint8_t)level);
     live_level = level;
   }
+}
+
+void buzz_live_stop(void)
+{
+  if(!found || !live)
+    return;
+
+  put(REG_RTP, 0);
+  put(REG_MODE, 0x00);              // back to effects
+  live = false;
+  live_level = 0;
 }
 
 void buzz_play(buzz_t what)

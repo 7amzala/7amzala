@@ -30,7 +30,9 @@
 // KNOCK, SLACK (tip sprang back, line loose), QUIET (calm for 2 s: stopped,
 // or swimming toward you) - with a trend arrow, PULL % and TILT, the live
 // graph with the strike marked, and a 30 s story bar. Until WATCHING or
-// REEL IN: RUN = live vibration that follows the rod; KNOCK click per kick
+// REEL IN: RUN = fast short pulses (faster and stronger with a harder pull),
+// on the strike screen the ring empties within ~1 s once the rod is still;
+// KNOCK click per kick
 // + 3 clicks / 5 s; SLACK buzz-click-buzz / 4 s; QUIET wake-up alarm, 3
 // long strong buzzes / 5 s, after 30 s longer ones / 4 s.
 //
@@ -245,6 +247,9 @@ static float fish_avg = 0;            // tip angle, 0.5 s average
 static float fish_mov2 = 0;           // movement around it, squared
 static float fish_mov = 0;            // movement (deg RMS)
 static float fish_mov_base = 0.1f;    // the waves' normal movement
+static float fish_moving_level = 0.25f; // movement above this = moving
+static uint32_t fish_move_ms = 0;     // last time the rod moved
+static float st_rest = 0;             // strike screen: the tip's rest (follows it once the rod is still)
 #define FISH_MOVE_MIN 0.25f           // deg: at least this much movement = moving
 #define FISH_CALM_MS  2000            // calm this long = not running
 static float fish_slow = 0;           // strength, slow average (for the trend)
@@ -590,20 +595,40 @@ static void ring_timer(lv_timer_t *tm)
     lv_arc_set_value(ring_glow, ring_cur);
   }
 
-  // live vibration: stronger the harder the tip is pulled, pulsing as the
-  // rod bounces, a strong kick on each knock
+}
+
+// RUN vibration: short fast pulses, "bz-bz-bz" like a bee - about 6 a
+// second for a gentle pull up to 14 for a hard one, and stronger too; a
+// knock gives one extra-strong pulse.
+static float haptic_phase = 0;
+static float haptic_strength = 0;               // 0..1, set by the strike screen
+
+static void haptic_timer(lv_timer_t *tm)
+{
+  (void)tm;
+
   if(!haptic_live)
   {
-    buzz_live(0);
+    haptic_phase = 0;
+    buzz_live_stop();
     return;
   }
 
-  int level = 50 + ring_cur * 160 / 100 + (int)(fish_mov * 80);
+  float st = haptic_strength < 0 ? 0 : (haptic_strength > 1 ? 1 : haptic_strength);
+  float rate = 6 + 8 * st;                      // pulses a second
+
+  haptic_phase += rate * 0.010f;
+
+  if(haptic_phase >= 1)
+    haptic_phase -= 1;
+
+  bool on = haptic_phase < 0.5f;                // half on, half off
+  int level = on ? 150 + (int)(105 * st) : 0;
 
   if((int32_t)(haptic_kick_until - lv_tick_get()) > 0)
     level = 255;
 
-  buzz_live(level > 255 ? 255 : level);
+  buzz_live(level);
 }
 
 // the state pill at the top: [dot] TEXT, tinted in its colour
@@ -1154,6 +1179,11 @@ static void fish_track(const ble_link_status_t *s, int k)
   // RUN: the rod is moving (still pulling), or bent strongly forward and
   // held there (a steady run makes no bounce). The rod's pull % / drop-back
   // stay latched during a strike, so they are not used here.
+  if(fish_mov > moving_level)
+    fish_move_ms = now;                         // the rod is moving
+
+  fish_moving_level = moving_level;
+
   if(fish_mov > moving_level || s->ftilt > 2 * allow)
     fish_run_ms = now;
 
@@ -1212,12 +1242,27 @@ static void strike_page(const ble_link_status_t *s, uint32_t now)
   {
     strike_ms_id = s->strikeid;
     strike_ms = now;
+    st_rest = 0;
   }
+
+  // The rod stopped moving and is not bent hard (a steady run): where it
+  // is now is its rest - roughly back is back - so the ring empties within
+  // about a second instead of creeping down with the last bit of bend.
+  float allow = s->allow > 0.2f ? s->allow : 0.2f;
+
+  if(now - fish_move_ms > 400 && s->ftilt <= 2 * allow)
+    st_rest += (s->ftilt - st_rest) * 0.5f;
+
+  float pulled = s->ftilt - st_rest;
+  float ring_part = pulled / (3 * allow);
+  float mov_part = fish_mov / (2 * fish_moving_level);
+
+  haptic_strength = ring_part > mov_part ? ring_part : mov_part;
 
   lv_color_t c = fish_color(fish);
 
-  // the ring: how hard the tip is pulled now (red: a strike)
-  ring_pull(s->ftilt, s->allow, COL_RED);
+  // the ring: how hard the tip is pulled now, from its rest (red: a strike)
+  ring_pull(pulled, s->allow, COL_RED);
 
   // time since the strike
   char a[32];
@@ -2292,4 +2337,5 @@ void watch_ui_create(void)
   lv_timer_create(graph_timer, 100, NULL);
   lv_timer_create(swipe_timer, 20, NULL);
   lv_timer_create(ring_timer, 33, NULL);
+  lv_timer_create(haptic_timer, 10, NULL);
 }

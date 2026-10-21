@@ -29,7 +29,8 @@ typedef enum
 
 bool buzz_begin(void);         // false = no module found
 void buzz_play(buzz_t what);   // starts it and returns at once
-void buzz_live(int level);     // live vibration 0..255 (follows the rod), 0 = off
+void buzz_live(int level);     // live vibration 0..255 (follows the rod); 0 = still, stays ready
+void buzz_live_stop(void);     // leave live vibration (effects again)
 
 #ifdef __cplusplus
 }
