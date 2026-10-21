@@ -412,6 +412,13 @@ int main(void)
   vswipe(400, 150, 233); expect(1, -1, "up again: stays");
   vswipe(150, 400, 233); expect(1, 0, "down: back to sea state");
   swipe(120, 380, 300);  expect(0, 0, "right: main");
+  // bad touch reads (shared bus): one far point while the finger rests, or alone
+  touch_x = 233; touch_y = 300; touch_down = 1; run_ms(100);
+  touch_x = 460; run_ms(30); touch_x = 233; run_ms(100);
+  touch_down = 0; run_ms(200);
+  expect(0, 0, "finger resting + one bad far point: no page change");
+  touch_x = 20; touch_y = 240; touch_down = 1; run_ms(25); touch_x = 440; run_ms(25); touch_down = 0; run_ms(200);
+  expect(0, 0, "a bad 50 ms 'touch' jumping across: no page change");
   vswipe(150, 400, 233); expect(0, 1, "down from main: last strike");
   run_ms(31000);         expect(0, 0, "30 s later: main by itself");
   printf("%s: swipe map, %d wrong\n", nav_fail ? "FAIL" : "PASS", nav_fail);

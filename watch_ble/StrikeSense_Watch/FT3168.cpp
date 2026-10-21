@@ -49,23 +49,36 @@ void Touch_Init(void)
   I2C_writr_buff(I2C_ADDR_FT3168,0x00,&data,1); //Switch to normal mode
 
 }
+// One finger on the screen? Only a clean answer counts: the bus is shared
+// with the vibration module, motion sensor and battery chip, and a failed
+// or garbled read used to look like a touch at a random place (pages
+// changed by themselves).
 uint8_t getTouch(uint16_t *x,uint16_t *y)
 {
-  uint8_t data;
+  uint8_t points = 0;
   uint8_t buf[4];
-  I2C_read_buff(I2C_ADDR_FT3168,0x02,&data,1);
-  if(data)
-  {
-    I2C_read_buff(I2C_ADDR_FT3168,0x03,buf,4);
-    *x = (((uint16_t)buf[0] & 0x0f)<<8) | (uint16_t)buf[1];
-    *y = (((uint16_t)buf[2] & 0x0f)<<8) | (uint16_t)buf[3];
-    if(*x > EXAMPLE_LCD_H_RES)
-    *x = EXAMPLE_LCD_H_RES;
-    if(*y > EXAMPLE_LCD_V_RES)
-    *y = EXAMPLE_LCD_V_RES;
-    return 1;
-  }
-  return 0;
+
+  if(I2C_read_buff(I2C_ADDR_FT3168,0x02,&points,1) != ESP_OK)
+    return 0;
+
+  if(points < 1 || points > 2)                // 0 = no finger; more = noise
+    return 0;
+
+  if(I2C_read_buff(I2C_ADDR_FT3168,0x03,buf,4) != ESP_OK)
+    return 0;
+
+  uint8_t event = buf[0] >> 6;                // 0 down, 1 lifted, 2 contact, 3 (not set by all chips)
+
+  if(event == 1)
+    return 0;
+
+  uint16_t tx = (((uint16_t)buf[0] & 0x0f)<<8) | (uint16_t)buf[1];
+  uint16_t ty = (((uint16_t)buf[2] & 0x0f)<<8) | (uint16_t)buf[3];
+
+  if(tx >= EXAMPLE_LCD_H_RES || ty >= EXAMPLE_LCD_V_RES)
+    return 0;                                 // off the screen: a bad read
+
+  *x = tx;
+  *y = ty;
+  return 1;
 }
-
-

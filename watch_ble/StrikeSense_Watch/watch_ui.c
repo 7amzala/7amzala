@@ -118,6 +118,8 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #define SCREEN_LOST_MS  5000       // rod lost: on this long
 
 #define SWIPE_PX     70           // finger moved this far sideways = swipe
+#define SWIPE_JUMP   160          // a finger can't move this far in one reading: a bad touch read
+#define SWIPE_MIN_MS 80           // a swipe takes at least this long
 #define PAGE_BACK_MS 30000        // other page: back to the main page after this
 #define HOLD_MS      2000         // RELEARN: hold this long
 
@@ -865,6 +867,9 @@ static void swipe_timer(lv_timer_t *t)
 
   static bool down = false;
   static lv_point_t from;
+  static lv_point_t last;
+  static uint32_t down_ms = 0;
+  static int beyond = 0;              // readings in a row past the swipe distance
 
   lv_indev_t *in = lv_indev_get_next(NULL);
 
@@ -879,6 +884,9 @@ static void swipe_timer(lv_timer_t *t)
   {
     down = true;
     from = p;
+    last = p;
+    down_ms = lv_tick_get();
+    beyond = 0;
     swiped = !screen_on;            // dark: this touch only wakes the screen
     screen_wake(imu_present() ? SCREEN_TOUCH_MS : SCREEN_IDLE_MS);
     return;
@@ -890,12 +898,28 @@ static void swipe_timer(lv_timer_t *t)
     return;
   }
 
+  // a jump no finger can make: a bad touch read, ignore this point
+  int jx = p.x - last.x;
+  int jy = p.y - last.y;
+
+  if((jx < 0 ? -jx : jx) + (jy < 0 ? -jy : jy) > SWIPE_JUMP)
+    return;
+
+  last = p;
+
   int dx = p.x - from.x;
   int dy = p.y - from.y;
   int adx = dx < 0 ? -dx : dx;
   int ady = dy < 0 ? -dy : dy;
 
-  if(swiped || (adx < SWIPE_PX && ady < SWIPE_PX))
+  if(adx < SWIPE_PX && ady < SWIPE_PX)
+  {
+    beyond = 0;
+    return;
+  }
+
+  // a real swipe: far enough on 2 readings in a row, and not instant
+  if(swiped || ++beyond < 2 || lv_tick_get() - down_ms < SWIPE_MIN_MS)
     return;
 
   swiped = true;                    // one page per swipe
