@@ -8258,6 +8258,45 @@ void handleSaveSettings()
   sendSettings();
 }
 
+// ---------- Time and date (from the phone or the watch) ----------
+
+bool clockSet = false;
+unsigned long clockEpochAt = 0;          // seconds since 1970 (UTC)...
+unsigned long clockMillisAt = 0;         // ...at this millis()
+long clockTzMin = 0;                     // local time = UTC + this
+
+unsigned long nowEpoch()
+{
+  if(!clockSet)
+    return 0;
+
+  return clockEpochAt + (millis() - clockMillisAt) / 1000;
+}
+
+void handleSetTime()
+{
+  long t = server.arg("t").toInt();
+  long tz = server.arg("tz").toInt();
+
+  if(t < 1600000000L || tz < -14 * 60 || tz > 14 * 60)
+  {
+    server.send(400, "text/plain", "BAD TIME");
+    return;
+  }
+
+  bool first = !clockSet;
+
+  clockEpochAt = (unsigned long)t;
+  clockMillisAt = millis();
+  clockTzMin = tz;
+  clockSet = true;
+
+  if(first)
+    Serial.printf("TIME SET: %lu (UTC%+ld min)\n", (unsigned long)t, tz);
+
+  server.send(200, "text/plain", "OK");
+}
+
 // ---------- Saved setups (5, named, in flash) ----------
 
 const int PRESET_COUNT = 5;
@@ -8479,6 +8518,8 @@ String watchJson()
   addField(json, "knockthr", knockThreshold, 4);
   addField(json, "tilt", tiltDeg, 2);
   addField(json, "ft", fastTiltDeg, 2);
+  addField(json, "time", (long)nowEpoch());
+  addField(json, "tz", clockTzMin);
   addField(json, "allow", pullAllow, 2);
   addField(json, "bucket", (long)(pullBucket / bucketSize * 100.0));
   addField(json, "drop", (long)(dropBucket / bucketSize * 100.0));
@@ -8780,6 +8821,7 @@ void setup()
   server.on("/set", handleSet);
   server.on("/savesettings", handleSaveSettings);
   server.on("/defaultsettings", handleDefaultSettings);
+  server.on("/settime", handleSetTime);
   server.on("/presets", handlePresets);
   server.on("/presetsave", handlePresetSave);
   server.on("/presetload", handlePresetLoad);

@@ -54,10 +54,14 @@
 #include "watch_bat.h"
 #include "watch_imu.h"
 #include "watch_power.h"
+#include "watch_clock.h"
+#include "strike_log.h"
+#include "strike_sd.h"
 
 void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #include "strikesense_boot_fixed.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -156,10 +160,11 @@ static lv_obj_t *bars[4];
 static lv_obj_t *bat_label;
 static lv_obj_t *title;
 static lv_obj_t *subtitle;
-static lv_obj_t *chart;
-static lv_chart_series_t *ser_knock;
-static lv_chart_series_t *ser_limit;
-static lv_chart_series_t *ser_tilt;
+// the live graph's data (last 20 s): plain arrays the graph panel draws
+// from (no hidden chart object: less screen memory)
+static lv_coord_t g_knock[GRAPH_POINTS];
+static lv_coord_t g_tilt[GRAPH_POINTS];
+static uint16_t g_start = 0;          // the oldest point
 static lv_obj_t *btn1;                // big round button: READY, SKIP
 static lv_obj_t *btn1_label;
 static lv_obj_t *btn1_cap;            // its name under it
@@ -217,7 +222,35 @@ static uint32_t ls_shown_ms = 0;      // which answer is drawn
 static uint32_t ls_asked = 0;
 static uint32_t ls_entered = 0;
 static long ls_strikeid = -1;
-static int ls_view = 0;               // 0 = ZOOM (2 s + 2 s), 1 = 30 s overview; tap the graph to switch
+static int ls_view = 0;               // 0 = close-up (20 s, drag) / rod: zoom; 1 = whole strike; tap to switch
+
+// strike history (the watch's own recordings, strike_log.c)
+#define HIST_W     334                // points drawn at most (one per pixel)
+#define HIST_CLOSE 200                // close-up: 20 s
+static lv_coord_t ls_k[HIST_W], ls_t[HIST_W], ls_lim[HIST_W];
+#define ls_ago    title               // "2 h 15 min ago" (the title is not used on that page)
+static lv_obj_t *ls_home;             // round home button
+static lv_obj_t *ls_axis[4];          // times under the graph
+static lv_obj_t *ls_win;              // the part shown, on the story bar
+#define home_last hint                // home screen: "last strike 18 min ago" (hint not used there)
+static slog_t *hist_rec_shown = NULL;
+static int hist_view_shown = -1, hist_off_shown = -1, hist_n_shown = -1;
+static int hist_off = 0;              // close-up: first point shown
+static slog_t *hist_rec_for_off = NULL;
+static lv_coord_t ls_drag_x0;
+static int ls_drag_off0;
+static bool ls_moved = false;
+
+// back to the live graph when something happens (strike: at once)
+static bool pending_home = false;
+static uint32_t last_knock_jump = 0;
+static bool finger_down = false;
+static bool bucket_was_on = false, drop_was_on = false;
+
+static uint32_t last_settime_ms = 0;  // the watch told the rod the time
+static uint32_t sd_save_at = 0;
+
+static int hist_total(void);
 static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
 static uint32_t hold_from = 0;
@@ -373,15 +406,56 @@ static void set_font(lv_obj_t *o, const lv_font_t *f)
     lv_obj_set_style_text_font(o, f, 0);
 }
 
-static void ls_chart_clicked(lv_event_t *e)
+// The strike graph: drag left / right to move through the strike
+// (close-up), tap to switch close-up <-> whole strike
+static void ls_chart_event(lv_event_t *e)
+{
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_indev_t *in = lv_indev_get_act();
+  lv_point_t p = { 0, 0 };
+
+  if(in)
+    lv_indev_get_point(in, &p);
+
+  if(code == LV_EVENT_PRESSED)
+  {
+    ls_drag_x0 = p.x;
+    ls_drag_off0 = hist_off;
+    ls_moved = false;
+    return;
+  }
+
+  if(code == LV_EVENT_PRESSING)
+  {
+    int dx = p.x - ls_drag_x0;
+
+    if(dx > 8 || dx < -8)
+      ls_moved = true;
+
+    if(ls_moved && ls_view == 0)
+      hist_off = ls_drag_off0 - dx * HIST_CLOSE / (354 - 20);   // finger right = earlier
+
+    return;
+  }
+
+  if(code == LV_EVENT_RELEASED && !ls_moved && !swiped)
+  {
+    ls_view = 1 - ls_view;
+    ls_shown_ms = 0;                  // draw again
+    hist_view_shown = -1;
+    buzz_play(BUZZ_TAP);
+  }
+}
+
+static void home_clicked(lv_event_t *e)
 {
   (void)e;
 
   if(swiped)
     return;
 
-  ls_view = 1 - ls_view;
-  ls_shown_ms = 0;                    // draw again
+  page = 0;
+  vpage = 0;
   buzz_play(BUZZ_TAP);
 }
 
@@ -673,9 +747,8 @@ static void metric(int i, const char *val, const char *unit, const char *cap, lv
 // "now" dot at the end of the tilt line in the graph panel
 static void graph_now(void)
 {
-  lv_coord_t *ty = lv_chart_get_y_array(chart, ser_tilt);
-  int last = (lv_chart_get_x_start_point(chart, ser_tilt) + GRAPH_POINTS - 1) % GRAPH_POINTS;
-  int tv = ty[last] == LV_CHART_POINT_NONE ? 0 : ty[last];
+  int last = (g_start + GRAPH_POINTS - 1) % GRAPH_POINTS;
+  int tv = g_tilt[last];
   lv_obj_set_y(st_now, 10 + (900 - tv) * (126 - 20) / 1200 - 6);
 }
 
@@ -730,7 +803,7 @@ static void layout(ui_mode_t m)
   lv_obj_set_style_arc_width(ring, st || m == MODE_PULLTEST ? 12 : 10, LV_PART_MAIN);
 
   // top: signal + rod battery (the strike screen shows the time there)
-  bool top = live || sea || lst || m == MODE_REELED || m == MODE_PULLTEST || m == MODE_RELEARN;
+  bool top = live || sea || m == MODE_REELED || m == MODE_PULLTEST || m == MODE_RELEARN;
 
   show(bat_label, top);
 
@@ -743,7 +816,7 @@ static void layout(ui_mode_t m)
 
   // state pill: everywhere but the radar, boot and battery
   show(st_pill, !look && !bat && m != MODE_BOOT);
-  lv_obj_align(st_pill, LV_ALIGN_TOP_MID, st ? -10 : 0, 66);
+  lv_obj_align(st_pill, LV_ALIGN_TOP_MID, st ? -10 : 0, lst ? 32 : 66);
   show(st_trend, st);
   show(st_time, st);
 
@@ -813,14 +886,19 @@ static void layout(ui_mode_t m)
   // last strike
   show(ls_chart, lst);
   show(ls_story, lst);
+  show(ls_home, lst);
+  show(ls_win, false);
+
+  for(int i = 0; i < 4; i++)
+    show(ls_axis[i], false);
 
   for(int i = 0; i < 3; i++)
     show(ls_info[i], lst);
 
   // texts: which page uses the title / subtitle / hint
-  show(title, look || m == MODE_REELED || m == MODE_PULLTEST);
+  show(title, look || m == MODE_REELED || m == MODE_PULLTEST || lst);   // strike page: "... ago" 
   show(subtitle, look || live || m == MODE_REELED || m == MODE_PULLTEST || lst);
-  show(hint, m == MODE_PULLTEST || sea);
+  show(hint, m == MODE_PULLTEST || sea || live);                      // home: "last strike ... ago" 
 
   lv_obj_set_style_bg_color(scr, COL_BG, 0);
 
@@ -834,6 +912,8 @@ static void layout(ui_mode_t m)
 
     case MODE_LIVE:
       place(subtitle, FONT_MICRO, 306);
+      place(hint, FONT_MICRO, 22);
+      set_text_color(hint, COL_DIM);
       break;
 
     case MODE_REELED:
@@ -873,7 +953,9 @@ static void layout(ui_mode_t m)
       break;
 
     case MODE_LASTSTRIKE:
-      place(subtitle, FONT_TINY, 98);
+      place(subtitle, FONT_TINY, 68);
+      place(title, FONT_MICRO, 90);
+      set_text_color(title, COL_DIM);
       break;
 
     default:
@@ -934,6 +1016,8 @@ static void swipe_timer(lv_timer_t *t)
     return;
   }
 
+  finger_down = pressed;
+
   if(!pressed)
   {
     down = false;
@@ -986,23 +1070,28 @@ static void swipe_timer(lv_timer_t *t)
   }
   else if(dy < 0)
   {
-    // finger up: battery, or back from the last strike
+    // finger up: battery, or back toward the live graph through the strikes
     if(vpage == 0)
       vpage = -1;
-    else if(vpage == 1)
-      vpage = 0;
+    else if(vpage >= 1)
+      vpage--;
   }
   else
   {
-    // finger down: last strike, or back from the battery
+    // finger down: newest strike, then older ones; or back from the battery
     if(vpage == 0)
       vpage = 1;
     else if(vpage == -1)
       vpage = 0;
+    else if(vpage >= 1 && vpage < hist_total())
+      vpage++;
   }
 
-  if(vpage == 1 && vbefore != 1)
+  if(vpage >= 1 && vpage != vbefore)
   {
+    hist_rec_for_off = NULL;          // close-up, at the strike
+    hist_view_shown = -1;
+
     ls_view = 0;                      // ZOOM first
     ls_shown_ms = 0;
     ble_link_ask_last_strike();
@@ -1381,9 +1470,283 @@ static void ls_story_draw(const short *kk, const short *tt, int n, float allow)
   }
 }
 
-static void last_strike_page(const ble_link_status_t *s, uint32_t now)
+// ---------- strike history (the watch's own recordings) ----------
+
+static int hist_total(void)
+{
+  int n = slog_count();
+  return n > 0 ? n : 1;               // none yet: the rod's last strike
+}
+
+static void fmt_ago(char *out, size_t size, long sec)
+{
+  if(sec < 0)
+    out[0] = 0;
+  else if(sec < 60)
+    snprintf(out, size, "%ld s ago", sec);
+  else if(sec < 3600)
+    snprintf(out, size, "%ld min ago", sec / 60);
+  else if(sec < 48 * 3600L)
+    snprintf(out, size, "%ld h %02ld min ago", sec / 3600, (sec % 3600) / 60);
+  else
+    snprintf(out, size, "%ld days ago", sec / 86400);
+}
+
+// seconds since the strike: from the clock, or the watch's own count
+static long rec_age(const slog_t *r, uint32_t now_ms)
+{
+  uint32_t c = clock_now();
+
+  if(r->utc && c >= r->utc)
+    return (long)(c - r->utc);
+
+  if(!r->from_card && r->got_ms)
+    return (long)((now_ms - r->got_ms) / 1000);
+
+  return -1;
+}
+
+// "21:42" today, "14 Oct 21:42" another day, "" if the time was not known
+static void fmt_when(char *out, size_t size, const slog_t *r)
+{
+  static const char *mon[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+  if(r->utc == 0)
+  {
+    out[0] = 0;
+    return;
+  }
+
+  long local = (long)r->utc + r->tz * 60L;
+  long day = local / 86400, sec = local % 86400;
+  long today = clock_now() ? ((long)clock_now() + clock_tz() * 60L) / 86400 : day;
+
+  if(day == today)
+  {
+    snprintf(out, size, "%02ld:%02ld", sec / 3600, (sec / 60) % 60);
+    return;
+  }
+
+  // days since 1970 -> date
+  long z = day + 719468, era = (z >= 0 ? z : z - 146096) / 146097;
+  long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+  int d = (int)(doy - (153 * mp + 2) / 5 + 1), m = (int)(mp < 10 ? mp + 3 : mp - 9);
+
+  snprintf(out, size, "%d %s %02ld:%02ld", d, mon[m - 1], sec / 3600, (sec / 60) % 60);
+}
+
+static void fmt_secs(char *out, size_t size, long sec)
+{
+  if(sec < 0)
+    snprintf(out, size, "-%ld:%02ld", -sec / 60, -sec % 60);
+  else
+    snprintf(out, size, "%ld:%02ld", sec / 60, sec % 60);
+}
+
+// the colour bar: the whole recording, one pixel column each
+static void hist_story(const slog_t *r)
+{
+  for(int x = 0; x < STORY_W; x++)
+  {
+    int b0 = x * r->n / STORY_W, b1 = (x + 1) * r->n / STORY_W;
+    int f = 0;
+
+    for(int i = b0; i < b1 || i == b0; i++)
+      if(i < r->n && r->st[i] > f)
+        f = r->st[i];
+
+    lv_color_t c = f == FISH_QUIET ? lv_color_hex(0x343a4a) : fish_color((fish_t)f);
+
+    for(int y = 0; y < STORY_H; y++)
+      ls_story_buf[y * STORY_W + x] = c;
+  }
+
+  memset(ls_story_drawn, -1, sizeof(ls_story_drawn));   // (the rod's page paints cells)
+  lv_obj_invalidate(ls_story);
+}
+
+static void history_page(slog_t *r, int idx, int total, uint32_t now)
 {
   layout(MODE_LASTSTRIKE);
+
+  char a[72], w[24];
+
+  snprintf(a, sizeof(a), "STRIKE %d OF %d", total - idx, total);
+  pill_set(a, COL_RED, true);
+
+  fmt_when(w, sizeof(w), r);
+  snprintf(a, sizeof(a), "%s%s%s", r->type[0] ? r->type : "STRIKE", w[0] ? "  -  " : "", w);
+  set_text(subtitle, a);
+  set_text_color(subtitle, COL_TEXT);
+
+  fmt_ago(a, sizeof(a), rec_age(r, now));
+
+  if(!r->done)
+    strncat(a, a[0] ? "  -  recording..." : "recording...", sizeof(a) - strlen(a) - 1);
+
+  set_text(ls_ago, a);
+
+  show(ls_chart, true);
+  show(ls_story, true);
+  set_text(ls_info[1], "");
+
+  // which part: close-up (20 s, dragged) or the whole strike
+  int n = r->n, a0 = 0, cnt = n;
+
+  if(hist_rec_for_off != r)
+  {
+    hist_rec_for_off = r;
+    hist_off = r->pre - 60;           // starts 6 s before the strike
+  }
+
+  bool close = ls_view == 0 && n > HIST_CLOSE;
+
+  if(close)
+  {
+    hist_off = hist_off < 0 ? 0 : (hist_off > n - HIST_CLOSE ? n - HIST_CLOSE : hist_off);
+    a0 = hist_off;
+    cnt = HIST_CLOSE;
+  }
+
+  show(ls_win, close);
+
+  for(int i = 0; i < 4; i++)
+    show(ls_axis[i], cnt > 1);
+
+  if(r != hist_rec_shown || ls_view != hist_view_shown || a0 != hist_off_shown || n != hist_n_shown)
+  {
+    bool new_rec = r != hist_rec_shown || n != hist_n_shown;
+
+    hist_rec_shown = r;
+    hist_view_shown = ls_view;
+    hist_off_shown = a0;
+    hist_n_shown = n;
+    ls_shown_ms = 0;                  // (the rod's page must draw again)
+
+    // the points: one per pixel at most (biggest knock, furthest tilt of each)
+    int pts = cnt < HIST_W ? cnt : HIST_W;
+
+    if(pts < 2)
+      pts = 2;
+
+    for(int i = 0; i < pts; i++)
+    {
+      int b0 = a0 + i * cnt / pts, b1 = a0 + (i + 1) * cnt / pts;
+      int kk = 0, tt = 0;
+
+      for(int j = b0; j < b1 || j == b0; j++)
+      {
+        if(j >= n)
+          break;
+
+        if(r->k[j] > kk) kk = r->k[j];
+        if(abs(r->t[j]) >= abs(tt)) tt = r->t[j];
+      }
+
+      ls_k[i] = kk;
+      ls_t[i] = tt;
+      ls_lim[i] = KNOCK_LIMIT;
+    }
+
+    lv_chart_set_point_count(ls_chart, pts);
+    lv_chart_refresh(ls_chart);
+
+    // red line + dot at the strike, if it is in view
+    bool in = r->pre >= a0 && r->pre < a0 + cnt;
+    show(ls_mark, in);
+    show(ls_mark_dot, in);
+
+    if(in)
+    {
+      int x = (r->pre - a0) * (354 - 20) / (cnt > 1 ? cnt - 1 : 1);
+      lv_obj_set_pos(ls_mark, x - 1, 0);
+      lv_obj_set_pos(ls_mark_dot, x - 5, -8);
+    }
+
+    // times under the graph (0:00 = the strike)
+    for(int i = 0; i < 4; i++)
+    {
+      long sec = (long)((a0 + i * (cnt - 1) / 3) - r->pre) / 10;
+      char lab[16];
+
+      if(sec == 0)
+        snprintf(lab, sizeof(lab), "0:00");
+      else if(sec > -60 && sec < 60)
+        snprintf(lab, sizeof(lab), "%+lds", sec);
+      else
+        snprintf(lab, sizeof(lab), "%s%ld:%02ld", sec < 0 ? "-" : "+", labs(sec) / 60, labs(sec) % 60);
+
+      set_text(ls_axis[i], lab);
+      set_text_color(ls_axis[i], sec == 0 ? COL_RED : COL_DARK);
+      lv_obj_align(ls_axis[i], LV_ALIGN_TOP_MID, -167 + i * 334 / 3, 252);
+    }
+
+    if(new_rec)
+      hist_story(r);
+
+    // the part shown, as a box on the colour bar
+    if(close)
+    {
+      int x0 = a0 * STORY_W / n, x1 = (a0 + cnt) * STORY_W / n;
+      lv_obj_set_size(ls_win, x1 - x0 + 4, STORY_H + 8);
+      lv_obj_align(ls_win, LV_ALIGN_TOP_MID, -STORY_W / 2 + (x0 + x1) / 2, 270 - 4);
+    }
+
+    // the story in words + numbers
+    int run = 0, slack = -1, last = r->pre, peak = 0;
+
+    for(int i = r->pre; i < n; i++)
+    {
+      if(r->st[i] == FISH_RUN) run++;
+      if(r->st[i] == FISH_SLACK && slack < 0) slack = i;
+      if(r->st[i] != FISH_QUIET) last = i;
+      if(r->t[i] > peak) peak = r->t[i];
+    }
+
+    char t1[16], t2[16];
+    int len = snprintf(a, sizeof(a), "RUN %d s", run / 10);
+
+    if(slack >= 0)
+    {
+      fmt_secs(t1, sizeof(t1), (slack - r->pre) / 10);
+      len += snprintf(a + len, sizeof(a) - len, "  -  SLACK %s", t1);
+    }
+
+    if(r->done)
+    {
+      fmt_secs(t2, sizeof(t2), (last - r->pre) / 10);
+      snprintf(a + len, sizeof(a) - len, "  -  quiet from %s", t2);
+    }
+
+    set_text(ls_info[0], a);
+
+    snprintf(t1, sizeof(t1), "%+.1f", peak / 100.0f);
+    metric(0, t1, "deg", "TILT PEAK", COL_VIOLET, 296);
+    fmt_secs(t2, sizeof(t2), (last - r->pre) / 10);
+    metric(1, t2, "", "LASTED", COL_TEXT, 296);
+  }
+
+  set_text(ls_info[2], close ? "drag < >  -  tap: whole" : "tap: close-up");
+}
+
+// none recorded by the watch yet: the rod's last strike (fetched)
+static void rod_last_strike_page(const ble_link_status_t *s, uint32_t now)
+{
+  layout(MODE_LASTSTRIKE);
+
+  show(ls_win, false);
+
+  for(int i = 0; i < 4; i++)
+    show(ls_axis[i], false);
+
+  set_text(ls_ago, "");
+
+  if(hist_rec_shown != NULL)
+  {
+    hist_rec_shown = NULL;            // the history page draws again next time
+    ls_shown_ms = 0;
+  }
 
   pill_set("LAST STRIKE", COL_RED, true);
 
@@ -1580,7 +1943,74 @@ static void ui_timer(lv_timer_t *t)
 
   top_icons(&s);
 
-  if(s.strike || ((page != 0 || vpage != 0) && now - page_since > PAGE_BACK_MS))
+  // ---- time and date: from the rod (set by the phone), or the watch tells a restarted rod ----
+  if(s.time > 1600000000L)
+  {
+    uint32_t c = clock_now();
+    long diff = c ? (long)(c - (uint32_t)s.time) : 9999;
+
+    if(diff > 2 || diff < -2 || s.tz != clock_tz())
+      clock_set((uint32_t)s.time, s.tz);
+  }
+  else if(s.time == 0 && clock_now() && now - last_settime_ms > 20000)
+  {
+    char path[48];
+    snprintf(path, sizeof(path), "/settime?t=%lu&tz=%d", (unsigned long)clock_now(), clock_tz());
+    ble_link_command(path);
+    last_settime_ms = now;
+  }
+
+  // ---- finished strikes to the SD card, never during a strike ----
+  if(!s.strike && !slog_recording() && now - sd_save_at > 1000)
+  {
+    sd_save_at = now;
+    strike_sd_save();
+  }
+
+  // ---- something happened: back to the live graph ----
+  // a new knock: show it for 3 s
+  bool new_knock = last_knock_id >= 0 && s.knockid != last_knock_id;
+
+  if(new_knock)
+  {
+    knock_until = now + 3000;
+
+    if(!imu_present())
+      screen_wake(SCREEN_KNOCK_MS);   // with the motion sensor a knock only vibrates
+  }
+
+  last_knock_id = s.knockid;
+
+  bool bucket_on = s.bucket >= PULL_SHOW;
+  bool drop_on = s.drop >= PULL_SHOW || s.dropwatch;
+  bool away = page != 0 || vpage != 0;
+
+  if(away && ((bucket_on && !bucket_was_on) || (drop_on && !drop_was_on) ||
+              (new_knock && now - last_knock_jump >= 30000)))
+  {
+    pending_home = true;
+
+    if(new_knock)
+      last_knock_jump = now;
+  }
+
+  bucket_was_on = bucket_on;
+  drop_was_on = drop_on;
+
+  // not in the middle of something: holding a setup button, teaching
+  // the look, a finger on the screen (then as soon as it lifts)
+  if(pending_home && hold_btn == NULL && imu_teach_state() != 1 && !finger_down)
+  {
+    pending_home = false;
+    page = 0;
+    vpage = 0;
+  }
+
+  if(!away)
+    pending_home = false;
+
+  // a strike: at once; another page for 30 s: back by itself
+  if(s.strike || (away && now - page_since > PAGE_BACK_MS))
   {
     page = 0;
     vpage = 0;
@@ -1594,9 +2024,18 @@ static void ui_timer(lv_timer_t *t)
     return;
   }
 
-  if(vpage == 1)
+  if(vpage >= 1)
   {
-    last_strike_page(&s, now);
+    if(slog_count() > 0)
+    {
+      int i = vpage - 1 < slog_count() ? vpage - 1 : slog_count() - 1;
+      history_page(slog_get(i), i, slog_count(), now);
+    }
+    else
+    {
+      rod_last_strike_page(&s, now);
+    }
+
     return;
   }
 
@@ -1613,19 +2052,6 @@ static void ui_timer(lv_timer_t *t)
     if(page == -1)
       return;
   }
-
-  // a new knock: show it for 3 s
-  bool new_knock = last_knock_id >= 0 && s.knockid != last_knock_id;
-
-  if(new_knock)
-  {
-    knock_until = now + 3000;
-
-    if(!imu_present())
-      screen_wake(SCREEN_KNOCK_MS);   // with the motion sensor a knock only vibrates
-  }
-
-  last_knock_id = s.knockid;
 
   // ---- vibration ----
   strike_seen = s.strikeid;
@@ -1761,6 +2187,19 @@ static void ui_timer(lv_timer_t *t)
   // ---------- home ----------
   layout(MODE_LIVE);
 
+  // top: how long ago the last strike was
+  {
+    char ago[40] = "", line[56] = "";
+
+    if(slog_count() > 0)
+      fmt_ago(ago, sizeof(ago), rec_age(slog_get(0), now));
+
+    if(ago[0])
+      snprintf(line, sizeof(line), "last strike %s", ago);
+
+    set_text(home_last, line);
+  }
+
   lv_color_t c = COL_CYAN;
   bool warn = false;              // orange: something building
   const char *pill = "ARMED";
@@ -1856,16 +2295,20 @@ static void graph_timer(lv_timer_t *t)
   int k = s.knockthr > 0 ? (int)(s.energy_peak / s.knockthr * KNOCK_LIMIT) : 0;
   int tl = (int)(s.tilt * 100);
 
-  lv_chart_set_next_value(chart, ser_knock, k > 300 ? 300 : k);
-  lv_chart_set_next_value(chart, ser_limit, KNOCK_LIMIT);
-  lv_chart_set_next_value(chart, ser_tilt, tl > 300 ? 300 : (tl < -300 ? -300 : tl));
+  g_knock[g_start] = k > 300 ? 300 : k;
+  g_tilt[g_start] = tl > 300 ? 300 : (tl < -300 ? -300 : tl);
+  g_start = (g_start + 1) % GRAPH_POINTS;
 
   fish_track(&s, k);
+
+  // the watch records each strike itself (strike_log.c)
+  slog_tick(k, tl, fish, s.strike, s.strikeid, s.type, s.allow, s.strikeid == strike_quiet,
+            lv_tick_get(), clock_now(), clock_tz());
 
   // the graph panel (home + STRIKE) shows the same data (shared arrays, same start point)
   if(mode == MODE_STRIKE || mode == MODE_LIVE)
   {
-    uint16_t sp = lv_chart_get_x_start_point(chart, ser_knock);
+    uint16_t sp = g_start;
     lv_chart_set_x_start_point(st_bars, st_bar_ser, sp);
     lv_chart_set_x_start_point(st_lines, st_knock_ser, sp);
     lv_chart_set_x_start_point(st_lines, st_tilt_ser, sp);
@@ -1937,22 +2380,6 @@ void watch_ui_create(void)
   lv_obj_set_style_arc_color(radar_arc, COL_CYAN, LV_PART_INDICATOR);
   lv_obj_set_style_arc_rounded(radar_arc, true, LV_PART_INDICATOR);
 
-  // live data holder (not shown: the graph panel below draws it)
-  chart = lv_chart_create(scr);
-  lv_obj_add_flag(chart, LV_OBJ_FLAG_HIDDEN);
-  lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-  lv_chart_set_point_count(chart, GRAPH_POINTS);
-  lv_chart_set_update_mode(chart, LV_CHART_UPDATE_MODE_SHIFT);
-  lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, -300, 300);     // knock 0..300 = top half
-  lv_chart_set_range(chart, LV_CHART_AXIS_SECONDARY_Y, -300, 900);   // tilt -3..+3 deg = bottom half
-
-  ser_limit = lv_chart_add_series(chart, lv_color_hex(0x6b5426), LV_CHART_AXIS_PRIMARY_Y);
-  ser_tilt = lv_chart_add_series(chart, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
-  ser_knock = lv_chart_add_series(chart, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
-
-  lv_chart_set_all_value(chart, ser_limit, KNOCK_LIMIT);
-  lv_chart_set_all_value(chart, ser_tilt, 0);
-  lv_chart_set_all_value(chart, ser_knock, 0);
 
   // pull test: a rod that bends, and the line going into the sea
   pt_rod = lv_line_create(scr);
@@ -2092,8 +2519,8 @@ void watch_ui_create(void)
 
   // last strike page: graph of the rod's recording, in the same dark panel
   ls_chart = lv_chart_create(scr);
-  lv_obj_set_size(ls_chart, 354, 130);
-  lv_obj_align(ls_chart, LV_ALIGN_TOP_MID, 0, 124);
+  lv_obj_set_size(ls_chart, 354, 136);
+  lv_obj_align(ls_chart, LV_ALIGN_TOP_MID, 0, 112);
   lv_chart_set_type(ls_chart, LV_CHART_TYPE_LINE);
   lv_chart_set_point_count(ls_chart, LS_MAX);
   lv_chart_set_div_line_count(ls_chart, 0, 0);
@@ -2106,16 +2533,21 @@ void watch_ui_create(void)
   lv_obj_set_style_pad_all(ls_chart, 10, 0);
   lv_obj_set_style_size(ls_chart, 0, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(ls_chart, 3, LV_PART_ITEMS);
-  lv_obj_add_flag(ls_chart, LV_OBJ_FLAG_CLICKABLE);              // tap: ZOOM <-> 30 s
+  lv_obj_add_flag(ls_chart, LV_OBJ_FLAG_CLICKABLE);              // drag: move in time, tap: close-up <-> whole
   lv_obj_clear_flag(ls_chart, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_event_cb(ls_chart, ls_chart_clicked, LV_EVENT_CLICKED, NULL);
+  lv_obj_add_event_cb(ls_chart, ls_chart_event, LV_EVENT_PRESSED, NULL);
+  lv_obj_add_event_cb(ls_chart, ls_chart_event, LV_EVENT_PRESSING, NULL);
+  lv_obj_add_event_cb(ls_chart, ls_chart_event, LV_EVENT_RELEASED, NULL);
 
   ls_limit = lv_chart_add_series(ls_chart, lv_color_hex(0x6b5426), LV_CHART_AXIS_PRIMARY_Y);
   ls_tilt = lv_chart_add_series(ls_chart, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
   ls_knock = lv_chart_add_series(ls_chart, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
+  lv_chart_set_ext_y_array(ls_chart, ls_limit, ls_lim);     // our arrays: no screen memory used
+  lv_chart_set_ext_y_array(ls_chart, ls_tilt, ls_t);
+  lv_chart_set_ext_y_array(ls_chart, ls_knock, ls_k);
 
   // red strike line with a dot on top: inside the graph (can never stick out of it)
-  ls_mark = box(ls_chart, 2, 130 - 20, 0, COL_RED);
+  ls_mark = box(ls_chart, 2, 136 - 20, 0, COL_RED);
   lv_obj_add_flag(ls_mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_set_style_bg_opa(ls_mark, LV_OPA_70, 0);
 
@@ -2123,14 +2555,37 @@ void watch_ui_create(void)
   lv_obj_add_flag(ls_mark_dot, LV_OBJ_FLAG_IGNORE_LAYOUT);
 
   // its story bar: what the fish did, left to right
-  ls_story = story_canvas(ls_story_buf, ls_story_drawn, 262);
+  ls_story = story_canvas(ls_story_buf, ls_story_drawn, 270);
 
-  ls_info[0] = label(scr, FONT_MICRO, COL_DIM);          // ZOOM 2 s | 2 s - tap
-  lv_obj_align(ls_info[0], LV_ALIGN_TOP_MID, 0, 274);
+  // the part shown in the close-up: a box on the colour bar
+  ls_win = box(scr, 40, STORY_H + 8, 4, COL_BG);
+  lv_obj_set_style_bg_opa(ls_win, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(ls_win, 2, 0);
+  lv_obj_set_style_border_color(ls_win, COL_TEXT, 0);
+
+  for(int i = 0; i < 4; i++)
+    ls_axis[i] = label(scr, FONT_MICRO, COL_DARK);
+
+  // round home button: straight back to the live graph
+  ls_home = lv_btn_create(scr);
+  lv_obj_set_size(ls_home, 52, 52);
+  lv_obj_align(ls_home, LV_ALIGN_TOP_MID, 0, 362);
+  lv_obj_set_style_radius(ls_home, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(ls_home, COL_CARD, 0);
+  lv_obj_set_style_border_width(ls_home, 2, 0);
+  lv_obj_set_style_border_color(ls_home, COL_CYAN, 0);
+  lv_obj_set_style_shadow_width(ls_home, 0, 0);
+  lv_obj_add_event_cb(ls_home, home_clicked, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *hi = label(ls_home, FONT_SMALL, COL_CYAN);
+  lv_label_set_text(hi, LV_SYMBOL_HOME);
+  lv_obj_center(hi);
+
+  ls_info[0] = label(scr, FONT_MICRO, COL_TEXT);         // RUN 14 s - SLACK 0:21 - ... / rod: ZOOM 2 s | 2 s
+  lv_obj_align(ls_info[0], LV_ALIGN_TOP_MID, 0, 280);
   ls_info[1] = label(scr, FONT_TINY, COL_DIM);           // no strike yet / errors
   lv_obj_align(ls_info[1], LV_ALIGN_TOP_MID, 0, 180);
-  ls_info[2] = label(scr, FONT_MICRO, COL_DIM);          // 3 strikes since ...
-  lv_obj_align(ls_info[2], LV_ALIGN_TOP_MID, 0, 364);
+  ls_info[2] = label(scr, FONT_MICRO, COL_DIM);          // drag < > - tap ... / rod: 3 strikes since ...
+  lv_obj_align(ls_info[2], LV_ALIGN_TOP_MID, 0, 422);
 
   // page dots at the bottom
   for(int i = 0; i < 3; i++)
@@ -2220,7 +2675,7 @@ void watch_ui_create(void)
   lv_obj_set_style_bg_grad_dir(st_bars, LV_GRAD_DIR_VER, LV_PART_ITEMS);
   lv_obj_clear_flag(st_bars, LV_OBJ_FLAG_CLICKABLE);
   st_bar_ser = lv_chart_add_series(st_bars, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
-  lv_chart_set_ext_y_array(st_bars, st_bar_ser, lv_chart_get_y_array(chart, ser_knock));
+  lv_chart_set_ext_y_array(st_bars, st_bar_ser, g_knock);
 
   // knock edge + tilt line, same scales as the main graph
   st_lines = lv_chart_create(st_panel);
@@ -2238,8 +2693,8 @@ void watch_ui_create(void)
   lv_obj_clear_flag(st_lines, LV_OBJ_FLAG_CLICKABLE);
   st_knock_ser = lv_chart_add_series(st_lines, COL_CYAN, LV_CHART_AXIS_PRIMARY_Y);
   st_tilt_ser = lv_chart_add_series(st_lines, COL_VIOLET, LV_CHART_AXIS_SECONDARY_Y);
-  lv_chart_set_ext_y_array(st_lines, st_knock_ser, lv_chart_get_y_array(chart, ser_knock));
-  lv_chart_set_ext_y_array(st_lines, st_tilt_ser, lv_chart_get_y_array(chart, ser_tilt));
+  lv_chart_set_ext_y_array(st_lines, st_knock_ser, g_knock);
+  lv_chart_set_ext_y_array(st_lines, st_tilt_ser, g_tilt);
 
   // knock limit: dashed amber line
   static lv_point_t limit_pts[2] = { { 10, 0 }, { 344, 0 } };

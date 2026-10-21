@@ -597,6 +597,12 @@ final class RodLink
                         public void run()
                         {
                             request("/mtu?v=" + n, 3000);
+
+                            // the time and date (with summer / winter time):
+                            // the rod passes them on to the watch
+                            long now = System.currentTimeMillis();
+                            int tz = java.util.TimeZone.getDefault().getOffset(now) / 60000;
+                            request("/settime?t=" + (now / 1000) + "&tz=" + tz, 3000);
                         }
                     }).start();
                 }

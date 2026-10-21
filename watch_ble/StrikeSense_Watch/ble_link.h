@@ -39,6 +39,8 @@ typedef struct
   float knockthr;
   float tilt;               // deg, + toward the water
   float ftilt;              // same, less smoothing (rod 2.2+): the ring follows the tip
+  long time;                // the rod's time: UTC seconds since 1970, 0 = unknown
+  int tz;                   // local time = UTC + tz minutes
   float allow;
   float ptdeg;              // pull test: how far the tip moved
   float ptneed;             // pull test: how far it must move

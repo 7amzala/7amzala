@@ -68,7 +68,21 @@ float imu_teach_progress(void) { return fake_teach == 1 ? 0.5f : fake_teach == 2
 static int cpu_mhz = 240;
 void power_screen(bool on) { cpu_mhz = on ? 240 : 80; }
 
+// fake clock chip and SD card
+#include "watch_clock.h"
+#include "strike_sd.h"
+static uint32_t fake_utc0 = 0;        // 0 = the watch does not know the time
+static int fake_tz = 0, clock_sets = 0, sd_saves = 0;
+uint32_t clock_now(void) { return fake_utc0 ? fake_utc0 + sim_ms / 1000 : 0; }
+int clock_tz(void) { return fake_tz; }
+void clock_set(uint32_t utc, int tz) { fake_utc0 = utc - sim_ms / 1000; fake_tz = tz; clock_sets++; }
+void strike_sd_save(void);
+bool strike_sd_present(void) { return true; }
+
+#include "strike_log.c"               // the real strike recorder
 #include "watch_ui.c"                 // the real screens (statics visible to the test)
+
+void strike_sd_save(void) { slog_t *r = slog_unsaved(); if(r) { r->saved = true; sd_saves++; } }
 
 // fake watch battery
 void watch_bat_begin(void) {}
@@ -118,6 +132,7 @@ void ble_link_command(const char *path)
 }
 
 static float peak = 0;
+static long fake_rod_time = 0;        // the rod's clock (0 = it does not know)
 static long fake_strike_id = 3;       // a new strike gets a new number (as on the rod)
 
 void ble_link_get(ble_link_status_t *s, bool take_peak)
@@ -231,6 +246,8 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
 
   s->energy_peak = peak;
   s->ftilt = s->tilt;                           // the rod's quicker tilt: same here
+  s->time = fake_rod_time ? fake_rod_time + sim_ms / 1000 : 0;
+  s->tz = 60;
 
   if(take_peak)
     peak = 0;
@@ -411,19 +428,23 @@ int main(void)
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
   vswipe(150, 400, 233); expect(1, 1, "down: last strike"); save("w10_laststrike");
   {
-    int zoom_first = lv_chart_get_point_count(ls_chart) == 200;
-    press(233, 200);                          // tap the graph
-    int over = lv_chart_get_point_count(ls_chart) == 150;
+    // the watch's own recording of the strike (no loading from the rod)
+    slog_t *r = slog_get(0);
+    int own = slog_count() == 1 && r && r->done && r->n > HIST_CLOSE && !lv_obj_has_flag(ls_chart, LV_OBJ_FLAG_HIDDEN);
+    int close_first = lv_chart_get_point_count(ls_chart) == HIST_CLOSE;
+    int off0 = hist_off;
+    swipe(330, 130, 190);                     // drag the graph to the left: later in the strike
+    int dragged = hist_off > off0 && lv_chart_get_point_count(ls_chart) == HIST_CLOSE;
+    press(233, 190);                          // tap: the whole strike
+    int whole = lv_chart_get_point_count(ls_chart) == (r->n < HIST_W ? r->n : HIST_W);
     save("w10b_overview");
-    press(233, 200);
-    int back = lv_chart_get_point_count(ls_chart) == 200;
-    fake_ls_recording = 1; fake_ls_got = 2; run_ms(300);
-    int rec = !lv_obj_has_flag(ls_chart, LV_OBJ_FLAG_HIDDEN);
+    press(233, 190);
+    int back = lv_chart_get_point_count(ls_chart) == HIST_CLOSE;
+    printf("  %s the watch's own recording: %d points (%.1f s), shown at once\n", own ? "ok  " : "FAIL", r ? r->n : 0, r ? r->n / 10.0 : 0);
+    printf("  %s close-up first (20 s), drag moves in time (%d -> %d), tap: whole, tap: close-up\n",
+           close_first && dragged && whole && back ? "ok  " : "FAIL", off0, hist_off);
     save("w10c_recording");
-    fake_ls_recording = 0; fake_ls_got = 3; run_ms(300);
-    printf("  %s ZOOM first (200 points), tap: 30 s (150), tap: ZOOM again\n", zoom_first && over && back ? "ok  " : "FAIL");
-    printf("  %s strike still recording: graph shown at once\n", rec ? "ok  " : "FAIL");
-    if(!(zoom_first && over && back && rec)) nav_fail++;
+    if(!(own && close_first && dragged && whole && back)) nav_fail++;
   }
   vswipe(150, 400, 233); expect(1, 1, "down again: stays");
   swipe(380, 120, 300);  expect(1, 1, "left/right on last strike: nothing");
@@ -591,6 +612,51 @@ int main(void)
   scene = 1; run_ms(500);
   sent_n = sent_before_ring;                    // (the WATCHING taps above)
   printf("%s: ring, %d wrong\n", rfail ? "FAIL" : "PASS", rfail);
+
+  // ---- time, strike history, back home ----
+  printf("history:\n");
+  int hfail = 0, sent_before_hist = sent_n;
+#define HIST(cond, what) do { int ok_ = (cond); if(!ok_) hfail++; printf("  %s %s (page %d/%d, strikes %d)\n", ok_ ? "ok  " : "FAIL", what, page, vpage, slog_count()); } while(0)
+  fake_look = 1; scene = 1; run_ms(500);
+  fake_rod_time = 1760000000; run_ms(300);
+  HIST(labs((long)clock_now() - (fake_rod_time + (long)(sim_ms / 1000))) <= 2 && clock_tz() == 60, "the rod's time (from the phone) sets the watch clock");
+  fake_rod_time = 0; int s0 = sent_n; run_ms(300);
+  HIST(sent_n > s0 && strncmp(sent[sent_n - 1], "/settime?t=17600", 16) == 0 && strstr(sent[sent_n - 1], "&tz=60"), "rod restarted: the watch tells it the time");
+  int n0 = slog_count(), saves0 = sd_saves;
+  for(int i = 0; i < 2; i++)
+  {
+    fake_strike_id = 30 + i; scene = 4; scene_start = sim_ms; run_ms(3000);
+    press(176, 354);                            // I'M WATCHING
+    scene = 1; run_ms(25000);                   // quiet: the recording ends
+  }
+  HIST(slog_count() == n0 + 2 && slog_get(0)->strikeid == 31 && slog_get(0)->done, "2 more strikes recorded by the watch");
+  HIST(sd_saves >= saves0 + 2, "saved to the SD card after they ended");
+  HIST(strncmp(lv_label_get_text(hint), "last strike ", 12) == 0 && strstr(lv_label_get_text(hint), "ago"), "home screen: 'last strike ... ago'");
+  vswipe(150, 400, 233);
+  HIST(vpage == 1 && strstr(lv_label_get_text(title), "ago") && strstr(lv_label_get_text(subtitle), ":"), "down: newest strike, with its time and '... ago'");
+  save("w18_history");
+  vswipe(150, 400, 233);
+  HIST(vpage == 2, "down again: the strike before");
+  vswipe(400, 150, 233);
+  HIST(vpage == 1, "up: newer");
+  vswipe(150, 400, 233); vswipe(150, 400, 233);
+  press(233, 388);                              // the home button
+  HIST(page == 0 && vpage == 0, "home button: straight back to the live graph");
+  swipe(380, 120, 300);                         // to the sea state page
+  scene = 2; scene_start = sim_ms; run_ms(1500);
+  HIST(page == 0 && vpage == 0, "a knock on another page: back to the live graph");
+  swipe(380, 120, 300); run_ms(300);
+  scene = 2; scene_start = sim_ms; run_ms(1500);
+  HIST(page == 1, "another knock within 30 s: stays (no jumping all the time)");
+  scene = 1; run_ms(500);
+  touch_x = 233; touch_y = 300; touch_down = 1; run_ms(100);    // finger resting on the screen
+  scene = 3; scene_start = sim_ms; run_ms(2500);
+  HIST(page == 1, "slow pull while a finger is on the screen: waits");
+  touch_down = 0; run_ms(300);
+  HIST(page == 0 && vpage == 0, "finger lifted: back to the live graph");
+  scene = 1; run_ms(2000);
+  sent_n = sent_before_hist;                    // (WATCHING taps, /settime)
+  printf("%s: history, %d wrong\n", hfail ? "FAIL" : "PASS", hfail);
 
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
   int ok = sent_n == 7;

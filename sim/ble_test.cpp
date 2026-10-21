@@ -294,6 +294,17 @@ int main()
     check(ask(600012, "/defaultsettings", b) && b.body.find("\"pdeg\":1.000") != std::string::npos, "Default: back to the factory values");
   }
 
+  // ---- time and date ----
+  {
+    Answer b;
+    check(ask(600101, "/watch", b) && b.body.find("\"time\":0") != std::string::npos, "no time yet: \"time\":0");
+    check(ask(600102, "/settime?t=1760000000&tz=60", b) && b.code == 200, "/settime from the phone");
+    step(5);
+    check(ask(600103, "/watch", b) && b.body.find("\"time\":176000000") != std::string::npos && b.body.find("\"tz\":60") != std::string::npos,
+          "the watch gets the time (counting on) and the time zone");
+    check(ask(600104, "/settime?t=12&tz=0", b) && b.code == 400, "a wrong time is refused");
+  }
+
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }

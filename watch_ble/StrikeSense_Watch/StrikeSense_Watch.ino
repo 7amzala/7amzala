@@ -19,6 +19,8 @@
 #include "buzz.h"
 #include "watch_bat.h"
 #include "watch_imu.h"
+#include "watch_clock.h"
+#include "strike_sd.h"
 
 void setup()
 {
@@ -29,6 +31,8 @@ void setup()
     delay(10);
 
   Touch_Init();
+  clock_begin();            // time and date (clock chip on the touch bus)
+  strike_sd_begin();        // micro-SD card: strike history (before the screens use it)
   lcd_lvgl_Init();          // screen + the StrikeSense screens (watch_ui.c)
   buzz_begin();             // wrist vibration, if the Haptic Bzzz is wired (SDA/SCL)
   watch_bat_begin();        // the watch's own battery (BATTERY page)

@@ -28,7 +28,7 @@ static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 static ble_link_status_t shared;
 static float peak = 0;
 static uint32_t lastAnswerMs = 0;
-static char commandPath[32] = "";
+static char commandPath[48] = "";
 static bool commandBusy = false;
 
 // Notifications from the rod (Bluetooth task) -> loop()
@@ -243,6 +243,8 @@ static void gotWatchData(const std::string &j)
   s.knockthr = jsonNum(j, "knockthr", 0.01);
   s.tilt = jsonNum(j, "tilt", 0);
   s.ftilt = jsonNum(j, "ft", s.tilt);           // older rod: the normal tilt
+  s.time = (long)jsonNum(j, "time", 0);         // UTC seconds, 0 = the rod does not know
+  s.tz = (int)jsonNum(j, "tz", 0);
   s.allow = jsonNum(j, "allow", 1);
   s.ptdeg = jsonNum(j, "ptdeg", 0);
   s.ptneed = jsonNum(j, "ptneed", 1);
