@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 4
-        versionName "2.2 (pull test once)"
+        versionCode 5
+        versionName "2.3 (signal bars)"
     }
 
     // The app's own signing key (a personal app, not on the Play Store).

@@ -226,7 +226,9 @@ public class MainActivity extends Activity
             }
             else
             {
-                js("var e=document.getElementById('linkInfo'); if(e) e.textContent=" + quote(linkText(link)) + ";");
+                // coloured signal bars (dashboard 2.3+); older page: the text
+                js("if(window.setLink) setLink(" + link.ready() + "," + link.rssi() + ");"
+                   + " else { var e=document.getElementById('linkInfo'); if(e) e.textContent=" + quote(linkText(link)) + "; }");
             }
 
             handler.postDelayed(this, 1000);
