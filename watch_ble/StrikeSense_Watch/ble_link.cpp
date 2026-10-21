@@ -242,6 +242,7 @@ static void gotWatchData(const std::string &j)
   s.knockid = (long)jsonNum(j, "knockid", 0);
   s.knockthr = jsonNum(j, "knockthr", 0.01);
   s.tilt = jsonNum(j, "tilt", 0);
+  s.ftilt = jsonNum(j, "ft", s.tilt);           // older rod: the normal tilt
   s.allow = jsonNum(j, "allow", 1);
   s.ptdeg = jsonNum(j, "ptdeg", 0);
   s.ptneed = jsonNum(j, "ptneed", 1);

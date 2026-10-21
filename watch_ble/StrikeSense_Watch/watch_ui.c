@@ -20,11 +20,16 @@
 // vibrates. Without the motion sensor: dark after 30 s, as before.
 // While dark nothing is drawn and the chip runs at 80 MHz (watch_power.cpp).
 //
+// The ring on the home and STRIKE screens mirrors the rod tip live: it
+// fills right from the mark at the top when the tip is pulled toward the
+// sea, left (violet) when it springs back, empty at rest. Full = strike level.
+//
 // STRIKE screen: what the fish does now - RUN (pulling the line), KNOCK,
 // SLACK (line went loose), QUIET (and for how long) - with a trend arrow
-// (stronger / weaker), a strength ring, PULL % and TILT, the live graph with
-// the strike marked, and a 30 s story bar. Each state has its own vibration;
-// unanswered: a reminder every 30 s.
+// (stronger / weaker), PULL % and TILT, the live graph with the strike
+// marked, and a 30 s story bar. Each state has its own vibration, repeated
+// until WATCHING or REEL IN: RUN long buzz / 1.5 s, KNOCK click per kick +
+// 3 clicks / 5 s, SLACK buzz-click-buzz / 4 s, QUIET 2 soft pulses / 10 s.
 //
 // Wrist vibration (buzz.c, if the Haptic Bzzz is wired): knock = tick,
 // slow pull = pulses (faster as it grows), drop-back = 2 ticks, strike =
@@ -239,7 +244,6 @@ static uint32_t story_at = 0;
 static uint32_t strike_ms = 0;        // when the strike on the screen started
 static long strike_ms_id = -1;
 static uint32_t buzz_state_at = 0;
-static uint32_t buzz_remind_at = 0;
 
 // STRIKE screen objects
 static lv_obj_t *ring_glow;
@@ -510,6 +514,78 @@ static void ring_set(int value, lv_color_t colour)
   set_arc(ring_glow, value, colour);
 }
 
+// ---- mirror ring (home, strike): where the rod tip is right now ----
+// It fills from the mark at the top: to the right when the tip is pulled
+// toward the sea, to the left when it springs back. Full = 3x the wave
+// allowance (strike level). The rod sends the tip 10x a second; the ring
+// slides there in 3 even steps (one per 33 ms frame), so it moves as fast
+// or as slowly as the tip - nothing is added or smoothed away.
+static lv_obj_t *ring_mark;
+static bool ring_mirrored = false;
+static int ring_cur = 0, ring_from = 0, ring_to = 0, ring_step = 0;
+
+#define RING_STEPS 3
+
+static void ring_mode(bool mirror)
+{
+  if(mirror == ring_mirrored)
+    return;
+
+  ring_mirrored = mirror;
+  lv_obj_t *arcs[2] = { ring, ring_glow };
+
+  for(int i = 0; i < 2; i++)
+  {
+    lv_arc_set_mode(arcs[i], mirror ? LV_ARC_MODE_SYMMETRICAL : LV_ARC_MODE_NORMAL);
+    lv_arc_set_range(arcs[i], mirror ? -100 : 0, 100);
+    lv_arc_set_value(arcs[i], 0);
+  }
+
+  ring_cur = ring_from = ring_to = 0;
+  ring_step = RING_STEPS;
+}
+
+static void ring_mirror(float tip_deg, float allow, lv_color_t forward)
+{
+  float full = 3 * (allow > 0.2f ? allow : 0.2f);
+  int v = (int)(tip_deg / full * 100);
+
+  v = v > 100 ? 100 : (v < -100 ? -100 : v);
+
+  if(v > -2 && v < 2)
+    v = 0;                            // at rest: empty
+
+  lv_color_t c = v < 0 ? COL_VIOLET : forward;
+
+  for(int i = 0; i < 2; i++)
+  {
+    lv_obj_t *a = i == 0 ? ring : ring_glow;
+
+    if(lv_obj_get_style_arc_color(a, LV_PART_INDICATOR).full != c.full)
+      lv_obj_set_style_arc_color(a, c, LV_PART_INDICATOR);
+  }
+
+  if(v != ring_to)
+  {
+    ring_from = ring_cur;
+    ring_to = v;
+    ring_step = 0;
+  }
+}
+
+static void ring_timer(lv_timer_t *tm)
+{
+  (void)tm;
+
+  if(!ring_mirrored || ring_step >= RING_STEPS)
+    return;
+
+  ring_step++;
+  ring_cur = ring_from + (ring_to - ring_from) * ring_step / RING_STEPS;
+  lv_arc_set_value(ring, ring_cur);
+  lv_arc_set_value(ring_glow, ring_cur);
+}
+
 // the state pill at the top: [dot] TEXT, tinted in its colour
 static void pill_set(const char *text, lv_color_t c, bool dot)
 {
@@ -604,6 +680,8 @@ static void layout(ui_mode_t m)
   // the outer gauge ring: home, strike, reeled in, pull test, setup
   show(ring, live || st || m == MODE_REELED || m == MODE_PULLTEST || m == MODE_RELEARN);
   show(ring_glow, live || st || m == MODE_PULLTEST);
+  ring_mode(live || st);
+  show(ring_mark, live || st);
   lv_obj_set_style_arc_width(ring, st || m == MODE_PULLTEST ? 12 : 10, LV_PART_INDICATOR);
   lv_obj_set_style_arc_width(ring, st || m == MODE_PULLTEST ? 12 : 10, LV_PART_MAIN);
 
@@ -1009,20 +1087,22 @@ static void fish_track(const ble_link_status_t *s, int k)
   uint32_t now = lv_tick_get();
   float allow = s->allow > 0.2f ? s->allow : 0.2f;
 
-  if(s->bucket >= PULL_SHOW || s->tilt > allow)
-    fish_run_ms = now;                          // pulling the line beyond the waves
+  // from where the tip is now (the rod's pull % and drop-back stay
+  // latched during a strike, so they would say RUN / SLACK forever)
+  if(s->ftilt > allow)
+    fish_run_ms = now;                          // tip pulled toward the sea beyond the waves
 
-  if(s->dropwatch || s->drop >= PULL_SHOW || s->tilt < -allow)
-    fish_slack_ms = now;                        // line went loose
+  if(s->ftilt < -allow)
+    fish_slack_ms = now;                        // tip sprang back: line went loose
 
   if(k >= KNOCK_LIMIT)
     fish_knock_ms = now;
 
   fish_t f = FISH_QUIET;
 
-  if(fish_run_ms && now - fish_run_ms < 1500)
+  if(fish_run_ms && now - fish_run_ms < 1000)
     f = FISH_RUN;
-  else if(fish_slack_ms && now - fish_slack_ms < 1500)
+  else if(fish_slack_ms && now - fish_slack_ms < 1000)
     f = FISH_SLACK;
   else if(fish_knock_ms && now - fish_knock_ms < 3000)
     f = FISH_KNOCK;
@@ -1034,12 +1114,10 @@ static void fish_track(const ble_link_status_t *s, int k)
 
   fish = f;
 
-  // strength 0..1: pull %, tilt beyond the waves, knock size - the biggest
-  float st = s->bucket / 100.0f;
-  float tl = fabsf(s->tilt) / (allow * 3);
+  // strength 0..1 (for the trend arrow): how far the tip is out, knock size
+  float st = fabsf(s->ftilt) / (allow * 3);
   float kk = k / 300.0f;
 
-  if(tl > st) st = tl;
   if(kk > st) st = kk;
   if(st > 1) st = 1;
 
@@ -1072,10 +1150,9 @@ static void strike_page(const ble_link_status_t *s, uint32_t now)
   }
 
   lv_color_t c = fish_color(fish);
-  int strength = (int)(fish_fast * 100);
 
-  // strength ring + soft glow
-  ring_set(strength < 3 ? 3 : strength, c);
+  // the ring: where the tip is now (red forward, violet back)
+  ring_mirror(s->ftilt, s->allow, COL_RED);
 
   // time since the strike
   char a[32];
@@ -1103,7 +1180,9 @@ static void strike_page(const ble_link_status_t *s, uint32_t now)
   lv_obj_align_to(st_trend, st_pill, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
   // PULL % and TILT, each number centred with its unit right after it
-  snprintf(a, sizeof(a), "%d", s->bucket);
+  // PULL: how hard the tip is pulled now (the rod's pull % stays at 100 during a strike)
+  int pull = ring_to > 0 ? ring_to : 0;
+  snprintf(a, sizeof(a), "%d", pull);
   metric(0, a, "%", "PULL", COL_TEXT, 104);
   snprintf(a, sizeof(a), "%+.1f", s->tilt);
   metric(1, a, "deg", "TILT", COL_VIOLET, 104);
@@ -1442,46 +1521,30 @@ static void ui_timer(lv_timer_t *t)
 
   if(s.strike)
   {
-    // a vibration for each state, until you answer; reminder every 30 s
+    // each state its own pattern, repeated until you answer:
+    //   RUN   long buzz every 1.5 s
+    //   KNOCK a click per kick + click click click every 5 s
+    //   SLACK buzz . click . buzz every 4 s
+    //   QUIET 2 soft pulses every 10 s
     if(s.strikeid != strike_quiet)
     {
+      static const buzz_t pattern[] = { BUZZ_QUIET, BUZZ_KNOCKS, BUZZ_SLACK, BUZZ_STRIKE };   // by fish_t
+      static const uint32_t every[] = { 10000, 5000, 4000, 1500 };
+
       if(buzz_strike_at == 0)
       {
         buzz_play(BUZZ_STRIKE);           // the strike itself
         buzz_strike_at = now;
         buzz_state_at = now;
-        buzz_remind_at = now;
       }
-      else if(fish != fish_was)
+      else if(fish != fish_was || now - buzz_state_at >= every[fish])
       {
-        buzz_play(fish == FISH_RUN ? BUZZ_STRIKE : fish == FISH_KNOCK ? BUZZ_KNOCK :
-                  fish == FISH_SLACK ? BUZZ_DROP : BUZZ_TAP);
+        buzz_play(pattern[fish]);         // the state changed, or again: not answered yet
         buzz_state_at = now;
-
-        if(fish != FISH_QUIET)
-          buzz_remind_at = now;
-      }
-      else if(fish == FISH_RUN && now - buzz_state_at >= 1500)
-      {
-        buzz_play(BUZZ_STRIKE);           // still running: long buzz every 1.5 s
-        buzz_state_at = now;
-        buzz_remind_at = now;
-      }
-      else if(fish == FISH_SLACK && now - buzz_state_at >= 3000)
-      {
-        buzz_play(BUZZ_DROP);
-        buzz_state_at = now;
-        buzz_remind_at = now;
       }
       else if(fish == FISH_KNOCK && new_knock)
       {
-        buzz_play(BUZZ_KNOCK);
-        buzz_remind_at = now;
-      }
-      else if(now - buzz_remind_at >= 30000)
-      {
-        buzz_play(BUZZ_STRIKE);           // reminder: not answered yet
-        buzz_remind_at = now;
+        buzz_play(BUZZ_KNOCK);            // each kick
       }
     }
 
@@ -1572,7 +1635,6 @@ static void ui_timer(lv_timer_t *t)
 
   lv_color_t c = COL_CYAN;
   bool warn = false;              // orange: something building
-  int ringv = s.bucket;
   const char *pill = "ARMED";
 
   if(strcmp(s.state, "learning") == 0)
@@ -1595,7 +1657,6 @@ static void ui_timer(lv_timer_t *t)
     set_text(subtitle, "watching for a pull...");
     c = COL_ORANGE;
     warn = true;
-    ringv = 100;
   }
   else if(s.bucket >= PULL_SHOW)
   {
@@ -1612,7 +1673,6 @@ static void ui_timer(lv_timer_t *t)
     set_text(subtitle, "line going slack");
     c = COL_ORANGE;
     warn = true;
-    ringv = s.drop;
   }
   else if(now < knock_until)
   {
@@ -1628,7 +1688,7 @@ static void ui_timer(lv_timer_t *t)
 
   pill_set(pill, c, true);
   set_text_color(subtitle, warn ? COL_ORANGE : COL_DIM);
-  ring_set(ringv < 4 ? 4 : ringv, c);
+  ring_mirror(s.ftilt, s.allow, c);
 
   // TILT left, KNOCKS (or PULL while it builds) right
   snprintf(a, sizeof(a), "%+.1f", s.tilt);
@@ -1703,6 +1763,10 @@ void watch_ui_create(void)
   // outer gauge ring: 270 degrees, open at the bottom
   ring = gauge_arc(scr, 452, 10, COL_RING_BG);
   lv_obj_center(ring);
+
+  // the rest mark at the top: the mirror ring fills right / left from here
+  ring_mark = box(scr, 3, 20, 1, COL_DIM);
+  lv_obj_align(ring_mark, LV_ALIGN_TOP_MID, 0, 2);
 
   // top: Bluetooth signal bars, rod battery
   for(int i = 0; i < 4; i++)
@@ -2148,4 +2212,5 @@ void watch_ui_create(void)
   lv_timer_create(ui_timer, 100, NULL);
   lv_timer_create(graph_timer, 100, NULL);
   lv_timer_create(swipe_timer, 20, NULL);
+  lv_timer_create(ring_timer, 33, NULL);
 }

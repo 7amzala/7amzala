@@ -20,7 +20,10 @@ typedef enum
   BUZZ_DROP,         // 2 short ticks
   BUZZ_STRIKE,       // strong long buzz
   BUZZ_LOST,         // 3 slow buzzes
-  BUZZ_HELLO         // start-up: the module was found
+  BUZZ_HELLO,        // start-up: the module was found
+  BUZZ_KNOCKS,       // 3 quick clicks: fish knocking (strike reminder)
+  BUZZ_SLACK,        // buzz - click - buzz: line went slack
+  BUZZ_QUIET         // 2 soft pulses: fish stopped, still not answered
 } buzz_t;
 
 bool buzz_begin(void);         // false = no module found

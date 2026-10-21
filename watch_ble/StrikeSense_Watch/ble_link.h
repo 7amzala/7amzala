@@ -38,6 +38,7 @@ typedef struct
   float energy_peak;        // highest knock energy since the screen last took it
   float knockthr;
   float tilt;               // deg, + toward the water
+  float ftilt;              // same, less smoothing (rod 2.2+): the ring follows the tip
   float allow;
   float ptdeg;              // pull test: how far the tip moved
   float ptneed;             // pull test: how far it must move

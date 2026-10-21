@@ -221,6 +221,9 @@ void buzz_play(buzz_t what)
     { 47, 47, 0x80 | 8, 47, 47, 0 },           // STRIKE: buzz buzz . buzz buzz
     { 47, 0x80 | 40, 47, 0x80 | 40, 47, 0 },   // LOST: 3 slow buzzes
     { 47, 0x80 | 15, 47, 0 },                  // HELLO: 2 clear buzzes
+    { 1, 0x80 | 8, 1, 0x80 | 8, 1, 0 },        // KNOCKS: click click click
+    { 47, 0x80 | 12, 1, 0x80 | 12, 47, 0 },    // SLACK: buzz . click . buzz
+    { 7, 0x80 | 25, 7, 0 },                    // QUIET: soft bump . soft bump
   };
 
   put(REG_GO, 0);                 // stop what is playing

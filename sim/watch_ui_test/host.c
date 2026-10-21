@@ -44,7 +44,7 @@ void ble_link_poll(void) {}
 
 // fake vibration: count what was played
 #include "buzz.h"
-static int buzzed[8];
+static int buzzed[16];
 bool buzz_begin(void) { return true; }
 void buzz_play(buzz_t what) { buzzed[what]++; }
 
@@ -188,6 +188,14 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
       s->tilt = -1.6f;
       break;
 
+    case 10:                                    // strike: hard pull, then the tip settles back
+      s->strike = true;
+      strcpy(s->type, "SHARP STRIKE");
+      s->strikeid = fake_strike_id;
+      s->bucket = 100;                          // (stays at 100 on the rod during a strike)
+      s->tilt = t < 2 ? 3.6f : 0.1f;
+      break;
+
     case 6:                                     // pull test
       strcpy(s->state, "pulltest");
       s->dir = false;
@@ -202,6 +210,7 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
     peak = e;
 
   s->energy_peak = peak;
+  s->ftilt = s->tilt;                           // the rod's quicker tilt: same here
 
   if(take_peak)
     peak = 0;
@@ -488,25 +497,50 @@ int main(void)
   FISH(fish == FISH_RUN && fish_fast > 0.5f, "pulling hard: RUN, strong");
   FISH(buzzed[BUZZ_STRIKE] - b0 >= 2, "RUN: long buzz repeated");
   save("w14_strike_run");
-  scene = 9; scene_start = sim_ms; int d0 = buzzed[BUZZ_DROP]; run_ms(4000);
-  FISH(fish == FISH_SLACK && buzzed[BUZZ_DROP] > d0, "line went loose: SLACK, double tick");
+  scene = 9; scene_start = sim_ms; int d0 = buzzed[BUZZ_SLACK]; run_ms(4000);
+  FISH(fish == FISH_SLACK && buzzed[BUZZ_SLACK] > d0, "line went loose: SLACK, buzz-click-buzz");
   save("w15_strike_slack");
-  scene = 8; scene_start = sim_ms; int k0 = buzzed[BUZZ_KNOCK]; run_ms(4000);
-  FISH(fish == FISH_KNOCK && buzzed[BUZZ_KNOCK] > k0, "bites: KNOCK, ticks");
+  scene = 8; scene_start = sim_ms; int k0 = buzzed[BUZZ_KNOCK] + buzzed[BUZZ_KNOCKS]; run_ms(4000);
+  FISH(fish == FISH_KNOCK && buzzed[BUZZ_KNOCK] + buzzed[BUZZ_KNOCKS] > k0, "bites: KNOCK, click click click");
   save("w16_strike_knock");
-  scene = 7; scene_start = sim_ms; int t0 = buzzed[BUZZ_TAP]; run_ms(6000);
-  FISH(fish == FISH_QUIET && buzzed[BUZZ_TAP] > t0 && fish_trend <= 0, "fish stopped: QUIET, one soft tick, not stronger");
+  scene = 7; scene_start = sim_ms; int t0 = buzzed[BUZZ_QUIET]; run_ms(6000);
+  FISH(fish == FISH_QUIET && buzzed[BUZZ_QUIET] > t0 && fish_trend <= 0, "fish stopped: QUIET, 2 soft pulses, not stronger");
   save("w17_strike_quiet");
-  int r0 = buzzed[BUZZ_STRIKE]; run_ms(31000);
-  FISH(buzzed[BUZZ_STRIKE] > r0, "not answered: reminder buzz within 30 s");
+  int r0 = buzzed[BUZZ_QUIET]; run_ms(21000);
+  FISH(buzzed[BUZZ_QUIET] >= r0 + 2, "still quiet, not answered: soft pulses again every 10 s");
   int st_ok = !lv_obj_has_flag(st_panel, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(title, LV_OBJ_FLAG_HIDDEN);
   FISH(st_ok, "strike screen shows the graph panel (no flashing red page)");
   press(176, 354);                              // I'M WATCHING
-  r0 = buzzed[BUZZ_STRIKE]; run_ms(31000);
-  FISH(buzzed[BUZZ_STRIKE] == r0, "answered: no more buzzing");
+  int all0 = 0; for(int i = 0; i < 16; i++) if(i != BUZZ_TAP) all0 += buzzed[i];
+  run_ms(31000);
+  int all1 = 0; for(int i = 0; i < 16; i++) if(i != BUZZ_TAP) all1 += buzzed[i];
+  FISH(all1 == all0, "answered: no more buzzing");
   sent_n--;                                     // (that I'M WATCHING)
   scene = 1; run_ms(500);
   printf("%s: strike screen, %d wrong\n", ffail ? "FAIL" : "PASS", ffail);
+
+  // ---- the ring mirrors the rod tip ----
+  printf("ring:\n");
+  int rfail = 0;
+#define RING(cond, what) do { int ok_ = (cond); if(!ok_) rfail++; printf("  %s %s (ring %d, fish %d)\n", ok_ ? "ok  " : "FAIL", what, lv_arc_get_value(ring), fish); } while(0)
+  scene = 1; scene_start = sim_ms; run_ms(3000);
+  RING(abs(lv_arc_get_value(ring)) <= 22, "armed, waves only: ring small");
+  RING(!lv_obj_has_flag(ring_mark, LV_OBJ_FLAG_HIDDEN), "rest mark at the top");
+  scene = 3; scene_start = sim_ms; run_ms(6000);
+  RING(lv_arc_get_value(ring) >= 50, "slow pull (tip ~2.5 of 3 deg): ring filled to the right");
+  scene = 1; run_ms(400);
+  RING(lv_arc_get_value(ring) <= 22, "pull let go: ring back within 0.4 s");
+  fake_strike_id = 20; scene = 10; scene_start = sim_ms; run_ms(1500);
+  RING(lv_arc_get_value(ring) == 100 && fish == FISH_RUN, "strike, pulled hard: ring full, RUN");
+  run_ms(2000);
+  RING(abs(lv_arc_get_value(ring)) <= 5 && fish == FISH_QUIET, "tip settled back: ring empty, QUIET (not RUN)");
+  press(176, 354); sent_n--;                    // I'M WATCHING
+  fake_strike_id = 21; scene = 9; scene_start = sim_ms; run_ms(1500);
+  RING(lv_arc_get_value(ring) < -40 && lv_obj_get_style_arc_color(ring, LV_PART_INDICATOR).full == COL_VIOLET.full,
+       "line went slack: ring fills to the left, violet");
+  press(176, 354); sent_n--;
+  scene = 1; run_ms(500);
+  printf("%s: ring, %d wrong\n", rfail ? "FAIL" : "PASS", rfail);
 
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
   int ok = sent_n == 7;

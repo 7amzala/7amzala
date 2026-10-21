@@ -462,6 +462,7 @@ const unsigned long OVERSAMPLE_US = 2500; // read every 2.5 ms, average ~4 per s
 // ---------- Signal filters ----------
 
 const float GRAVITY_TAU = 0.30;          // s, rod angle smoothing
+const float FAST_TILT_TAU = 0.10;        // s, quicker angle for the watch ring (display only)
 const float VIBRATION_TAU = 0.04;        // s, only shaking faster than ~4 Hz counts as vibration
 const float ENERGY_TAU = 0.08;           // s, knock energy smoothing (smoother noise, knocks last 200+ ms)
 
@@ -734,6 +735,8 @@ float energySq = 0;
 float knockEnergy = 0;           // fast vibration strength (g)
 
 float tiltDeg = 0;               // signed: + toward water, - away
+Vec3 fastGravity = { 0, 0, 1 };
+float fastTiltDeg = 0;           // same, less smoothing: the watch ring follows the tip
 float sideDeg = 0;               // sideways (wind)
 float totalDeg = 0;              // total angle from rest
 
@@ -1371,6 +1374,25 @@ void updateSignals()
     // No direction: fall back to "how much", like the old code
     tiltDeg = totalDeg;
     sideDeg = 0;
+  }
+
+  fastGravity =
+    vAdd(
+      fastGravity,
+      vScale(
+        vSub(rawAccel, fastGravity),
+        alphaFor(FAST_TILT_TAU)
+      )
+    );
+
+  if(vLen(fastGravity) > 0.5)
+  {
+    Vec3 fu = vNorm(fastGravity);
+
+    if(haveDir)
+      fastTiltDeg = atan2(vDot(fu, pullDir), vDot(fu, restDir)) * RAD_TO_DEGREES;
+    else
+      fastTiltDeg = vAngleDeg(fu, restDir);
   }
 
   recentRest =
@@ -7870,6 +7892,7 @@ String watchJson()
   energyPeakSinceWatch = 0;
   addField(json, "knockthr", knockThreshold, 4);
   addField(json, "tilt", tiltDeg, 2);
+  addField(json, "ft", fastTiltDeg, 2);
   addField(json, "allow", pullAllow, 2);
   addField(json, "bucket", (long)(pullBucket / bucketSize * 100.0));
   addField(json, "drop", (long)(dropBucket / bucketSize * 100.0));
@@ -8115,7 +8138,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.1 (Bluetooth: phone + watch) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.2 (Bluetooth: phone + watch, fast watch ring) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

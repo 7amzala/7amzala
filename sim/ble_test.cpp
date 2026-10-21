@@ -234,6 +234,7 @@ int main()
   // watch pages: last strike (fresh after a rod start) and battery time left
   printf("\n=== WATCH PAGES ===\n");
   check(ask(500006, "/watch", a) && a.body.find("\"batleft\"") != std::string::npos, "/watch has battery time left");
+  check(a.body.find("\"ft\":") != std::string::npos, "/watch has the quicker tilt for the watch ring");
   check(ask(500007, "/laststrike", a) && a.body.find("\"have\":false") != std::string::npos &&
         a.body.find("\"count\":0") != std::string::npos, "/laststrike: no strike yet after start");
 
