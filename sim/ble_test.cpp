@@ -273,6 +273,27 @@ int main()
   printf("        /laststrike = %zu bytes, zoom part: %.120s\n", a.body.size(), a.body.c_str() + a.body.find("\"zpre\""));
   check(a.body.size() < 4500, "/laststrike small enough for the watch");
 
+  // ---- 5 named setups (presets), kept on the rod ----
+  {
+    Answer b;
+    check(ask(600001, "/presets", b) && b.body == "{\"presets\":[\"\",\"\",\"\",\"\",\"\"]}", "/presets: 5 empty setups");
+    ask(600002, "/set?k=pdeg&v=2.5", b);
+    check(ask(600003, "/presetsave?s=0&n=Calm%20beach%20%C3%B1", b) && b.body.find("\"Calm beach \xC3\xB1\"") != std::string::npos,
+          "save setup 1 with a name (Spanish letters kept)");
+    ask(600004, "/set?k=pdeg&v=1.0", b);
+    check(ask(600005, "/presetload?s=0", b) && b.body.find("\"pdeg\":2.500") != std::string::npos && b.body.find("\"saved\":false") != std::string::npos,
+          "load setup 1: its values come back (SAVE keeps them)");
+    check(ask(600006, "/presetsave?s=1&n=%22bad%5C%22%0A", b) && b.body.find("\"bad\"") != std::string::npos,
+          "quotes, backslash, new line removed from a name");
+    ask(600007, "/presetsave?s=2&n=" + std::string(40, 'x'), b);
+    check(b.body.find("\"" + std::string(24, 'x') + "\"") != std::string::npos, "a long name is cut to 24 letters");
+    check(ask(600008, "/presetsave?s=3&n=", b) && b.body.find("\"Setup 4\"") != std::string::npos, "no name: 'Setup 4'");
+    check(ask(600009, "/presetsave?s=7&n=x", b) && b.code == 400, "only setups 1-5");
+    check(ask(600010, "/presetdel?s=0", b) && b.body.find("Calm") == std::string::npos, "delete setup 1");
+    check(ask(600011, "/presetload?s=0", b) && b.code == 404, "an empty setup cannot be loaded");
+    check(ask(600012, "/defaultsettings", b) && b.body.find("\"pdeg\":1.000") != std::string::npos, "Default: back to the factory values");
+  }
+
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }

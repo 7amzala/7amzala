@@ -251,6 +251,27 @@ public class RodService extends Service
 
     // ---------- alarm ----------
 
+    // The four alarm sounds (assets/sounds/*.ogg) and the default per alarm type
+    static final java.util.List<String> SOUNDS =
+        java.util.Arrays.asList("reel_scream", "reel_clicks", "rod_bell", "falling_tone");
+
+    private String soundFile(String type)
+    {
+        String cat = type.equals("SLOW PULL") ? "slow"
+                   : type.equals("REPEATED BITE") ? "knock"
+                   : type.startsWith("DROP") ? "drop"
+                   : "strike";
+
+        String def = cat.equals("slow") ? "reel_clicks"
+                   : cat.equals("knock") ? "rod_bell"
+                   : cat.equals("drop") ? "falling_tone"
+                   : "reel_scream";
+
+        String name = getSharedPreferences("sounds", MODE_PRIVATE).getString(cat, def);
+
+        return SOUNDS.contains(name) ? name : def;
+    }
+
     private synchronized void startAlarm(String type)
     {
         alarming = true;
@@ -283,18 +304,36 @@ public class RodService extends Service
 
         try
         {
-            Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-
-            if(uri == null)
-                uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-
             stopSound();
             player = new MediaPlayer();
             player.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build());
-            player.setDataSource(this, uri);
+
+            try
+            {
+                // the chosen fishing sound
+                android.content.res.AssetFileDescriptor fd = getAssets().openFd("sounds/" + soundFile(type) + ".ogg");
+                player.setDataSource(fd.getFileDescriptor(), fd.getStartOffset(), fd.getLength());
+                fd.close();
+            }
+            catch(Exception e)
+            {
+                // not there: the phone's alarm sound, as before
+                Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+
+                if(uri == null)
+                    uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+
+                player.reset();
+                player.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+                player.setDataSource(this, uri);
+            }
+
             player.setLooping(true);
             player.prepare();
             player.start();

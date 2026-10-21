@@ -37,6 +37,7 @@ public:
   bool operator==(const String& o) const { return s == o.s; }
   String& operator+=(char c){ s += c; return *this; }
   bool concat(const char* p, unsigned n){ s.append(p, n); return true; }
+  void trim(){ size_t a = s.find_first_not_of(" \t\r\n"); if(a == std::string::npos){ s.clear(); return; } size_t b = s.find_last_not_of(" \t\r\n"); s = s.substr(a, b - a + 1); }
   friend String operator+(const String& a, const String& b){ return String(a.s + b.s); }
   friend String operator+(const char* a, const String& b){ return String(std::string(a) + b.s); }
   friend String operator+(const String& a, const char* b){ return String(a.s + b); }

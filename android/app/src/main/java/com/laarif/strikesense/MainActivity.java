@@ -290,6 +290,10 @@ public class MainActivity extends Activity
                 if(path.equals("/logo.webp"))
                     return asset("logo.webp", "image/webp");
 
+                // the alarm sounds (screaming reel, reel clicks, rod bell, falling tone)
+                if(path.matches("/sounds/[a-z_]+\\.ogg"))
+                    return asset(path.substring(1), "audio/ogg");
+
                 if(path.equals("/favicon.ico"))
                     return answer(404, "text/plain", new byte[0]);
 
@@ -447,6 +451,18 @@ public class MainActivity extends Activity
             catch(Exception e)
             {
             }
+        }
+
+        // The dashboard's chosen alarm sound per alarm type (strike, slow,
+        // knock, drop): RodService plays it when the app is in the background
+        @JavascriptInterface
+        public void setSound(String cat, String name)
+        {
+            if(cat == null || name == null || !RodService.SOUNDS.contains(name)
+               || !(cat.equals("strike") || cat.equals("slow") || cat.equals("knock") || cat.equals("drop")))
+                return;
+
+            getSharedPreferences("sounds", MODE_PRIVATE).edit().putString(cat, name).apply();
         }
 
         @JavascriptInterface
