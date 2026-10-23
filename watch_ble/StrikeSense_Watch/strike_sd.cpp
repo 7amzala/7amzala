@@ -55,7 +55,7 @@ static bool load(const char *path)
   FileHead h;
   bool ok = f.read((uint8_t *)&h, sizeof(h)) == sizeof(h) && h.magic == FILE_MAGIC && h.n > 0 && h.n <= SLOG_MAX;
 
-  slog_t *r = ok ? slog_add_loaded() : NULL;
+  slog_t *r = ok ? slog_add_loaded(h.n) : NULL;
 
   if(r)
   {
@@ -139,7 +139,7 @@ bool strike_sd_begin(void)
   for(int i = 0; i < found; i++)
     loaded += load(names[i].c_str()) ? 1 : 0;
 
-  Serial.printf("[SD] card found, %d strikes loaded\n", loaded);
+  Serial.printf("[SD] card found, %d strikes loaded (%s)\n", loaded, slog_memory_note());
   return true;
 }
 
@@ -189,7 +189,7 @@ void strike_sd_save(void)
   r->saved = true;
   nextNumber++;
 
-  Serial.printf("[SD] saved %s (%u points)\n", path, r->n);
+  Serial.printf("[SD] saved %s (%u points; %s)\n", path, r->n, slog_memory_note());
 }
 
 bool strike_sd_present(void)

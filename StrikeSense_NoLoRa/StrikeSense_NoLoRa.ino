@@ -116,8 +116,31 @@ public:
 
     if(outPos < out.length())
     {
-      if(clients > 0 && micros() - lastPiece >= PIECE_GAP_US)
+      // phone + watch: no faster than the watch's slow link takes them
+      bool room = true;
+
+      if(clients >= 2)
       {
+        unsigned long nowMs = millis();
+        pieceTokens += (nowMs - tokensAt) * PIECES_PER_110MS / 110.0f;
+        tokensAt = nowMs;
+
+        if(pieceTokens > PIECE_BURST)
+          pieceTokens = PIECE_BURST;
+
+        room = pieceTokens >= 1;
+      }
+      else
+      {
+        pieceTokens = PIECE_BURST;
+        tokensAt = millis();
+      }
+
+      if(clients > 0 && room && micros() - lastPiece >= PIECE_GAP_US)
+      {
+        if(clients >= 2)
+          pieceTokens -= 1;
+
         size_t n = out.length() - outPos;
 
         if(n > chunk)
@@ -139,22 +162,23 @@ public:
       return;
     }
 
-    // between answers: the live message, 10 times a second
+    // between answers: a waiting question first...
+    char line[REQ_MAX];
+
+    if(popLine(line))
+    {
+      dispatch(line);
+      return;
+    }
+
+    // ...then the live message, 10 times a second
     if(clients > 0 && liveBuilder != nullptr && millis() - lastLive >= LIVE_MS)
     {
       lastLive = millis();
       String body = liveBuilder();
       out = "#live 200 " + String((unsigned long)body.length()) + "\n" + body;
       outPos = 0;
-      return;
     }
-
-    char line[REQ_MAX];
-
-    if(!popLine(line))
-      return;
-
-    dispatch(line);
   }
 
   String arg(const char* name)
@@ -198,6 +222,10 @@ private:
   static const int REQ_QUEUE = 8;
   static const int REQ_MAX = 200;
   static const unsigned long PIECE_GAP_US = 4000;
+  static constexpr float PIECE_BURST = 8;          // phone + watch: pieces at once...
+  static constexpr float PIECES_PER_110MS = 4;     // ...then this many per calm watch link interval
+  float pieceTokens = 8;
+  unsigned long tokensAt = 0;
   static const unsigned long LIVE_MS = 100;  // live message 10 times a second
 
   struct Route
@@ -7110,16 +7138,27 @@ function drawLanes(E, THR, T, AL, total, marker, signed)
 // GRAPH VIEW
 // =====================================================
 
+let replayTryAt = 0;
+let replayFailed = false;
+
 async function loadReplay(id)
 {
+  replayTryAt = Date.now();
+
   try
   {
     const response = await fetch("/strike");
+
+    if(!response.ok)
+      throw new Error("rod answered " + response.status);
+
     replay = await response.json();
     replayID = id;
+    replayFailed = false;
   }
   catch(e)
   {
+    replayFailed = true;
   }
 }
 
@@ -7139,10 +7178,15 @@ async function setView(v)
   if(v === "strike")
   {
     if(replayID !== lastStrikeID)
+    {
+      el("graphSub").innerText = "Loading the strike from the rod\u2026";
       await loadReplay(lastStrikeID);
+    }
 
     el("graphTitle").innerText = "LAST STRIKE REPLAY";
-    el("graphSub").innerText = replay ? replay.type + " · 4 s before and after" : "No strike recorded yet";
+    el("graphSub").innerText = replay && replayID === lastStrikeID ? replay.type + " · 4 s before and after"
+      : replayFailed ? "Couldn\u2019t load it \u2013 tap LAST STRIKE to try again"
+      : "No strike recorded yet";
   }
   else if(v === "rod")
   {
@@ -7915,7 +7959,7 @@ async function updateData()
 
     el("viewStrike").disabled = !d.strikeready;
 
-    if(view === "strike" && d.strikeready && replayID !== d.strikeid)
+    if(view === "strike" && d.strikeready && replayID !== d.strikeid && Date.now() - replayTryAt > 5000)
     {
       await setView("strike");
     }

@@ -222,11 +222,11 @@ static uint32_t ls_shown_ms = 0;      // which answer is drawn
 static uint32_t ls_asked = 0;
 static uint32_t ls_entered = 0;
 static long ls_strikeid = -1;
-static int ls_view = 0;               // 0 = close-up (20 s, drag) / rod: zoom; 1 = whole strike; tap to switch
+static int ls_view = 0;               // 0 = close-up (6 s, drag) / rod: zoom; 1 = whole strike; tap to switch
 
 // strike history (the watch's own recordings, strike_log.c)
 #define HIST_W     334                // points drawn at most (one per pixel)
-#define HIST_CLOSE 200                // close-up: 20 s
+#define HIST_CLOSE 60                 // close-up: 6 s - a real zoom (a whole strike is often only 25-35 s)
 static lv_coord_t ls_k[HIST_W], ls_t[HIST_W], ls_lim[HIST_W];
 #define ls_ago    title               // "2 h 15 min ago" (the title is not used on that page)
 static lv_obj_t *ls_home;             // round home button
@@ -429,8 +429,8 @@ static void ls_chart_event(lv_event_t *e)
   {
     int dx = p.x - ls_drag_x0;
 
-    if(dx > 8 || dx < -8)
-      ls_moved = true;
+    if(dx > 12 || dx < -12)
+      ls_moved = true;                  // (a tap may wobble a few pixels)
 
     if(ls_moved && ls_view == 0)
       hist_off = ls_drag_off0 - dx * HIST_CLOSE / (354 - 20);   // finger right = earlier
@@ -1597,7 +1597,7 @@ static void history_page(slog_t *r, int idx, int total, uint32_t now)
   if(hist_rec_for_off != r)
   {
     hist_rec_for_off = r;
-    hist_off = r->pre - 60;           // starts 6 s before the strike
+    hist_off = r->pre - 20;           // starts 2 s before the strike
   }
 
   bool close = ls_view == 0 && n > HIST_CLOSE;
@@ -1667,7 +1667,8 @@ static void history_page(slog_t *r, int idx, int total, uint32_t now)
     // times under the graph (0:00 = the strike)
     for(int i = 0; i < 4; i++)
     {
-      long sec = (long)((a0 + i * (cnt - 1) / 3) - r->pre) / 10;
+      long d = (long)(a0 + i * (cnt - 1) / 3) - r->pre;          // points (10 a second)
+      long sec = d >= 0 ? (d + 5) / 10 : -((-d + 5) / 10);       // rounded
       char lab[16];
 
       if(sec == 0)

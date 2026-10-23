@@ -298,7 +298,7 @@ public class MainActivity extends Activity
                     return answer(404, "text/plain", new byte[0]);
 
                 String query = u.getEncodedQuery();
-                long timeout = path.equals("/strike") ? 6000 : 3000;
+                long timeout = path.equals("/strike") ? 12000 : 3000;     // LAST STRIKE: ~5 KB, paced when the watch is on too
 
                 RodLink.Response r = RodLink.get(MainActivity.this).request(query == null ? path : path + "?" + query, timeout);
 

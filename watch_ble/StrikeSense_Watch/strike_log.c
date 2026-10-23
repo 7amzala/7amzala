@@ -1,10 +1,17 @@
 // =====================================================
 // STRIKE LOG: the watch records each strike itself (see strike_log.h)
+//
+// The strike being recorded goes into one working buffer (room for the
+// 3 minutes). When it is over it is copied into a block of its real size
+// (a typical strike: 2-4 KB). Without the big PSRAM switched on there is
+// little memory: then the oldest strikes are dropped from memory (they
+// stay on the SD card) so a new one always fits.
 // =====================================================
 
 #include "strike_log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #ifdef ESP_PLATFORM
   #include "esp_heap_caps.h"
@@ -14,7 +21,12 @@
 
 static slog_t *recs[SLOG_KEEP];            // 0 = newest
 static int count = 0;
-static slog_t *rec = NULL;                 // recording now
+static slog_t *rec = NULL;                 // recording now (its arrays are the working buffer)
+static int dropped = 0;                    // dropped from memory for lack of room
+
+// the working buffer for the strike being recorded
+static int16_t *work_k = NULL, *work_t = NULL;
+static uint8_t *work_st = NULL;
 
 // the last 10 s, always (so a recording starts 10 s before the strike)
 static int16_t ring_k[SLOG_PRE], ring_t[SLOG_PRE];
@@ -24,46 +36,154 @@ static int ring_head = 0, ring_n = 0;
 static long last_id = -1;
 static int quiet_run = 0;
 
-static slog_t *alloc_rec(void)
+int slog_test_limit = 0;                   // tests: pretend memory is this small (bytes, 0 = no limit)
+static int used_bytes = 0;
+
+static void *mem(size_t size)
 {
-  slog_t *r = NULL;
+  if(slog_test_limit && used_bytes + (int)size > slog_test_limit)
+    return NULL;
+
+  void *p = NULL;
 
 #ifdef ESP_PLATFORM
-  r = (slog_t *)heap_caps_malloc(sizeof(slog_t), MALLOC_CAP_SPIRAM);   // the big 8 MB memory
+  p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);             // the big 8 MB memory, if switched on
 #endif
 
-  if(r == NULL)
-    r = (slog_t *)malloc(sizeof(slog_t));
+  if(p == NULL)
+    p = malloc(size);
 
-  if(r)
-    memset(r, 0, sizeof(slog_t));
+  if(p)
+    used_bytes += (int)size;
 
-  return r;
+  return p;
 }
 
-// a new one at the front; the oldest drops out (it is on the card)
-static slog_t *push_front(void)
+static void mem_free(void *p, size_t size)
 {
+  if(p)
+  {
+    free(p);
+    used_bytes -= (int)size;
+  }
+}
+
+static size_t data_size(int n)
+{
+  return (size_t)n * (2 + 2 + 1);
+}
+
+static void free_rec(slog_t *r)
+{
+  if(r == NULL)
+    return;
+
+  if(r->k != work_k)
+    mem_free(r->k, data_size(r->n));        // (k, t, st are one block)
+
+  mem_free(r, sizeof(slog_t));
+}
+
+static void drop_oldest(void)
+{
+  if(count == 0)
+    return;
+
+  slog_t *r = recs[count - 1];
+
+  if(r == rec)
+    return;                                 // never the one being recorded
+
+  free_rec(r);
+  count--;
+  dropped++;
+}
+
+// a block of n points (k, t, st together); drops old strikes if needed
+static bool alloc_data(slog_t *r, int n)
+{
+  for(;;)
+  {
+    uint8_t *b = (uint8_t *)mem(data_size(n));
+
+    if(b)
+    {
+      r->k = (int16_t *)b;
+      r->t = (int16_t *)(b + n * 2);
+      r->st = b + n * 4;
+      return true;
+    }
+
+    if(count <= 1)
+      return false;
+
+    drop_oldest();
+  }
+}
+
+static slog_t *new_rec(void)
+{
+  if(count == SLOG_KEEP)
+    drop_oldest();
+
   slog_t *r;
 
-  if(count == SLOG_KEEP)
+  for(;;)
   {
-    r = recs[SLOG_KEEP - 1];
-    memset(r, 0, sizeof(slog_t));
-    count--;
-  }
-  else
-  {
-    r = alloc_rec();
+    r = (slog_t *)mem(sizeof(slog_t));
 
-    if(r == NULL)
-      return NULL;
+    if(r || count == 0)
+      break;
+
+    drop_oldest();
   }
 
+  if(r == NULL)
+    return NULL;
+
+  memset(r, 0, sizeof(slog_t));
   memmove(&recs[1], &recs[0], sizeof(recs[0]) * count);
   recs[0] = r;
   count++;
   return r;
+}
+
+static void remove_rec(slog_t *r)
+{
+  for(int i = 0; i < count; i++)
+  {
+    if(recs[i] == r)
+    {
+      memmove(&recs[i], &recs[i + 1], sizeof(recs[0]) * (count - i - 1));
+      count--;
+      return;
+    }
+  }
+}
+
+// the recording is over: keep it in a block of its real size
+static void finish(void)
+{
+  slog_t *r = rec;
+  rec = NULL;
+
+  if(r == NULL)
+    return;
+
+  r->done = true;
+
+  slog_t tmp = *r;
+
+  if(!alloc_data(r, r->n))
+  {
+    remove_rec(r);                          // no memory at all: not kept
+    free_rec(r);
+    return;
+  }
+
+  memcpy(r->k, tmp.k, r->n * 2);
+  memcpy(r->t, tmp.t, r->n * 2);
+  memcpy(r->st, tmp.st, r->n);
 }
 
 void slog_tick(int k, int tilt100, int fish, bool strike, long strikeid, const char *type,
@@ -74,18 +194,25 @@ void slog_tick(int k, int tilt100, int fish, bool strike, long strikeid, const c
 
   // a new strike while one is still recorded: that one is over
   if(strike && strikeid != last_id && rec != NULL)
-  {
-    rec->done = true;
-    rec = NULL;
-  }
+    finish();
 
   // a new strike: start with the last 10 s
   if(strike && strikeid != last_id && rec == NULL)
   {
-    rec = push_front();
+    if(work_k == NULL)
+    {
+      work_k = (int16_t *)mem(SLOG_MAX * 2);
+      work_t = (int16_t *)mem(SLOG_MAX * 2);
+      work_st = (uint8_t *)mem(SLOG_MAX);
+    }
+
+    rec = work_k && work_t && work_st ? new_rec() : NULL;
 
     if(rec)
     {
+      rec->k = work_k;
+      rec->t = work_t;
+      rec->st = work_st;
       rec->utc = utc;
       rec->tz = tz;
       rec->got_ms = now_ms;
@@ -132,15 +259,12 @@ void slog_tick(int k, int tilt100, int fish, bool strike, long strikeid, const c
   quiet_run = fish == 0 ? quiet_run + 1 : 0;
 
   // over: at least 10 s after the strike, and the fish quiet for 10 s
-  // (or answered and quiet), or 3 minutes full
+  // (or answered and quiet 3 s), or 3 minutes full
   int after = rec->n - rec->pre;
   bool quiet = quiet_run >= QUIET_END || (answered && quiet_run >= 30);
 
   if((after >= 100 && quiet) || rec->n >= SLOG_MAX)
-  {
-    rec->done = true;
-    rec = NULL;
-  }
+    finish();
 }
 
 int slog_count(void)
@@ -170,16 +294,31 @@ slog_t *slog_unsaved(void)
 }
 
 // at start, from the card: oldest first, each goes to the front
-slog_t *slog_add_loaded(void)
+slog_t *slog_add_loaded(int n)
 {
-  slog_t *r = push_front();
+  slog_t *r = new_rec();
 
-  if(r)
+  if(r == NULL)
+    return NULL;
+
+  r->n = (uint16_t)n;
+
+  if(!alloc_data(r, n))
   {
-    r->done = true;
-    r->saved = true;
-    r->from_card = true;
+    remove_rec(r);
+    free_rec(r);
+    return NULL;
   }
 
+  r->done = true;
+  r->saved = true;
+  r->from_card = true;
   return r;
+}
+
+const char *slog_memory_note(void)
+{
+  static char s[96];
+  snprintf(s, sizeof(s), "%d strikes in memory, %d bytes, %d dropped for room", count, used_bytes, dropped);
+  return s;
 }

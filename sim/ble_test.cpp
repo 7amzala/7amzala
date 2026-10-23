@@ -272,6 +272,22 @@ int main()
   }
   printf("        /laststrike = %zu bytes, zoom part: %.120s\n", a.body.size(), a.body.c_str() + a.body.find("\"zpre\""));
   check(a.body.size() < 4500, "/laststrike small enough for the watch");
+  {
+    // the phone app's LAST STRIKE view: /strike, the app waits 6 s -
+    // with the watch also connected, on its calm (slow) link
+    srv->cb->onConnect(srv);                  // the watch
+    Answer w; ask(500019, "/mtu?v=244", w);
+    BLECharacteristic::slowLink() = 1;
+    BLECharacteristic::drops() = 0;
+    txc->drained = simMillis;
+    Answer b; unsigned long t0 = simMillis;
+    bool got = ask(500020, "/strike", b, 6);
+    printf("        /strike = %zu bytes in %.1f s (code %d)\n", b.body.size(), (simMillis - t0) / 1000.0, b.code);
+    printf("        pieces dropped on the way: %d\n", BLECharacteristic::drops());
+    check(got && b.code == 200 && b.body.find("\"e\":[") != std::string::npos && b.body.back() == '}' && BLECharacteristic::drops() == 0,
+          "/strike (phone LAST STRIKE) arrives whole within 6 s, also with the watch on its slow link");
+    BLECharacteristic::slowLink() = 0;
+  }
 
   // ---- 5 named setups (presets), kept on the rod ----
   {

@@ -441,7 +441,7 @@ int main(void)
     press(233, 190);
     int back = lv_chart_get_point_count(ls_chart) == HIST_CLOSE;
     printf("  %s the watch's own recording: %d points (%.1f s), shown at once\n", own ? "ok  " : "FAIL", r ? r->n : 0, r ? r->n / 10.0 : 0);
-    printf("  %s close-up first (20 s), drag moves in time (%d -> %d), tap: whole, tap: close-up\n",
+    printf("  %s close-up first (6 s), drag moves in time (%d -> %d), tap: whole, tap: close-up\n",
            close_first && dragged && whole && back ? "ok  " : "FAIL", off0, hist_off);
     save("w10c_recording");
     if(!(own && close_first && dragged && whole && back)) nav_fail++;
@@ -655,6 +655,22 @@ int main(void)
   touch_down = 0; run_ms(300);
   HIST(page == 0 && vpage == 0, "finger lifted: back to the live graph");
   scene = 1; run_ms(2000);
+  {
+    // no PSRAM switched on: little memory. New strikes must still be kept
+    // (the oldest drop out of memory), never "stuck at 2"
+    extern int slog_test_limit;
+    slog_test_limit = 30000;
+    int before = slog_count();
+    for(int i = 0; i < 6; i++)
+    {
+      fake_strike_id = 40 + i; scene = 4; scene_start = sim_ms; run_ms(2500);
+      press(176, 354);
+      scene = 1; run_ms(14000);
+    }
+    HIST(slog_get(0)->strikeid == 45 && slog_get(0)->done && slog_get(1)->strikeid == 44, "little memory: every new strike is kept (oldest dropped from memory)");
+    printf("        %s (had %d)\n", slog_memory_note(), before);
+    slog_test_limit = 0;
+  }
   sent_n = sent_before_hist;                    // (WATCHING taps, /settime)
   printf("%s: history, %d wrong\n", hfail ? "FAIL" : "PASS", hfail);
 

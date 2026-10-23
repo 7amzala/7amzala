@@ -39,7 +39,25 @@ public:
   void setCallbacks(BLECharacteristicCallbacks* c) { cb = c; }
   void addDescriptor(BLEDescriptor*) {}
   void setValue(uint8_t* d, size_t n) { value.assign((const char*)d, n); }
-  void notify() { notified.push_back(value); }
+  // A watch on its calm (power-saving) link takes its pieces only every
+  // 110 ms, about 4 at a time. The Bluetooth chip holds only ~12 pieces
+  // for it; when that is full, notify() drops the piece without a word
+  // (like the real stack). slowLink = 0: no slow watch connected.
+  static int& slowLink() { static int v = 0; return v; }
+  static int& drops() { static int v = 0; return v; }
+  int queued = 0;
+  unsigned long drained = 0;
+  void notify()
+  {
+    extern unsigned long simMillis;
+    if(slowLink())
+    {
+      while(simMillis - drained >= 110) { drained += 110; queued = queued > 4 ? queued - 4 : 0; }
+      if(queued >= 12) { drops()++; return; }
+      queued++;
+    }
+    notified.push_back(value);
+  }
   String getValue() { return String(value); }
 };
 
