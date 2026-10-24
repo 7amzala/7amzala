@@ -5,6 +5,7 @@
 #include "FT3168.h"
 #include "read_lcd_id_bsp.h"
 #include <string.h>
+#include "esp_task_wdt.h"
 static SemaphoreHandle_t lvgl_mux = NULL; //mutex semaphores
 #define LCD_HOST    SPI2_HOST
 
@@ -175,8 +176,13 @@ static void example_lvgl_unlock(void)
 static void example_lvgl_port_task(void *arg)
 {
   uint32_t task_delay_ms = EXAMPLE_LVGL_TASK_MAX_DELAY_MS;
+
+  esp_task_wdt_add(NULL);   // the watchdog: stuck screen task (e.g. screen memory full) = restart
+
   for(;;)
   {
+    esp_task_wdt_reset();
+
     if (example_lvgl_lock(-1))
     {
       task_delay_ms = lv_timer_handler();

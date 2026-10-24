@@ -321,6 +321,14 @@ int main()
     check(ask(600104, "/settime?t=12&tz=0", b) && b.code == 400, "a wrong time is refused");
   }
 
+  // ---- watchdog ----
+  {
+    Answer b;
+    printf("        watchdog: on=%d, %ld check-ins, longest gap %lu ms (limit %u)\n", wdtMock().on, wdtMock().resets, wdtMock().longest, (unsigned)wdtMock().timeout);
+    check(wdtMock().on && wdtMock().timeout == 10000 && wdtMock().longest < 2000, "watchdog on (10 s), the rod checks in far more often");
+    check(ask(600201, "/data", b) && b.body.find("\"rst\":\"power\"") != std::string::npos, "/data says why the rod started (rst)");
+  }
+
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }
