@@ -24,7 +24,16 @@ rep('''#include <Preferences.h>
 ''', '''#include <Preferences.h>
 #include <esp_task_wdt.h>
 
-// ---------- Watchdog ----------
+// (defined further down, before the battery code)
+void startWatchdog();
+const char* resetReason();
+''')
+
+
+
+rep('''// ---------- Battery ----------
+
+// Resting LiPo voltage -> percent''', '''// ---------- Watchdog ----------
 
 const uint32_t WATCHDOG_MS = 10000;      // stuck this long = restart
 
@@ -59,9 +68,10 @@ const char* resetReason()
     default:               return "other";
   }
 }
-''')
 
+// ---------- Battery ----------
 
+// Resting LiPo voltage -> percent''')
 
 rep('''  addField(json, "strikeready", lastStrikeReady);''', '''  addField(json, "strikeready", lastStrikeReady);
   json += ",\\"rst\\":\\"";

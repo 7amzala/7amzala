@@ -11,41 +11,9 @@
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 
-// ---------- Watchdog ----------
-
-const uint32_t WATCHDOG_MS = 10000;      // stuck this long = restart
-
-// loop() must check in at least every WATCHDOG_MS, or the chip restarts
-void startWatchdog()
-{
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  esp_task_wdt_config_t cfg = { WATCHDOG_MS, 0, true };
-
-  if(esp_task_wdt_reconfigure(&cfg) != ESP_OK)
-    esp_task_wdt_init(&cfg);
-#else
-  esp_task_wdt_init(WATCHDOG_MS / 1000, true);
-#endif
-
-  esp_task_wdt_add(NULL);               // this task: setup() + loop()
-}
-
-// why the rod started this time
-const char* resetReason()
-{
-  switch(esp_reset_reason())
-  {
-    case ESP_RST_POWERON:  return "power";
-    case ESP_RST_SW:       return "software";
-    case ESP_RST_PANIC:    return "crash";
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:      return "watchdog";
-    case ESP_RST_BROWNOUT: return "low battery";
-    case ESP_RST_DEEPSLEEP: return "sleep";
-    default:               return "other";
-  }
-}
+// (defined further down, before the battery code)
+void startWatchdog();
+const char* resetReason();
 #include <SparkFunLIS3DH.h>
 
 // LoRa link to the watch (XIAO ESP32-S3 + Wio-SX1262).
@@ -9558,6 +9526,42 @@ void setup()
 // The sensor is read every 2.5 ms, averaged, and processed at a
 // fixed 100 steps per second. The web server is served in between.
 // =====================================================
+
+// ---------- Watchdog ----------
+
+const uint32_t WATCHDOG_MS = 10000;      // stuck this long = restart
+
+// loop() must check in at least every WATCHDOG_MS, or the chip restarts
+void startWatchdog()
+{
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_task_wdt_config_t cfg = { WATCHDOG_MS, 0, true };
+
+  if(esp_task_wdt_reconfigure(&cfg) != ESP_OK)
+    esp_task_wdt_init(&cfg);
+#else
+  esp_task_wdt_init(WATCHDOG_MS / 1000, true);
+#endif
+
+  esp_task_wdt_add(NULL);               // this task: setup() + loop()
+}
+
+// why the rod started this time
+const char* resetReason()
+{
+  switch(esp_reset_reason())
+  {
+    case ESP_RST_POWERON:  return "power";
+    case ESP_RST_SW:       return "software";
+    case ESP_RST_PANIC:    return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "low battery";
+    case ESP_RST_DEEPSLEEP: return "sleep";
+    default:               return "other";
+  }
+}
 
 // ---------- Battery ----------
 
