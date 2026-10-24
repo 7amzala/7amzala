@@ -1,0 +1,178 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#05070d;font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;padding:28px 30px}
+h1{font-size:30px;margin:0 0 4px}
+.sub{color:#8ea6c8;font-size:17px;margin-bottom:22px}
+.row{display:flex;gap:26px}
+.col{width:360px}
+.cap{font-size:18px;font-weight:700;margin:0 0 10px;color:#22d3ff}
+.capd{font-size:14px;color:#8ea6c8;margin:-6px 0 10px;min-height:34px}
+.phone{width:360px;height:780px;border-radius:38px;border:3px solid #2a3348;overflow:hidden;position:relative;
+ background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%);padding:16px 14px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.logo{width:38px;height:38px;border-radius:50%;background:radial-gradient(circle,#22d3ff,#1e7bff 60%,#0a1a3a);box-shadow:0 0 14px rgba(30,150,255,.6)}
+.brand{font-weight:900;font-size:19px}.brand b{color:#22d3ff}
+.card{background:rgba(14,22,40,.85);border:1px solid #1d2a44;border-radius:16px;padding:12px 13px;margin-bottom:10px}
+.lbl{font-size:12px;color:#8ea6c8;letter-spacing:.8px;font-weight:700}
+.big{font-size:22px;font-weight:900}
+.pill{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:12px;background:#0b1428;border:1px solid #1d2a44;margin-top:7px}
+.bars{display:inline-flex;gap:3px;align-items:flex-end;margin-left:8px}
+.bars i{display:block;width:5px;border-radius:1px;background:#262b36}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
+.seg{display:flex;background:#0b1428;border-radius:12px;border:1px solid #1d2a44;padding:3px;margin-top:8px}
+.seg div{flex:1;text-align:center;padding:9px 4px;border-radius:9px;font-weight:700;font-size:14px;color:#8ea6c8}
+.seg .on{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a}
+.note{font-size:12.5px;color:#a9bbd6;line-height:1.4;margin-top:8px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chip{padding:7px 11px;border-radius:20px;background:#0b1428;border:1px solid #24324f;font-size:13px;font-weight:700;color:#a9bbd6}
+.chip.on{background:#22d3ff;color:#04121a;border-color:#22d3ff}
+.rec{display:flex;gap:8px;margin-bottom:10px}
+.rec .card{flex:1;margin:0;padding:10px}
+.item{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #18233a}
+.tag{font-size:11px;font-weight:800;padding:4px 7px;border-radius:7px;white-space:nowrap}
+.meta{font-size:12px;color:#8ea6c8}
+.spark{margin-left:auto}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:62px;background:#070c18;border-top:1px solid #1d2a44;display:flex}
+.tabs div{flex:1;text-align:center;padding-top:12px;font-size:12px;color:#5f7799;font-weight:700}
+.tabs .on{color:#22d3ff}
+.tabs b{display:block;font-size:18px;margin-bottom:2px}
+.banner{background:#3a2a08;border:1px solid #ffba52;color:#ffd38a;border-radius:12px;padding:9px 11px;font-size:13px;font-weight:700;margin-bottom:10px}
+</style></head><body>
+<h1>Your StrikeSense app: what is added (nothing removed)</h1>
+<div class="sub">Mockup, no code yet. Screens 1-2 are your real app. 3-5 open from the new MY STRIKES button; "‹ Back" returns to the live screen. Online storage is hidden: you only use the app.</div>
+<div class="row">
+
+<!-- 1: real app -->
+<div class="col">
+<div class="cap">1. Your app now + the new parts</div>
+<div class="capd">Real screen of your app. Everything stays. Pink dashed = new.</div>
+<div class="phone" style="padding:0"><img src="app_main.png" style="width:100%;display:block"></div>
+</div>
+<div class="col">
+<div class="cap">2. Watch only switched ON</div>
+<div class="capd">Phone off the rod, free for other things. Tap "Phone + watch" to come back.</div>
+<div class="phone" style="padding:0"><img src="app_wo.png" style="width:100%;display:block"></div>
+</div>
+<!-- 2: list + filter + records -->
+<div class="col">
+<div class="cap">3. MY STRIKES (tap the new button)</div>
+<div class="capd">Saved on the phone first, sent online when there is internet. Pick a country or one beach.</div>
+<div class="phone">
+ <div class="top"><span style="font-size:15px;color:#22d3ff;font-weight:700">‹ Back</span><div class="brand">My strikes</div><span class="chip on" style="margin-left:auto">🗺 MAP</span></div><div class="meta" style="margin:-4px 0 8px">☁ all 47 saved online</div>
+ <div class="chips"><span class="chip">All 47</span><span class="chip on">Spain 29</span><span class="chip">Morocco 12</span><span class="chip">UK 6</span></div>
+ <div class="chips" style="margin-top:-4px"><span class="chip on">All Spain</span><span class="chip">San Pedro del Pinatar 21</span><span class="chip">Torrevieja 8</span><span class="chip">📅 Any date</span></div>
+ <div class="rec">
+  <div class="card"><div class="lbl" style="color:#ff4d5e">💪 STRONGEST PULL</div><div class="big">4.8°</div><div class="meta">SLOW PULL · 12 Aug 06:40<br>San Pedro del Pinatar</div></div>
+  <div class="card"><div class="lbl" style="color:#9b8cff">⏱ LONGEST FIGHT</div><div class="big">2:35</div><div class="meta">SHARP STRIKE · 3 Aug 21:15<br>Torrevieja</div></div>
+ </div>
+ <div class="card" style="padding:9px 12px"><span class="lbl">SPAIN</span> &nbsp;<span class="meta">29 strikes · best time <b style="color:#eaf3ff">05:30–08:00</b> · most: <b style="color:#eaf3ff">SLOW PULL</b></span></div>
+ <div id="list"></div>
+</div></div>
+
+<!-- 3: map -->
+<div class="col">
+<div class="cap">4. MAP (from My strikes)</div>
+<div class="capd">One pin per strike; zoom from the world down to one beach. Tap a pin to open the strike.</div>
+<div class="phone" style="padding:0">
+ <svg width="360" height="780" viewBox="0 0 380 780" preserveAspectRatio="xMidYMin slice">
+  <rect width="380" height="780" fill="#0a2240"/>
+  <!-- simple land: Spain + Morocco around the strait -->
+  <path d="M0,40 L250,30 L330,60 L360,140 L320,230 L290,300 L230,330 L160,320 L120,360 L60,350 L0,330Z" fill="#16233a" stroke="#2a3a5a"/>
+  <path d="M0,470 L80,430 L160,440 L240,470 L380,450 L380,780 L0,780Z" fill="#16233a" stroke="#2a3a5a"/>
+  <text x="140" y="180" fill="#5f7799" font-size="26" font-weight="700">SPAIN</text>
+  <text x="150" y="600" fill="#5f7799" font-size="26" font-weight="700">MOROCCO</text>
+  <text x="250" y="400" fill="#3d5a80" font-size="14">Mediterranean</text>
+  <!-- pins -->
+  <g id="pins"></g>
+  <!-- biggest -->
+  <circle cx="318" cy="250" r="20" fill="none" stroke="#ff4d5e" stroke-width="3"/>
+  <rect x="150" y="196" width="150" height="40" rx="9" fill="#0b1428" stroke="#ff4d5e"/>
+  <text x="160" y="213" fill="#ff4d5e" font-size="11" font-weight="800">💪 STRONGEST · SPAIN</text>
+  <text x="160" y="229" fill="#eaf3ff" font-size="12">4.8° · San Pedro</text>
+  <circle cx="92" cy="470" r="20" fill="none" stroke="#9b8cff" stroke-width="3"/>
+  <rect x="120" y="478" width="160" height="40" rx="9" fill="#0b1428" stroke="#9b8cff"/>
+  <text x="130" y="495" fill="#9b8cff" font-size="11" font-weight="800">⏱ LONGEST · MOROCCO</text>
+  <text x="130" y="511" fill="#eaf3ff" font-size="12">3:10 · Asilah</text>
+  <!-- header -->
+  <rect x="0" y="0" width="380" height="64" fill="#070c18" opacity=".92"/>
+  <text x="12" y="40" fill="#22d3ff" font-size="15" font-weight="700">‹ Back</text>
+  <rect x="96" y="18" width="268" height="32" rx="16" fill="#0b1428" stroke="#24324f"/>
+  <text x="112" y="39" fill="#a9bbd6" font-size="13" font-weight="700">All · Spain · Morocco · UK</text>
+  <g font-size="11" font-weight="700">
+   <rect x="14" y="640" width="352" height="64" rx="14" fill="#0b1428" stroke="#1d2a44"/>
+   <circle cx="34" cy="662" r="6" fill="#ff4d5e"/><text x="46" y="666" fill="#a9bbd6">SHARP</text>
+   <circle cx="104" cy="662" r="6" fill="#ffba52"/><text x="116" y="666" fill="#a9bbd6">SLOW PULL</text>
+   <circle cx="200" cy="662" r="6" fill="#9b8cff"/><text x="212" y="666" fill="#a9bbd6">DROP-BACK</text>
+   <circle cx="296" cy="662" r="6" fill="#22d3ff"/><text x="308" y="666" fill="#a9bbd6">REPEATED</text>
+   <text x="24" y="690" fill="#5f7799">Pinch to zoom · bigger pin = stronger strike</text>
+  </g>
+ </svg>
+</div></div>
+
+<!-- 4: strike detail -->
+<div class="col">
+<div class="cap">5. One strike: zoom deeper</div>
+<div class="capd">Pinch to zoom down to single knocks, drag along the strike. Place, time and records shown.</div>
+<div class="phone">
+ <div class="top"><span style="font-size:15px;color:#22d3ff;font-weight:700">‹ Back</span><div class="brand">SLOW PULL</div><span class="tag" style="background:#ff4d5e;color:#fff;margin-left:auto">💪 Spain record</span></div>
+ <div class="card" style="padding:10px 12px">
+  <div class="meta">📍 San Pedro del Pinatar, Spain · 12 Aug 2026 · 06:40</div>
+  <div style="display:flex;gap:14px;margin-top:8px">
+   <div><div class="lbl">PULL</div><div class="big">4.8°</div></div>
+   <div><div class="lbl">FIGHT</div><div class="big">1:52</div></div>
+   <div><div class="lbl">KNOCKS</div><div class="big">7</div></div>
+   <div><div class="lbl">SEA</div><div class="big" style="font-size:16px;padding-top:4px">small waves</div></div>
+  </div>
+ </div>
+ <div class="card" style="padding:8px">
+  <div style="display:flex;justify-content:space-between" class="meta"><span>zoom <b style="color:#22d3ff">×8</b> · 06:40:02 – 06:40:08</span><span>⤢ whole strike</span></div>
+  <svg width="100%" viewBox="0 0 340 250" id="g"></svg>
+  <svg width="100%" viewBox="0 0 340 34" id="ov"></svg>
+  <div class="meta" style="text-align:center">overview: the box is what you see · drag it</div>
+ </div>
+ <div class="card" style="padding:10px 12px">
+  <div class="lbl">STORY</div>
+  <div style="display:flex;height:14px;border-radius:5px;overflow:hidden;margin-top:6px">
+   <div style="flex:3;background:#22d3ff"></div><div style="flex:1;background:#ffba52"></div><div style="flex:5;background:#ff4d5e"></div><div style="flex:1;background:#9b8cff"></div><div style="flex:2;background:#ff4d5e"></div><div style="flex:3;background:#3a4560"></div></div>
+  <div class="meta" style="margin-top:5px">knocks → pull → RUN → slack → RUN → quiet</div>
+ </div>
+</div></div>
+
+</div>
+<script>
+// list
+const items=[["SLOW PULL","#ffba52","12 Aug 06:40","San Pedro del Pinatar","4.8° · 1:52"],
+["SHARP STRIKE","#ff4d5e","3 Aug 21:15","Torrevieja","3.1° · 2:35"],
+["DROP-BACK + PULL","#9b8cff","2 Aug 05:58","San Pedro del Pinatar","2.6° · 0:48"],
+["REPEATED BITE","#22d3ff","28 Jul 19:02","San Pedro del Pinatar","1.4° · 0:31"],
+["SLOW PULL","#ffba52","27 Jul 06:12","Torrevieja","2.2° · 1:05"]];
+let h="";
+for(const [t,c,d,p,v] of items){
+ let pts="";for(let i=0;i<20;i++){pts+=(i*3)+","+(14-Math.min(13,Math.abs(Math.sin(i*0.7+t.length))*10*(i>6?1:0.3)))+" ";}
+ h+=`<div class="item"><span class="tag" style="background:${c}22;color:${c};border:1px solid ${c}">${t}</span>
+ <div><div style="font-size:13px;font-weight:700">${v}</div><div class="meta">${d} · ${p}</div></div>
+ <svg class="spark" width="60" height="16"><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="1.6"/></svg></div>`;}
+document.getElementById("list").innerHTML=h;
+// pins
+const pins=[[300,240,8,"#ffba52"],[312,262,6,"#ff4d5e"],[296,258,5,"#22d3ff"],[322,240,5,"#ffba52"],[308,228,4,"#9b8cff"],[318,250,10,"#ffba52"],
+[290,280,5,"#ff4d5e"],[86,480,9,"#9b8cff"],[100,462,6,"#ffba52"],[92,470,7,"#ff4d5e"],[70,500,5,"#22d3ff"],[110,490,5,"#ffba52"]];
+document.getElementById("pins").innerHTML=pins.map(([x,y,r,c])=>`<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="#04121a" stroke-width="2"/>`).join("");
+// detail graph
+const W=340,H=250;let s=`<rect width="${W}" height="${H}" rx="8" fill="#060c1a"/>`;
+for(let i=1;i<6;i++)s+=`<line x1="0" x2="${W}" y1="${i*H/6}" y2="${i*H/6}" stroke="#14203a"/>`;
+s+=`<text x="6" y="16" fill="#8ea6c8" font-size="11">KNOCK</text><text x="6" y="${H/2+18}" fill="#8ea6c8" font-size="11">TILT (pull)</text>`;
+// knocks top half
+for(let i=0;i<W;i+=3){const k=Math.max(0,Math.sin(i*0.21)*Math.sin(i*0.047)*55)*(i>120?1:0.35)+Math.random()*4;s+=`<line x1="${i}" x2="${i}" y1="${H/2-6}" y2="${H/2-6-k}" stroke="#22d3ff" stroke-width="2"/>`;}
+s+=`<line x1="0" x2="${W}" y1="${H/2-6-40}" y2="${H/2-6-40}" stroke="#ff4d5e" stroke-dasharray="4 4"/>`;
+// tilt bottom
+let p="";for(let i=0;i<=W;i+=4){const v=i<120?2:Math.min(1,(i-120)/90)*70+Math.sin(i*0.09)*8;p+=`${i},${H-14-v} `;}
+s+=`<polyline points="${p}" fill="none" stroke="#ffba52" stroke-width="2.5"/>`;
+s+=`<line x1="150" x2="150" y1="0" y2="${H}" stroke="#ff4d5e" stroke-width="2"/><text x="155" y="${H/2+18}" fill="#ff4d5e" font-size="11" font-weight="700">STRIKE</text>`;
+document.getElementById("g").innerHTML=s;
+let o=`<rect width="340" height="34" rx="6" fill="#060c1a"/>`;let q="";for(let i=0;i<=340;i+=5){q+=`${i},${30-(i<100?2:Math.min(1,(i-100)/40)*18+Math.sin(i*0.08)*4)} `;}
+o+=`<polyline points="${q}" fill="none" stroke="#ffba52" stroke-width="1.5"/><rect x="92" y="1" width="46" height="32" rx="4" fill="#22d3ff22" stroke="#22d3ff" stroke-width="2"/>`;
+document.getElementById("ov").innerHTML=o;
+</script>
+</body></html>
