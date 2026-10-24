@@ -967,20 +967,22 @@ static void layout(ui_mode_t m)
 
 static void top_icons(const ble_link_status_t *s)
 {
-  int n = s->rssi == 0 ? 0 : s->rssi >= -60 ? 4 : s->rssi >= -70 ? 3 : s->rssi >= -80 ? 2 : 1;
+  bool lora = s->via == LINK_LORA;
+  int n = lora ? s->lora_bars :
+          s->rssi == 0 ? 0 : s->rssi >= -60 ? 4 : s->rssi >= -70 ? 3 : s->rssi >= -80 ? 2 : 1;
 
   for(int i = 0; i < 4; i++)
-    set_bg_color(bars[i], i < n ? COL_CYAN : COL_OFF);
+    set_bg_color(bars[i], i < n ? (lora ? COL_ORANGE : COL_CYAN) : COL_OFF);
 
   char t[24];
 
   if(s->bat < 0)
-    snprintf(t, sizeof(t), "--");
+    snprintf(t, sizeof(t), lora ? "-- LoRa" : "--");
   else
-    snprintf(t, sizeof(t), "%d%%", s->bat);
+    snprintf(t, sizeof(t), lora ? "%d%% LoRa" : "%d%%", s->bat);    // orange bars + "LoRa": rod far away
 
   set_text(bat_label, t);
-  set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : COL_DIM);
+  set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : lora ? COL_ORANGE : COL_DIM);
 }
 
 // ---------- swipe: watch the finger (also over buttons) ----------
@@ -1929,13 +1931,18 @@ static void ui_timer(lv_timer_t *t)
     set_text(title, "Looking for the rod");
     set_text_color(title, COL_TEXT);
     // what the link is doing, so a problem can be seen without a computer
-    char info[96];
+    char info[128];
 
     if(s.phase == BLE_LINK_SEARCHING && s.scans > 0)
       snprintf(info, sizeof(info), "scan %d - %d devices seen\n%s", s.scans, s.seen,
                s.note[0] ? s.note : "rod not seen yet");
     else
       snprintf(info, sizeof(info), "%s", s.note[0] ? s.note : "Bluetooth - stay within ~30 m");
+
+    // the LoRa backup, so a wiring problem shows without a computer
+    size_t used = strlen(info);
+    snprintf(info + used, sizeof(info) - used, "\n%s",
+             s.lora_ok ? "LoRa ready - rod not heard" : "LoRa module not found");
 
     set_text(subtitle, info);
     set_text_color(subtitle, COL_DIM);
@@ -2344,7 +2351,8 @@ void watch_ui_create(void)
   }
 
   bat_label = label(scr, FONT_MICRO, COL_DIM);
-  lv_obj_align(bat_label, LV_ALIGN_TOP_MID, 14, 44);
+  lv_obj_align(bat_label, LV_ALIGN_TOP_LEFT, 233, 44);     // grows to the right ("85% LoRa")
+
 
   // title + subtitle
   title = label(scr, FONT_BIG, COL_CYAN);

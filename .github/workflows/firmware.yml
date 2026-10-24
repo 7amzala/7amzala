@@ -9,6 +9,7 @@ on:
       - "StrikeSense/**"
       - "StrikeSense_NoLoRa/**"
       - "watch_ble/**"
+      - "sim/**"
       - ".github/workflows/firmware.yml"
   workflow_dispatch:
 
@@ -18,6 +19,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Rod <-> watch LoRa link test (PC simulation)
+        run: |
+          cd sim
+          W=../watch_ble/StrikeSense_Watch
+          g++ -O2 -std=c++17 -Imock -Imock_lora -I$W -o link_test link_test.cpp $W/lora_link.cpp $W/link_merge.c
+          ./link_test
 
       - uses: arduino/setup-arduino-cli@v2
 

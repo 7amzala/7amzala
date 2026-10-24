@@ -1,14 +1,19 @@
 // =====================================================
-// LAARIF STRIKESENSE WATCH (Bluetooth)
+// LAARIF STRIKESENSE WATCH (Bluetooth + LoRa)
 //
 // Waveshare ESP32-S3-Touch-AMOLED-1.43. Talks to the rod over
-// Bluetooth (no LoRa module needed): live graph, the rod's state and
-// the buttons to answer. The phone app can be connected at the same time.
+// Bluetooth: live graph, the rod's state and the buttons to answer.
+// The phone app can be connected at the same time.
+// With the SX1262 LoRa Node wired (see WATCH.md) and the LoRa rod sketch
+// (StrikeSense.ino), the watch switches to LoRa by itself when the rod
+// is too far for Bluetooth, and back when it is near again.
+// No LoRa module? It still works over Bluetooth (or set WATCH_LORA 0
+// in lora_link.h).
 //
 // Arduino IDE: Board "ESP32S3 Dev Module", Flash Size 16MB,
 // Partition Scheme "Huge APP (3MB No OTA/1MB SPIFFS)", PSRAM "OPI PSRAM",
 // USB CDC On Boot "Enabled" (for the [BLE] messages).
-// Library: lvgl 8.3.x (as for the Waveshare demo).
+// Libraries: lvgl 8.3.x (as for the Waveshare demo), RadioLib.
 // Optional: Pimoroni Haptic Bzzz for wrist vibration, on the header:
 // SDA -> SDA, SCL -> SCL, 2-5V -> 3V3, GND -> GND (see buzz.c).
 // =====================================================
@@ -16,6 +21,7 @@
 #include "lcd_bsp.h"
 #include "FT3168.h"
 #include "ble_link.h"
+#include "lora_link.h"
 #include "buzz.h"
 #include "watch_bat.h"
 #include "watch_imu.h"
@@ -23,7 +29,7 @@
 #include "strike_sd.h"
 #include <esp_task_wdt.h>
 
-// Watchdog: if the screen task or the Bluetooth loop is ever stuck for
+// Watchdog: if the screen task, the Bluetooth loop or the LoRa task is ever stuck for
 // 30 s, the watch restarts by itself instead of staying frozen. (30 s:
 // finding and connecting to the rod may take a while on purpose.)
 static const uint32_t WATCHDOG_MS = 30000;
@@ -75,6 +81,7 @@ void setup()
   imu_begin();              // raise to wake (screen goes dark after 30 s)
 
   ble_link_begin();         // Bluetooth to the rod
+  lora_link_start_task();   // LoRa to the rod (its own task: never misses a packet)
 
   esp_task_wdt_add(NULL);   // from here on the loop below checks in too
 }

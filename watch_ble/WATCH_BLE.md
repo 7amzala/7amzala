@@ -1,7 +1,8 @@
 # StrikeSense watch – Bluetooth version
 
-Waveshare ESP32-S3-Touch-AMOLED-1.43 talking to the rod over **Bluetooth**
-(no LoRa module needed). The phone app can be connected at the same time.
+Waveshare ESP32-S3-Touch-AMOLED-1.43 talking to the rod over **Bluetooth**,
+with an optional **LoRa** backup when the rod is far (see below). The phone
+app can be connected at the same time.
 
 ## Screens
 
@@ -66,6 +67,42 @@ The small text under the title says what is happening:
 
 Watch Serial (115200) lists every named device it sees (`[BLE]   saw ...`)
 and marks the rod with `<- THE ROD`.
+
+## LoRa backup (optional): far from the rods
+
+With an **SX1262 LoRa Node (HF, 868 MHz)** wired to the watch and the
+**LoRa rod sketch** (`StrikeSense/StrikeSense.ino`, rod 2.3 with the
+Wio-SX1262), the watch switches by itself:
+
+| Rod distance | Link | Watch shows |
+|---|---|---|
+| up to ~30 m | Bluetooth | cyan signal bars, smooth live graph, LAST STRIKE from the rod |
+| ~30 m to ~1 km | LoRa | orange bars + "LoRa" next to the rod battery; ring, alarms, buttons, vibration all work; graph and ring update 1-2 times a second |
+| back near | Bluetooth again | (within a few seconds) |
+
+The phone app stays on Bluetooth. Strike history on the watch works on both.
+
+### Wiring (watch ↔ LoRa module)
+
+| LoRa pad | Watch | | LoRa pad | Watch |
+|---|---|---|---|---|
+| 3V3 | 3V3 | | RESET | IO6 |
+| GND | GND | | BUSY | IO7 |
+| CS | IO5 | | DIO1 | IO1 |
+| CLK | IO16 | | RXEN | IO2 |
+| MOSI | IO17 | | TXEN | IO3 |
+| MISO | IO18 | | ANT | the 868 MHz antenna (never transmit without it) |
+
+Library: **RadioLib** (Library Manager). The micro-SD card now runs in SD
+mode (same slot, nothing to rewire), so the SPI bus is free for LoRa.
+No module wired? The watch works as before over Bluetooth ("LoRa module
+not found" under "Looking for the rod"). To switch LoRa off completely set
+`WATCH_LORA 0` in `lora_link.h`.
+
+Radio: 869.525 MHz, SF7, **250 kHz**, 14 dBm (rod and watch must match:
+same `strikesense_protocol.h` in both sketch folders). A rod heartbeat is
+~39 ms on air: 1 a second when calm (~4%), 2 a second while something
+happens (~8%), inside the 10% allowed in this band.
 
 ## Wrist vibration (optional): Pimoroni Haptic Bzzz
 

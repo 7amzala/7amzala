@@ -814,6 +814,7 @@ float totalDeg = 0;              // total angle from rest
 
 float energyPeakSincePoll = 0;
 float energyPeakSinceWatch = 0;          // same, for the watch (its own poll)
+float energyPeakSinceLora = 0;           // same, for the watch's LoRa heartbeat
 
 // =====================================================
 // REST POSITION + PULL DIRECTION
@@ -1429,6 +1430,9 @@ void updateSignals()
 
   if(knockEnergy > energyPeakSinceWatch)
     energyPeakSinceWatch = knockEnergy;
+
+  if(knockEnergy > energyPeakSinceLora)
+    energyPeakSinceLora = knockEnergy;
 
   // Ignore free fall / bad readings for the angle
   if(vLen(gravity) > 0.5)
@@ -8478,7 +8482,7 @@ void handleRelearn()
 }
 
 // NEW PULL DIRECTION (phone settings / watch): one pull test now
-void handleTeachDir()
+void cmdTeachDir()
 {
   if(rodState == ST_LEARNING)
   {
@@ -8490,7 +8494,11 @@ void handleTeachDir()
     pullTestWaveDeg = 0;
     startPullTest();
   }
+}
 
+void handleTeachDir()
+{
+  cmdTeachDir();
   server.send(200, "text/plain", "OK");
 }
 
@@ -8593,16 +8601,11 @@ unsigned long nowEpoch()
   return clockEpochAt + (millis() - clockMillisAt) / 1000;
 }
 
-void handleSetTime()
+// From the phone or the watch (Bluetooth or LoRa); false = not a real time
+bool setClock(long t, long tz)
 {
-  long t = server.arg("t").toInt();
-  long tz = server.arg("tz").toInt();
-
   if(t < 1600000000L || tz < -14 * 60 || tz > 14 * 60)
-  {
-    server.send(400, "text/plain", "BAD TIME");
-    return;
-  }
+    return false;
 
   bool first = !clockSet;
 
@@ -8613,6 +8616,17 @@ void handleSetTime()
 
   if(first)
     Serial.printf("TIME SET: %lu (UTC%+ld min)\n", (unsigned long)t, tz);
+
+  return true;
+}
+
+void handleSetTime()
+{
+  if(!setClock(server.arg("t").toInt(), server.arg("tz").toInt()))
+  {
+    server.send(400, "text/plain", "BAD TIME");
+    return;
+  }
 
   server.send(200, "text/plain", "OK");
 }
@@ -9107,6 +9121,7 @@ unsigned long loraTxStart = 0;
 
 uint8_t loraSeq = 0;
 unsigned long lastHeartbeatSent = 0;
+unsigned long lastKnockIdSent = 0;     // a new knock makes the next heartbeats fast
 
 // Strike waiting for the watch to confirm
 bool strikeNeedsAck = false;
@@ -9140,6 +9155,7 @@ uint8_t strikeCode(const String& type)
   if(type == "SLOW PULL") return STRIKE_SLOW;
   if(type == "REPEATED BITE") return STRIKE_REPEATED;
   if(type.startsWith("DROP")) return STRIKE_DROPBACK;   // DROP-BACK + PULL
+  if(type == "SHAKING FISH") return STRIKE_SHAKE;
 
   return STRIKE_NONE;
 }
@@ -9190,13 +9206,38 @@ void sendHeartbeat()
   p.strike = strikeActive ? strikeCode(strikeType) : (uint8_t)STRIKE_NONE;
   p.strikeId = (uint16_t)strikeEventID;
   p.sea = seaState;
-  p.battery = 255;   // not measured yet
+  p.battery = batPercent < 0 ? 255 : (uint8_t)clampFloat(batPercent, 0, 100);
   p.learnLeft = (uint8_t)learnLeft;
   p.tilt10 = (int16_t)clampFloat(tiltDeg * 10.0, -32000, 32000);
   p.bucket = (uint8_t)clampFloat(pullBucket / bucketSize * 100.0, 0, 100);
   p.knocks = (uint8_t)recentKnockCount();
 
+  // rod 2.3+: the watch screens without Bluetooth
+  p.ftilt10 = (int16_t)clampFloat(fastTiltDeg * 10.0, -32000, 32000);
+  p.allow100 = (uint16_t)clampFloat(pullAllow * 100.0, 0, 65000);
+  p.drop = (uint8_t)clampFloat(dropBucket / bucketSize * 100.0, 0, 100);
+  p.flags = (dropWatch ? SS_F_DROPWATCH : 0) | (haveDir ? SS_F_DIR : 0);
+  p.knockId = (uint8_t)knockAlertID;
+  p.kpeak10 = (uint8_t)clampFloat(knockThreshold > 0 ? energyPeakSinceLora / knockThreshold * 10.0 : 0, 0, 255);
+  energyPeakSinceLora = 0;
+  p.waveWind = (uint8_t)((waveLevel & 0x0F) | ((windLevel & 0x0F) << 4));
+  p.batLeft = batLeftMin < 0 ? 0xFFFF : (uint16_t)clampFloat(batLeftMin, 0, 65000);
+  p.ptdeg100 = (uint16_t)clampFloat(totalDeg * 100.0, 0, 65000);
+  p.ptneed100 = (uint16_t)clampFloat(pullTestNeed() * 100.0, 0, 65000);
+  p.utc = (uint32_t)nowEpoch();
+  p.tz15 = (int8_t)(clockTzMin / 15);
+
+  lastKnockIdSent = knockAlertID;
+
   loraSend(&p, sizeof(p));
+}
+
+// Something happening: the watch gets 2 heartbeats a second, else 1
+bool loraBusy()
+{
+  return strikeActive || rodState == ST_PULLTEST ||
+         pullBucket / bucketSize >= 0.10 || dropBucket / bucketSize >= 0.10 ||
+         dropWatch || knockAlertID != lastKnockIdSent || recentKnockCount() > 0;
 }
 
 void sendStrike()
@@ -9234,7 +9275,7 @@ void loraOnStrike()
   nextStrikeSend = millis();
 }
 
-void handleCommand(const ss_command_t& c)
+void handleCommand(ss_command_t c)
 {
   // Always confirm, even a repeat (our first ACK may have been lost)
   queueAck(PKT_COMMAND, c.h.seq);
@@ -9254,6 +9295,9 @@ void handleCommand(const ss_command_t& c)
     case CMD_READY:    cmdReady(); break;
     case CMD_RESUME:   cmdResume(); break;
     case CMD_SKIPPULL: cmdSkipPull(); break;
+    case CMD_TEACHDIR: cmdTeachDir(); break;
+    case CMD_RELEARN:  cmdRelearn(false); break;
+    case CMD_SETTIME:  setClock((long)c.arg, (long)c.tz15 * 15); break;
   }
 }
 
@@ -9279,9 +9323,12 @@ void handlePacket(const uint8_t* buf, size_t len)
     watchHearsRodSnr = w->rodSnr;
     watchReported = true;
   }
-  else if(h->type == PKT_COMMAND && len >= sizeof(ss_command_t))
+  else if(h->type == PKT_COMMAND && len >= SS_COMMAND_V1_LEN)
   {
-    handleCommand(*(const ss_command_t*)buf);
+    ss_command_t c;
+    memset(&c, 0, sizeof(c));
+    memcpy(&c, buf, len < sizeof(c) ? len : sizeof(c));     // an older watch sends a shorter one
+    handleCommand(c);
   }
   else if(h->type == PKT_ACK && len >= sizeof(ss_ack_t))
   {
@@ -9319,7 +9366,7 @@ void loraBegin()
 
   loraOk = true;
 
-  Serial.printf("[LoRa] OK  %.3f MHz  SF%d - talking to the watch\n", SS_FREQ_MHZ, SS_SF);
+  Serial.printf("[LoRa] OK  %.3f MHz  SF%d  %.0f kHz - talking to the watch\n", SS_FREQ_MHZ, SS_SF, SS_BW_KHZ);
 }
 
 void loraPoll()
@@ -9384,7 +9431,7 @@ void loraPoll()
     return;
   }
 
-  if(now - lastHeartbeatSent >= SS_HEARTBEAT_MS)
+  if(now - lastHeartbeatSent >= (unsigned long)(loraBusy() ? SS_HEARTBEAT_FAST_MS : SS_HEARTBEAT_MS))
   {
     lastHeartbeatSent = now;
     sendHeartbeat();
@@ -9446,7 +9493,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.2 (Bluetooth: phone + watch, fast watch ring) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.3 (LoRa + Bluetooth: watch switches by itself) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

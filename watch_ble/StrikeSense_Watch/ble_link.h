@@ -22,9 +22,20 @@ typedef enum
   BLE_LINK_CONNECTED
 } ble_link_phase_t;
 
+// Which link the screens use (link_merge.c)
+typedef enum
+{
+  LINK_NONE,
+  LINK_BT,                  // Bluetooth: live graph, last strike, phone at the same time
+  LINK_LORA                 // LoRa: rod too far for Bluetooth, status 1-2 times a second
+} link_via_t;
+
 typedef struct
 {
-  ble_link_phase_t phase;
+  ble_link_phase_t phase;   // with LoRa in use: BLE_LINK_CONNECTED too
+  link_via_t via;
+  bool lora_ok;             // the watch's LoRa module answered
+  int lora_bars;            // 0..4, 0 = rod not heard over LoRa
   int rssi;                 // dBm, 0 = unknown
   uint32_t seq;             // +1 for every new answer from the rod
   uint32_t age_ms;          // since the last answer

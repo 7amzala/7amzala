@@ -5,6 +5,7 @@
 #include <string>
 
 #include "ble_link.h"
+#include "link_merge.h"
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include "host/ble_gap.h"
@@ -71,6 +72,8 @@ static uint32_t lastRssi = 0;
 static int rssi = 0;
 
 static int scans = 0;
+static uint32_t scanEndMs = 0;
+static const uint32_t SCAN_PAUSE_LORA_MS = 4000;  // on LoRa: look for Bluetooth less often (battery)
 static volatile int seenCount = 0;
 static uint32_t connectedAt = 0;
 static bool firstAnswerLogged = false;
@@ -672,10 +675,14 @@ void ble_link_poll(void)
 
   if(phase == BLE_LINK_SEARCHING)
   {
+    if(link_merge_via() == LINK_LORA && now - scanEndMs < SCAN_PAUSE_LORA_MS)
+      return;
+
     seenCount = 0;
     BLEDevice::getScan()->start(3, false);       // up to 3 s, stops early when found
     BLEDevice::getScan()->clearResults();
     scans++;
+    scanEndMs = millis();
 
     portENTER_CRITICAL(&mux);
     shared.scans = scans;
@@ -839,6 +846,14 @@ void ble_link_get(ble_link_status_t *out, bool take_peak)
     peak = 0;
 
   portEXIT_CRITICAL(&mux);
+
+#if WATCH_LORA
+  lora_link_status_t lo = lora_link_get_status();
+#else
+  lora_link_status_t lo;
+  memset(&lo, 0, sizeof(lo));
+#endif
+  link_merge(out, &lo, now, take_peak);     // rod too far for Bluetooth: LoRa fills in
 }
 
 void ble_link_ask_last_strike(void)
@@ -857,6 +872,23 @@ bool ble_link_get_last_strike(ble_last_strike_t *out)
 
 void ble_link_command(const char *path)
 {
+#if WATCH_LORA
+  if(link_merge_via() == LINK_LORA)
+  {
+    uint32_t utc = 0;
+    int tz = 0;
+    uint8_t cmd = link_path_to_cmd(path, &utc, &tz);
+
+    if(cmd == CMD_SETTIME)
+      lora_link_send_settime(utc, tz);
+    else if(cmd != 0)
+      lora_link_send_command(cmd);
+
+    Serial.printf("[LoRa] button %s -> command %d\n", path, cmd);
+    return;
+  }
+#endif
+
   portENTER_CRITICAL(&mux);
   strncpy(commandPath, path, sizeof(commandPath) - 1);
   commandPath[sizeof(commandPath) - 1] = 0;

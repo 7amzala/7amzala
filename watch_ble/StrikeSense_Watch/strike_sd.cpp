@@ -1,7 +1,8 @@
 // =====================================================
 // STRIKES ON THE SD CARD
 //
-// The board's micro-SD slot (SPI: CS 38, MOSI 39, MISO 40, SCK 41).
+// The board's micro-SD slot, used in SD mode (1 bit): CLK 41, CMD 39,
+// D0 40, D3 38 held high. So the SPI bus stays free for the LoRa module.
 // Each strike is one small file in /strikes (about 10 KB at most),
 // named S00001_20251014-2142.ssk - number, then local date and time.
 // At start the newest 20 are loaded, so the history is there after a
@@ -9,19 +10,19 @@
 // =====================================================
 
 #include <Arduino.h>
-#include <SPI.h>
-#include <SD.h>
+#include <SD_MMC.h>
 #include "strike_sd.h"
 #include "strike_log.h"
 
-#define SD_CS   38
-#define SD_MOSI 39
-#define SD_MISO 40
-#define SD_SCK  41
+#define SD_D3   38      // the slot's "CS" pin: must stay high in SD mode
+#define SD_CMD  39      // the slot's "MOSI"
+#define SD_D0   40      // the slot's "MISO"
+#define SD_CLK  41      // the slot's "SCK"
+
+#define SD SD_MMC
 
 #define FILE_MAGIC 0x53534B31              // "SSK1"
 
-static SPIClass sdSpi(HSPI);
 static bool present = false;
 static unsigned nextNumber = 1;
 
@@ -82,8 +83,11 @@ static bool load(const char *path)
 
 bool strike_sd_begin(void)
 {
-  sdSpi.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  present = SD.begin(SD_CS, sdSpi, 20000000);
+  pinMode(SD_D3, OUTPUT);
+  digitalWrite(SD_D3, HIGH);
+
+  SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
+  present = SD_MMC.begin("/sdcard", true);         // true = 1-bit mode
 
   if(!present)
   {
