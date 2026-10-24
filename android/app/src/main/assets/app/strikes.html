@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>My strikes</title>
+<link rel="stylesheet" href="leaflet.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%) fixed;-webkit-tap-highlight-color:transparent}
+.page{display:none;padding:12px 12px 30px;min-height:100%}
+.page.on{display:block}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.back{color:#22d3ff;font-weight:800;font-size:15px;background:none;border:0;padding:6px 4px;cursor:pointer}
+.title{font-weight:900;font-size:20px}
+.sp{flex:1}
+.meta{font-size:12px;color:#8ea6c8}
+.card{background:rgba(14,22,40,.88);border:1px solid #1d2a44;border-radius:15px;padding:11px 12px;margin-bottom:10px}
+.lbl{font-size:11.5px;color:#8ea6c8;letter-spacing:.8px;font-weight:800}
+.big{font-size:22px;font-weight:900}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chip{padding:7px 11px;border-radius:20px;background:#0b1428;border:1px solid #24324f;font-size:13px;font-weight:700;color:#a9bbd6;cursor:pointer;user-select:none}
+.chip.on{background:#22d3ff;color:#04121a;border-color:#22d3ff}
+.chip.act{background:#0b1428;color:#22d3ff;border-color:#1f8fd6}
+.rec{display:flex;gap:8px;margin-bottom:10px}
+.rec .card{flex:1;margin:0;padding:10px;cursor:pointer;min-width:0}
+.item{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #18233a;cursor:pointer}
+.item .txt{min-width:0;flex:1}
+.tag{font-size:11px;font-weight:800;padding:4px 7px;border-radius:7px;white-space:nowrap;border:1px solid}
+.empty{color:#8ea6c8;text-align:center;padding:30px 10px;line-height:1.5}
+#map{height:calc(100vh - 150px);min-height:300px;border-radius:14px;overflow:hidden;border:1px solid #1d2a44;background:#0a2240}
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11px;font-weight:700;color:#a9bbd6}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.stats{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+canvas{display:block;width:100%;touch-action:none}
+.zoombar{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.zbtn{background:#0b1428;border:1px solid #24324f;color:#22d3ff;border-radius:9px;font-weight:900;font-size:15px;padding:4px 11px;cursor:pointer}
+.story{display:flex;height:14px;border-radius:5px;overflow:hidden;margin-top:6px;background:#1a2235}
+.btn{display:inline-block;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border:0;border-radius:10px;padding:10px 14px;font-weight:900;font-size:13px;cursor:pointer;margin:4px 6px 4px 0}
+.btn.ghost{background:#0b1428;color:#a9bbd6;border:1px solid #24324f}
+.btn.red{background:#3a0d14;color:#ff8d98;border:1px solid #ff4d5e}
+input[type=text]{width:100%;padding:10px;border-radius:10px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff;font-size:13px}
+ol{padding-left:20px;line-height:1.5;font-size:13px;color:#c3d2ea}
+pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px solid #1d2a44;border-radius:10px;padding:8px;font-size:10.5px;color:#a9bbd6;max-height:180px;overflow:auto}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#0b1428;color:#eaf3ff;border:1px solid #24324f}
+.leaflet-container a.leaflet-popup-close-button{color:#8ea6c8}
+</style>
+</head>
+<body>
+
+<!-- ============ LIST ============ -->
+<div class="page on" id="pList">
+ <div class="top">
+  <button class="back" onclick="closeAll()">&#8249; Back</button>
+  <div class="title">My strikes</div><div class="sp"></div>
+  <span class="chip act" onclick="show('pMap')">&#128506; MAP</span>
+ </div>
+ <div class="meta" id="cloudLine" onclick="show('pCloud')" style="margin:-4px 0 9px;cursor:pointer">&#9729; &hellip;</div>
+ <div class="chips" id="countryChips"></div>
+ <div class="chips" id="placeChips"></div>
+ <div id="recs" class="rec"></div>
+ <div class="card" id="summary" style="padding:9px 12px"></div>
+ <div id="list"></div>
+</div>
+
+<!-- ============ MAP ============ -->
+<div class="page" id="pMap">
+ <div class="top">
+  <button class="back" onclick="show('pList')">&#8249; Back</button>
+  <div class="title">Map</div><div class="sp"></div>
+  <span class="meta" id="mapFilter"></span>
+ </div>
+ <div id="map"></div>
+ <div class="legend" id="legend"></div>
+ <div class="meta" style="margin-top:6px">Pinch to zoom &middot; bigger pin = stronger pull &middot; the map needs internet</div>
+</div>
+
+<!-- ============ ONE STRIKE ============ -->
+<div class="page" id="pStrike">
+ <div class="top">
+  <button class="back" onclick="show('pList')">&#8249; Back</button>
+  <div class="title" id="sTitle"></div><div class="sp"></div>
+  <span id="sBadge"></span>
+ </div>
+ <div class="card">
+  <div class="meta" id="sWhere"></div>
+  <div class="stats" id="sStats"></div>
+ </div>
+ <div class="card" style="padding:8px">
+  <div class="zoombar">
+   <span class="meta" id="zInfo"></span><div class="sp"></div>
+   <button class="zbtn" onclick="zoomBy(1/2)">&minus;</button>
+   <button class="zbtn" onclick="zoomBy(2)">+</button>
+   <button class="zbtn" style="font-size:12px" onclick="zoomAll()">ALL</button>
+  </div>
+  <canvas id="g" height="260"></canvas>
+  <canvas id="ov" height="38" style="margin-top:6px"></canvas>
+  <div class="meta" style="text-align:center;margin-top:3px">pinch or + / &minus; to zoom &middot; drag the graph or the box</div>
+  <div class="empty" id="noGraph" style="display:none;padding:14px">No graph for this strike (another strike came before the phone collected it). The numbers above are kept.</div>
+ </div>
+ <div class="card" id="storyCard">
+  <div class="lbl">STORY</div>
+  <div class="story" id="story"></div>
+  <div class="meta" id="storyText" style="margin-top:5px"></div>
+ </div>
+ <button class="btn red" onclick="deleteStrike()">Delete this strike</button>
+</div>
+
+<!-- ============ ONLINE STORAGE ============ -->
+<div class="page" id="pCloud">
+ <div class="top">
+  <button class="back" onclick="show('pList')">&#8249; Back</button>
+  <div class="title">Saved online</div>
+ </div>
+ <div class="card">
+  <div class="lbl">NOW</div>
+  <div id="cloudNow" style="margin:6px 0 8px;font-weight:700"></div>
+  <button class="btn" onclick="syncNow(false)">Send now</button>
+  <button class="btn ghost" onclick="syncNow(true)">Load from the sheet</button>
+  <div class="meta" id="syncMsg"></div>
+ </div>
+ <div class="card">
+  <div class="lbl">YOUR GOOGLE SHEET LINK</div>
+  <input type="text" id="cloudUrl" placeholder="https://script.google.com/macros/s/.../exec">
+  <button class="btn" onclick="saveUrl()">Save link</button>
+ </div>
+ <div class="card">
+  <div class="lbl">SET UP ONCE (5 MIN, ON A COMPUTER IS EASIEST)</div>
+  <ol>
+   <li>Open <b>sheets.new</b> (a new Google Sheet in your account). Name it <i>StrikeSense</i>.</li>
+   <li>Menu <b>Extensions &rarr; Apps Script</b>. Delete what is there, paste the code below, press <b>Save</b>.</li>
+   <li><b>Deploy &rarr; New deployment</b> &rarr; type <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. Press <b>Deploy</b> and allow it.</li>
+   <li>Copy the <b>Web app URL</b> (ends with /exec), paste it above, press <b>Save link</b>.</li>
+  </ol>
+  <div class="meta" style="margin-bottom:6px">Only this app knows the link. Your strikes stay in your own Google account.</div>
+  <button class="btn ghost" onclick="copyCode()">Copy the code</button>
+  <pre id="code"></pre>
+ </div>
+</div>
+
+<script src="leaflet.js"></script>
+<script>
+// ---------- data ----------
+const APP = window.StrikeStore || null;
+const COLORS = { 'SHARP STRIKE':'#ff4d5e', 'SLOW PULL':'#ffba52', 'DROP-BACK + PULL':'#9b8cff', 'REPEATED BITE':'#22d3ff', 'SHAKING FISH':'#3ddc84' };
+const colorOf = t => COLORS[t] || '#22d3ff';
+let all = [], country = 'All', place = 'All', range = 0;    // range: 0 any, 7, 30, 365 days
+const RANGES = [[0,'Any date'],[7,'Last 7 days'],[30,'Last 30 days'],[365,'Last 12 months']];
+
+function load()
+{
+  try { all = APP ? JSON.parse(APP.list()) : demo(); } catch(e) { all = []; }
+  all.sort((a, b) => b.time - a.time);
+}
+
+function full(uid)
+{
+  if(!APP) return all.find(s => s.uid == uid);
+  try { return JSON.parse(APP.strike(uid)); } catch(e) { return null; }
+}
+
+const countryOf = s => s.country || (s.lat !== undefined ? 'Place not named yet' : 'No GPS');
+const placeOf = s => s.place || '';
+
+// ---------- small helpers ----------
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mmss = s => s >= 0 ? Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : '–';
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function when(t, year)
+{
+  const d = new Date(t);
+  return d.getDate() + ' ' + MONTHS[d.getMonth()] + (year ? ' ' + d.getFullYear() : '') + ' · ' +
+         String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+const WAVES = ['flat sea','small waves','waves','big waves'];
+
+function show(id)
+{
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id == id));
+  window.scrollTo(0, 0);
+  if(id == 'pMap') drawMap();
+  if(id == 'pCloud') cloudPage();
+  if(id == 'pList') drawList();
+}
+
+// Android back button: one step back; false = close MY STRIKES
+function appBack()
+{
+  const on = document.querySelector('.page.on').id;
+  if(on == 'pList') return false;
+  show('pList');
+  return true;
+}
+
+function closeAll()
+{
+  if(APP) APP.close(); else history.back();
+}
+
+// ---------- filters ----------
+function filtered()
+{
+  const from = range ? Date.now() - range * 86400000 : 0;
+  return all.filter(s => (country == 'All' || countryOf(s) == country) &&
+                         (place == 'All' || placeOf(s) == place) && s.time >= from);
+}
+
+function chip(text, on, fn) { return `<span class="chip${on ? ' on' : ''}" onclick="${fn}">${esc(text)}</span>`; }
+
+function drawChips()
+{
+  const count = {};
+  all.forEach(s => count[countryOf(s)] = (count[countryOf(s)] || 0) + 1);
+  const names = Object.keys(count).sort((a, b) => count[b] - count[a]);
+  if(country != 'All' && !count[country]) country = 'All';
+
+  $('countryChips').innerHTML = chip('All ' + all.length, country == 'All', "setCountry('All')") +
+    names.map(n => chip(n + ' ' + count[n], country == n, `setCountry(${JSON.stringify(n).replace(/"/g, '&quot;')})`)).join('');
+
+  let row = '';
+
+  if(country != 'All')
+  {
+    const pc = {};
+    all.filter(s => countryOf(s) == country && placeOf(s)).forEach(s => pc[placeOf(s)] = (pc[placeOf(s)] || 0) + 1);
+    const pl = Object.keys(pc).sort((a, b) => pc[b] - pc[a]);
+    if(place != 'All' && !pc[place]) place = 'All';
+    if(pl.length > 1 || place != 'All')
+      row = chip('All ' + country, place == 'All', "setPlace('All')") +
+            pl.map(n => chip(n + ' ' + pc[n], place == n, `setPlace(${JSON.stringify(n).replace(/"/g, '&quot;')})`)).join('');
+  }
+
+  const r = RANGES.find(x => x[0] == range);
+  row += `<span class="chip${range ? ' on' : ''}" onclick="nextRange()">&#128197; ${r[1]}</span>`;
+  $('placeChips').innerHTML = row;
+}
+
+function setCountry(c) { country = c; place = 'All'; drawList(); }
+function setPlace(p) { place = p; drawList(); }
+function nextRange() { const i = RANGES.findIndex(x => x[0] == range); range = RANGES[(i + 1) % RANGES.length][0]; drawList(); }
+
+function filterName()
+{
+  return place != 'All' ? place : country != 'All' ? country : 'everywhere';
+}
+
+// strongest pull and longest fight among the strikes shown
+function records(list)
+{
+  let strong = null, long = null;
+  list.forEach(s =>
+  {
+    if(s.peak !== undefined && (!strong || s.peak > strong.peak)) strong = s;
+    if(s.fight !== undefined && s.done && (!long || s.fight > long.fight)) long = s;
+  });
+  return { strong, long };
+}
+
+// ---------- list ----------
+function drawList()
+{
+  load();
+  drawChips();
+  cloudLine();
+
+  const list = filtered();
+  const r = records(list);
+
+  if(!all.length)
+  {
+    $('recs').innerHTML = '';
+    $('summary').style.display = 'none';
+    $('list').innerHTML = '<div class="empty">No strikes yet.<br>Each strike the rod sees is saved here, with where it was.</div>';
+    return;
+  }
+
+  $('recs').innerHTML = !list.length ? '' :
+    `<div class="card" onclick="openStrike('${r.strong ? r.strong.uid : ''}')"><div class="lbl" style="color:#ff4d5e">&#128170; STRONGEST PULL</div>
+      ${r.strong ? `<div class="big">${r.strong.peak.toFixed(1)}&deg;</div><div class="meta">${esc(r.strong.type)} &middot; ${when(r.strong.time)}<br>${esc(placeOf(r.strong) || countryOf(r.strong))}</div>` : '<div class="meta">&ndash;</div>'}</div>
+     <div class="card" onclick="openStrike('${r.long ? r.long.uid : ''}')"><div class="lbl" style="color:#9b8cff">&#9201; LONGEST FIGHT</div>
+      ${r.long ? `<div class="big">${mmss(r.long.fight)}</div><div class="meta">${esc(r.long.type)} &middot; ${when(r.long.time)}<br>${esc(placeOf(r.long) || countryOf(r.long))}</div>` : '<div class="meta">&ndash;</div>'}</div>`;
+
+  // summary: how many, best time of day (2 hours with most strikes), most common type
+  $('summary').style.display = list.length ? '' : 'none';
+
+  if(list.length)
+  {
+    const hours = new Array(24).fill(0), types = {};
+    list.forEach(s => { hours[new Date(s.time).getHours()]++; types[s.type] = (types[s.type] || 0) + 1; });
+    let best = 0;
+    for(let h = 0; h < 24; h++) if(hours[h] + hours[(h + 1) % 24] > hours[best] + hours[(best + 1) % 24]) best = h;
+    const top = Object.keys(types).sort((a, b) => types[b] - types[a])[0];
+    $('summary').innerHTML = `<span class="lbl">${esc(filterName().toUpperCase())}</span> &nbsp;<span class="meta">${list.length} strike${list.length > 1 ? 's' : ''}` +
+      (list.length >= 3 ? ` &middot; best time <b style="color:#eaf3ff">${String(best).padStart(2, '0')}:00&ndash;${String((best + 2) % 24).padStart(2, '0')}:00</b>` : '') +
+      ` &middot; most: <b style="color:#eaf3ff">${esc(top)}</b></span>`;
+  }
+
+  $('list').innerHTML = list.length ? list.map(s =>
+  {
+    const c = colorOf(s.type);
+    const p = placeOf(s) ? placeOf(s) + (country == 'All' && s.country ? ', ' + s.country : '') : countryOf(s);
+    return `<div class="item" onclick="openStrike('${s.uid}')"><span class="tag" style="background:${c}22;color:${c};border-color:${c}">${esc(s.type)}</span>
+      <div class="txt"><div style="font-size:13px;font-weight:700">${s.peak !== undefined ? s.peak.toFixed(1) + '&deg;' : ''} &middot; ${s.done ? mmss(s.fight) : 'fighting&hellip;'}${s.graph ? ' &nbsp;&#128200;' : ''}</div>
+      <div class="meta">${when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}</div></div>
+      ${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
+  }).join('') : '<div class="empty">No strikes for this choice.</div>';
+}
+
+function cloudLine()
+{
+  const waiting = all.filter(s => !s.synced && s.done).length;
+  const url = APP ? APP.cloudUrl() : '';
+  $('cloudLine').innerHTML = !url ? '&#9729; saved on this phone &middot; <u>save online too</u>'
+    : waiting ? `&#9729; ${waiting} waiting to go online &middot; <u>details</u>`
+    : `&#9729; all ${all.length} saved online`;
+}
+
+// ---------- map ----------
+let map = null, layer = null;
+
+function drawMap()
+{
+  load();
+  const list = filtered().filter(s => s.lat !== undefined);
+  $('mapFilter').textContent = filterName() + ' · ' + list.length + ' on the map';
+  $('legend').innerHTML = Object.keys(COLORS).map(t => `<span><i style="background:${COLORS[t]}"></i>${t}</span>`).join('');
+
+  if(typeof L == 'undefined') { $('map').innerHTML = '<div class="empty">Map not available.</div>'; return; }
+
+  if(!map)
+  {
+    map = L.map('map', { zoomControl: false, attributionControl: true }).setView([38, -1], 5);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  }
+
+  if(layer) layer.remove();
+  layer = L.layerGroup().addTo(map);
+
+  const r = records(list);
+
+  list.forEach(s =>
+  {
+    const rec = s == r.strong ? '#ff4d5e' : s == r.long ? '#9b8cff' : null;
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: 5 + Math.min(10, (s.peak || 0) * 2), color: rec || '#04121a', weight: rec ? 4 : 2,
+      fillColor: colorOf(s.type), fillOpacity: .9 }).addTo(layer);
+    m.bindPopup(`<b style="color:${colorOf(s.type)}">${esc(s.type)}</b>${rec ? (s == r.strong ? ' &#128170; strongest' : ' &#9201; longest') : ''}<br>
+      ${s.peak !== undefined ? s.peak.toFixed(1) + '&deg; &middot; ' : ''}${mmss(s.fight)}<br>${when(s.time, true)}<br>${esc(placeOf(s) || countryOf(s))}<br>
+      <a href="#" onclick="openStrike('${s.uid}');return false" style="color:#22d3ff;font-weight:800">Open &rsaquo;</a>`);
+  });
+
+  setTimeout(() =>
+  {
+    map.invalidateSize();
+    if(list.length) map.fitBounds(L.latLngBounds(list.map(s => [s.lat, s.lon])).pad(0.3), { maxZoom: 14 });
+  }, 50);
+}
+
+// ---------- one strike ----------
+let cur = null, pts = [], view = [0, 1], tMin = 0, tMax = 1;
+
+function openStrike(uid)
+{
+  if(!uid) return;
+  cur = full(uid);
+  if(!cur) return;
+
+  show('pStrike');
+  const c = colorOf(cur.type);
+  $('sTitle').textContent = cur.type;
+  $('sTitle').style.color = c;
+
+  // a record in its country?
+  const same = all.filter(s => countryOf(s) == countryOf(cur));
+  const r = records(same);
+  const badge = r.strong && r.strong.uid == cur.uid ? '\u{1F4AA} ' + countryOf(cur) + ' record'
+              : r.long && r.long.uid == cur.uid ? '\u23F1 ' + countryOf(cur) + ' record' : '';
+  $('sBadge').innerHTML = badge ? `<span class="tag" style="background:#ff4d5e;color:#fff;border-color:#ff4d5e">${esc(badge)}</span>` : '';
+
+  const p = [placeOf(cur), cur.country].filter(Boolean).join(', ') || countryOf(cur);
+  $('sWhere').innerHTML = `&#128205; ${esc(p)} &middot; ${when(cur.time, true)}`;
+  $('sStats').innerHTML =
+    stat('PULL', cur.peak !== undefined ? cur.peak.toFixed(1) + '&deg;' : '–') +
+    stat('FIGHT', cur.done ? mmss(cur.fight) : '…') +
+    stat('KNOCKS', cur.knocks !== undefined ? cur.knocks : '–') +
+    (cur.wave >= 0 && cur.wave !== undefined ? stat('SEA', WAVES[cur.wave] || '–', 15) : '');
+
+  build(cur.graphdata);
+}
+
+function stat(l, v, size) { return `<div><div class="lbl">${l}</div><div class="big"${size ? ` style="font-size:${size}px;padding-top:5px"` : ''}>${v}</div></div>`; }
+
+// one time line: the whole strike (5 a second) with the close-up (50 a
+// second) in the middle. x = seconds from the strike.
+function build(g)
+{
+  pts = [];
+  const has = g && g.k && g.k.length;
+  $('noGraph').style.display = has ? 'none' : '';
+  $('g').style.display = $('ov').style.display = has ? '' : 'none';
+  $('storyCard').style.display = has ? '' : 'none';
+  $('zInfo').textContent = '';
+  if(!has) return;
+
+  const zn = g.zk ? g.zk.length : 0, zs = -(g.zpre || 0) / 50, ze = zs + zn / 50;
+
+  g.k.forEach((k, i) =>
+  {
+    const x = (i - g.pre) / 5;
+    if(!zn || x < zs || x >= ze) pts.push([x, k, g.t[i] / 100]);
+  });
+
+  for(let i = 0; i < zn; i++) pts.push([zs + i / 50, g.zk[i], g.zt[i] / 100]);
+  pts.sort((a, b) => a[0] - b[0]);
+
+  tMin = pts[0][0];
+  tMax = pts[pts.length - 1][0];
+  view = [tMin, tMax];
+  story(g);
+  setTimeout(draw, 0);
+}
+
+// RUN / SLACK / knock / quiet, every 0.2 s after the strike
+function story(g)
+{
+  const allow = g.allow > 0.05 ? g.allow : 0.5;
+  const parts = [], words = [];
+  for(let i = g.pre; i < g.k.length; i++)
+  {
+    const t = g.t[i] / 100, k = g.k[i];
+    const st = t > allow ? 'RUN' : t < -allow ? 'slack' : k >= 100 ? 'knock' : 'quiet';
+    if(parts.length && parts[parts.length - 1][0] == st) parts[parts.length - 1][1]++;
+    else parts.push([st, 1]);
+  }
+  const col = { RUN: '#ff4d5e', slack: '#9b8cff', knock: '#22d3ff', quiet: '#3a4560' };
+  $('story').innerHTML = parts.map(p => `<div style="flex:${p[1]};background:${col[p[0]]}"></div>`).join('');
+  parts.forEach(p => { if(p[1] >= 2 && words[words.length - 1] != p[0]) words.push(p[0]); });
+  $('storyText').textContent = words.join(' → ') + '  (first 10 s after the strike)';
+}
+
+function draw()
+{
+  const cv = $('g'), W = cv.clientWidth, H = 260, dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d');
+  c.scale(dpr, dpr);
+  c.fillStyle = '#060c1a'; c.fillRect(0, 0, W, H);
+
+  const span = view[1] - view[0], X = x => (x - view[0]) / span * W;
+  const half = H / 2 - 8;
+
+  // grid + labels
+  c.strokeStyle = '#14203a'; c.lineWidth = 1;
+  const step = span > 20 ? 5 : span > 8 ? 2 : span > 3 ? 1 : span > 1.2 ? 0.5 : 0.1;
+  c.fillStyle = '#5f7799'; c.font = '10px Arial';
+  for(let x = Math.ceil(view[0] / step) * step; x <= view[1]; x += step)
+  {
+    c.beginPath(); c.moveTo(X(x), 0); c.lineTo(X(x), H); c.stroke();
+    c.fillText((x > 0 ? '+' : '') + (+x.toFixed(1)) + 's', X(x) + 2, H - 3);
+  }
+  c.fillStyle = '#8ea6c8'; c.font = 'bold 10px Arial';
+  c.fillText('KNOCK', 5, 12); c.fillText('TILT (pull)', 5, half + 26);
+
+  const vis = pts.filter(p => p[0] >= view[0] - 0.3 && p[0] <= view[1] + 0.3);
+
+  // knock (top): limit at 100 %
+  const KY = v => half - Math.min(v, 300) / 300 * (half - 16);
+  c.strokeStyle = '#ff4d5e'; c.setLineDash([4, 4]);
+  c.beginPath(); c.moveTo(0, KY(100)); c.lineTo(W, KY(100)); c.stroke(); c.setLineDash([]);
+  c.fillStyle = '#22d3ff';
+  const bw = Math.max(1.5, Math.min(6, W / (span * (span < 5 ? 50 : 5)) * 0.7));
+  vis.forEach(p => { const h = half - KY(p[1]); c.fillRect(X(p[0]) - bw / 2, half - h, bw, h); });
+
+  // tilt (bottom): -3 .. +3 degrees
+  const top = half + 16, bot = H - 16, TY = v => top + (bot - top) * (1 - (Math.max(-3, Math.min(3, v)) + 3) / 6);
+  c.strokeStyle = '#2a3956'; c.beginPath(); c.moveTo(0, TY(0)); c.lineTo(W, TY(0)); c.stroke();
+  c.strokeStyle = '#ffba52'; c.lineWidth = 2.2; c.beginPath();
+  vis.forEach((p, i) => i ? c.lineTo(X(p[0]), TY(p[2])) : c.moveTo(X(p[0]), TY(p[2])));
+  c.stroke();
+
+  // the strike
+  c.strokeStyle = '#ff4d5e'; c.lineWidth = 2; c.beginPath(); c.moveTo(X(0), 0); c.lineTo(X(0), H); c.stroke();
+  c.fillStyle = '#ff4d5e'; c.font = 'bold 10px Arial'; c.fillText('STRIKE', X(0) + 4, half + 26);
+
+  const zoom = (tMax - tMin) / span;
+  $('zInfo').innerHTML = `zoom <b style="color:#22d3ff">&times;${zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)}</b> &middot; ${(view[0] > 0 ? '+' : '') + view[0].toFixed(1)} to ${(view[1] > 0 ? '+' : '') + view[1].toFixed(1)} s`;
+
+  overview();
+}
+
+function overview()
+{
+  const cv = $('ov'), W = cv.clientWidth, H = 38, dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d');
+  c.scale(dpr, dpr);
+  c.fillStyle = '#060c1a'; c.fillRect(0, 0, W, H);
+  const X = x => (x - tMin) / (tMax - tMin) * W, Y = v => H / 2 - Math.max(-3, Math.min(3, v)) / 3 * (H / 2 - 3);
+  c.strokeStyle = '#ffba52'; c.lineWidth = 1.3; c.beginPath();
+  pts.forEach((p, i) => i ? c.lineTo(X(p[0]), Y(p[2])) : c.moveTo(X(p[0]), Y(p[2])));
+  c.stroke();
+  c.strokeStyle = '#ff4d5e'; c.beginPath(); c.moveTo(X(0), 0); c.lineTo(X(0), H); c.stroke();
+  c.fillStyle = 'rgba(34,211,255,.15)'; c.strokeStyle = '#22d3ff'; c.lineWidth = 2;
+  const a = X(view[0]), b = Math.max(a + 6, X(view[1]));
+  c.fillRect(a, 1, b - a, H - 2); c.strokeRect(a, 1, b - a, H - 2);
+}
+
+function setView(a, b)
+{
+  const MIN = 0.5;                    // half a second: single knocks
+  let span = Math.max(MIN, Math.min(tMax - tMin, b - a));
+  let mid = (a + b) / 2;
+  a = mid - span / 2; b = mid + span / 2;
+  if(a < tMin) { b += tMin - a; a = tMin; }
+  if(b > tMax) { a -= b - tMax; b = tMax; }
+  view = [Math.max(tMin, a), Math.min(tMax, b)];
+  draw();
+}
+
+function zoomBy(f, at)
+{
+  // the buttons zoom around the strike while it is on screen
+  const mid = at !== undefined ? at : view[0] <= 0 && view[1] >= 0 ? 0 : (view[0] + view[1]) / 2, span = (view[1] - view[0]) / f;
+  const r = at !== undefined ? (at - view[0]) / (view[1] - view[0]) : 0.5;
+  setView(mid - span * r, mid + span * (1 - r));
+}
+
+function zoomAll() { setView(tMin, tMax); }
+
+// touch: one finger drags, two fingers pinch
+(function()
+{
+  const cv = $('g'), ov = $('ov'), ptrs = new Map();
+  let start = null;
+
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, e.clientX); start = { view: view.slice(), ptrs: new Map(ptrs) }; });
+  cv.addEventListener('pointermove', e =>
+  {
+    if(!ptrs.has(e.pointerId) || !start) return;
+    ptrs.set(e.pointerId, e.clientX);
+    const W = cv.clientWidth, span = start.view[1] - start.view[0], rect = cv.getBoundingClientRect();
+    const ids = [...ptrs.keys()];
+
+    if(ids.length >= 2 && start.ptrs.size >= 2)
+    {
+      const [i, j] = ids, a0 = start.ptrs.get(i), b0 = start.ptrs.get(j), a1 = ptrs.get(i), b1 = ptrs.get(j);
+      if(a0 === undefined || b0 === undefined || Math.abs(b0 - a0) < 10) return;
+      const f = Math.abs(b1 - a1) / Math.abs(b0 - a0);
+      const at = start.view[0] + ((a0 + b0) / 2 - rect.left) / W * span;
+      const ns = span / f, r = ((a1 + b1) / 2 - rect.left) / W;
+      setView(at - ns * r, at + ns * (1 - r));
+    }
+    else
+    {
+      const x0 = start.ptrs.get(e.pointerId);
+      if(x0 === undefined) return;
+      const dt = (e.clientX - x0) / W * span;
+      setView(start.view[0] - dt, start.view[1] - dt);
+    }
+  });
+  const up = e => { ptrs.delete(e.pointerId); start = { view: view.slice(), ptrs: new Map(ptrs) }; };
+  cv.addEventListener('pointerup', up);
+  cv.addEventListener('pointercancel', up);
+
+  // the overview: tap or drag moves the box
+  const moveBox = e =>
+  {
+    const r = ov.getBoundingClientRect(), x = tMin + (e.clientX - r.left) / r.width * (tMax - tMin), s = view[1] - view[0];
+    setView(x - s / 2, x + s / 2);
+  };
+  ov.addEventListener('pointerdown', e => { ov.setPointerCapture(e.pointerId); moveBox(e); });
+  ov.addEventListener('pointermove', e => { if(e.buttons || e.pointerType == 'touch') moveBox(e); });
+  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8, view[0] + (e.clientX - r.left) / r.width * (view[1] - view[0])); }, { passive: false });
+  window.addEventListener('resize', () => { if($('pStrike').classList.contains('on') && pts.length) draw(); });
+})();
+
+function deleteStrike()
+{
+  if(!cur || !confirm('Delete this strike from the phone?\n(If it is already in your Google Sheet, it stays there.)')) return;
+  if(APP) APP.delete(cur.uid); else all = all.filter(s => s.uid != cur.uid);
+  show('pList');
+}
+
+// ---------- online ----------
+function cloudPage()
+{
+  $('cloudUrl').value = APP ? APP.cloudUrl() : '';
+  $('cloudNow').textContent = APP ? APP.cloudNote() || 'not checked yet' : 'test page';
+  $('code').textContent = SHEET_CODE;
+}
+
+function saveUrl()
+{
+  const u = $('cloudUrl').value.trim();
+  if(u && !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u))
+  {
+    $('syncMsg').textContent = 'That does not look like a Web app link (https://script.google.com/macros/s/…/exec).';
+    return;
+  }
+  if(APP) APP.setCloudUrl(u);
+  $('syncMsg').textContent = u ? 'Link saved. Sending…' : 'Link removed.';
+  if(u) syncNow(false);
+}
+
+function syncNow(restore)
+{
+  $('syncMsg').textContent = restore ? 'Loading from the sheet…' : 'Sending…';
+  if(APP) APP.sync(restore); else synced('test page');
+}
+
+// called by the app when a send / load finished
+function synced(note)
+{
+  $('syncMsg').textContent = note;
+  $('cloudNow').textContent = APP ? APP.cloudNote() : note;
+  load(); cloudLine();
+}
+
+function copyCode()
+{
+  const t = SHEET_CODE;
+  if(navigator.clipboard) navigator.clipboard.writeText(t).then(() => $('syncMsg').textContent = 'Code copied.');
+  else { const r = document.createRange(); r.selectNode($('code')); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
+}
+
+const SHEET_CODE = `// StrikeSense: your strikes in this Google Sheet (paste in Extensions > Apps Script)
+const COLS = ['uid','time','date','type','peak','fight','knock','knocks','country','place','lat','lon','wave','wind','graph'];
+
+function doPost(e) {
+  const req = JSON.parse(e.postData.contents);
+  const sh = sheet_();
+  if (req.action == 'add') {
+    const uids = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 1).getValues().map(r => String(r[0]));
+    (req.strikes || []).forEach(s => {
+      const row = COLS.map(c => c == 'date' ? new Date(s.time) : c == 'graph' ? (s.graphdata ? JSON.stringify(s.graphdata) : '') : (s[c] === undefined ? '' : s[c]));
+      const at = uids.indexOf(String(s.uid));
+      if (at >= 0) sh.getRange(at + 2, 1, 1, COLS.length).setValues([row]);
+      else { sh.appendRow(row); uids.push(String(s.uid)); }
+    });
+    return out_({ ok: true });
+  }
+  if (req.action == 'list') {
+    const rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, COLS.length).getValues() : [];
+    return out_({ ok: true, strikes: rows.map(r => {
+      const s = {};
+      COLS.forEach((c, i) => { if (c != 'date' && r[i] !== '') s[c] = r[i]; });
+      if (s.graph) { try { s.graphdata = JSON.parse(s.graph); } catch (x) {} }
+      delete s.graph; s.uid = String(s.uid); s.done = true;
+      return s;
+    }) });
+  }
+  return out_({ ok: false, error: 'unknown action' });
+}
+
+function sheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName('Strikes') || ss.insertSheet('Strikes');
+  if (sh.getLastRow() == 0) sh.appendRow(COLS);
+  return sh;
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+`;
+
+// ---------- test data (only in a normal browser, not in the app) ----------
+function demo()
+{
+  const now = Date.now(), D = 86400000;
+  const g = () => { const k = [], t = [], zk = [], zt = []; for(let i = 0; i < 150; i++) { k.push(i > 100 ? Math.round(Math.abs(Math.sin(i * .7)) * 160) : Math.round(Math.random() * 30)); t.push(i < 100 ? Math.round(Math.sin(i * .3) * 15) : Math.round(Math.min(1, (i - 100) / 10) * 240 + Math.sin(i * .4) * 30)); }
+    for(let i = 0; i < 200; i++) { zk.push(i > 100 && i % 9 < 2 ? 180 : Math.round(Math.random() * 25)); zt.push(i < 100 ? Math.round(Math.sin(i * .05) * 12) : Math.round(Math.min(1, (i - 100) / 60) * 200)); }
+    return { pre: 100, k, t, zpre: 100, zk, zt, allow: 0.6 }; };
+  const S = (dAgo, h, type, peak, fight, country, place, lat, lon) =>
+    ({ uid: 'u' + dAgo + h, time: now - dAgo * D - (new Date().getHours() - h) * 3600000, type, peak, fight, knock: 2, knocks: 5, done: true, synced: dAgo > 3,
+       country, place, lat, lon, wave: 1, graph: true, graphdata: g() });
+  return [
+    S(1, 6, 'SLOW PULL', 4.8, 112, 'Spain', 'San Pedro del Pinatar', 37.82, -0.78),
+    S(2, 21, 'SHARP STRIKE', 3.1, 155, 'Spain', 'Torrevieja', 37.97, -0.68),
+    S(3, 5, 'DROP-BACK + PULL', 2.6, 48, 'Spain', 'San Pedro del Pinatar', 37.83, -0.77),
+    S(9, 19, 'REPEATED BITE', 1.4, 31, 'Spain', 'San Pedro del Pinatar', 37.81, -0.79),
+    S(40, 6, 'SLOW PULL', 3.9, 190, 'Morocco', 'Asilah', 35.46, -6.03),
+    S(41, 7, 'SHARP STRIKE', 2.2, 65, 'Morocco', 'Asilah', 35.47, -6.04),
+    S(70, 20, 'SLOW PULL', 2.0, 75, 'United Kingdom', 'Brighton', 50.82, -0.14)
+  ];
+}
+
+drawList();
+</script>
+</body></html>

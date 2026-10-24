@@ -222,7 +222,7 @@ public:
   }
 
 private:
-  static const int MAX_ROUTES = 24;
+  static const int MAX_ROUTES = 32;
   static const int MAX_ARGS = 6;
   static const int REQ_QUEUE = 8;
   static const int REQ_MAX = 200;
@@ -1930,6 +1930,11 @@ void updateConditions(bool immediate)
 // STRIKE REPLAY RECORDING
 // =====================================================
 
+void fightOnStrike();
+void updateFight();
+bool watchConnected();
+int loraWatchBars();
+
 void startStrikeRecording()
 {
   savedCount = 0;
@@ -2139,6 +2144,7 @@ void startStrike(String type)
 
   startStrikeRecording();
   startWatchRecording();
+  fightOnStrike();
 
   Serial.println();
   Serial.print(">>> STRIKE: ");
@@ -3195,6 +3201,7 @@ void processSample()
 
   updateRecording();
   updateWatchRecording();
+  updateFight();
 }
 
 // =====================================================
@@ -4407,6 +4414,112 @@ body.strikeFlash {
 
 /* MOBILE */
 
+/* WATCH LINK, MY STRIKES, PHONE + WATCH / WATCH ONLY (phone app) */
+
+#watchInfo {
+  display:none;
+  align-items:center;
+  gap:6px;
+  margin-top:3px;
+  padding:3px 8px;
+  border-radius:10px;
+  background:#0d1a30;
+  border:1px solid #1b2c4c;
+  color:#dbe9ff;
+  font-size:12px;
+  font-weight:700;
+}
+
+#watchInfo.show {
+  display:inline-flex;
+}
+
+#watchVia {
+  font-weight:800;
+}
+
+.appOnly {
+  display:none !important;
+}
+
+body.inApp .appOnly {
+  display:inline-block !important;
+}
+
+body.inApp #whoBox.appOnly {
+  display:block !important;
+}
+
+#whoBox {
+  margin:6px 0 2px auto;
+  max-width:330px;
+}
+
+.whoSeg {
+  display:flex;
+  background:#0b1428;
+  border:1px solid #24324f;
+  border-radius:11px;
+  padding:3px;
+}
+
+.whoSeg button {
+  flex:1;
+  border:0;
+  background:none;
+  color:#8ea6c8;
+  border-radius:8px;
+  padding:7px 4px;
+  font-size:12px;
+  font-weight:800;
+  cursor:pointer;
+}
+
+.whoSeg button.on {
+  background:linear-gradient(90deg,#1e7bff,#22d3ff);
+  color:#04121a;
+}
+
+.whoNote {
+  margin-top:4px;
+  color:#a9bbd6;
+  font-size:10.5px;
+  line-height:1.35;
+}
+
+.woBanner {
+  display:none;
+  margin:6px 0 2px auto;
+  max-width:330px;
+  padding:8px 10px;
+  border-radius:11px;
+  background:#3a2a08;
+  border:1px solid #ffba52;
+  color:#ffd38a;
+  font-size:11.5px;
+  font-weight:700;
+  text-align:left;
+  line-height:1.35;
+}
+
+body.watchOnly .woBanner {
+  display:block;
+}
+
+body.watchOnly .layout {
+  opacity:.35;
+  pointer-events:none;
+}
+
+@media(max-width:600px) {
+
+  #whoBox,
+  .woBanner {
+    margin-left:auto;
+    margin-right:auto;
+  }
+}
+
 @media(max-width:850px) {
 
   .layout {
@@ -4551,6 +4664,34 @@ function setLink(ready, rssi)
   document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm' : '';
 }
 </script>
+<br>
+<span id="watchInfo"><span>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
+<script>
+// How the watch is connected to the rod (rod 2.3+: "wlink" in /data)
+function showWatch(d)
+{
+  var box = document.getElementById('watchInfo');
+
+  if(d.wlink === undefined)
+  {
+    box.className = '';
+    return;
+  }
+
+  var lora = d.wlink == 'lora', bt = d.wlink == 'bt';
+  var c = bt ? '#22d3ff' : lora ? '#ffba52' : '#ff4d5e';
+  var b = document.querySelectorAll('#wBars i');
+
+  for(var i = 0; i < b.length; i++)
+    b[i].style.background = i < d.wbars ? c : '';
+
+  var via = document.getElementById('watchVia');
+  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa' : 'not connected';
+  via.style.color = c;
+  document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
+  box.className = 'show';
+}
+</script>
 
 <div class="audioState">
 AUDIO: <span id="audioStatus">OFF</span>
@@ -4558,7 +4699,67 @@ AUDIO: <span id="audioStatus">OFF</span>
 
 <div class="soundControls">
 <button class="soundButton" onclick="openSettings()">&#9881; SETTINGS</button>
+<button class="soundButton appOnly" onclick="openStrikes()">&#128205; MY STRIKES</button>
 </div>
+
+<div class="woBanner" id="woBanner">&#128245; Phone off the rod: <u>WATCH ONLY</u>. No alarms on the phone. It checks every 2 min that the watch is still there.<br><span id="woInfo"></span></div>
+
+<div class="appOnly" id="whoBox">
+<div class="whoSeg">
+<button id="whoBoth" class="on" onclick="setWho(false)">Phone + watch</button>
+<button id="whoWatch" onclick="setWho(true)">Watch only</button>
+</div>
+<div class="whoNote">Watch only saves phone battery and a little rod battery. Live data and strike alarms are just as fast in both modes.</div>
+</div>
+<script>
+if(window.StrikeApp)
+  document.body.classList.add('inApp');
+
+var watchOnly = false;
+
+function openStrikes()
+{
+  if(window.StrikeApp && StrikeApp.openStrikes)
+    StrikeApp.openStrikes();
+}
+
+function setWho(only)
+{
+  if(only == watchOnly || !window.StrikeApp || !StrikeApp.setWatchOnly)
+    return;
+
+  if(only && !confirm('Watch only: the phone leaves the rod and gives NO alarms.\nThe watch alerts you. The phone checks every 2 min that the watch is still there.\n\nOK?'))
+    return;
+
+  StrikeApp.setWatchOnly(only);
+  setWatchOnlyView(only, '');
+}
+
+// Called by the phone app every second
+function setWatchOnlyView(only, info)
+{
+  watchOnly = only;
+  document.body.classList.toggle('watchOnly', only);
+  document.getElementById('whoBoth').className = only ? '' : 'on';
+  document.getElementById('whoWatch').className = only ? 'on' : '';
+  document.getElementById('woInfo').textContent = info || '';
+
+  if(only)
+  {
+    el('mainStatus').innerText = 'WATCH ONLY';
+    el('connState').innerHTML = '&#9679; PHONE OFF THE ROD';
+    el('connState').className = '';
+    document.getElementById('linkInfo').style.display = 'none';
+    document.getElementById('watchInfo').style.display = 'none';     // the banner says the last check
+    stopContinuousAlarm();
+  }
+  else
+  {
+    document.getElementById('linkInfo').style.display = '';
+    document.getElementById('watchInfo').style.display = '';
+  }
+}
+</script>
 
 <div class="uptime">
 <span class="timeChip" id="batChip" title="Battery"><i class="batIcon"><i id="batFill"></i></i><b id="batText">&ndash;</b></span>
@@ -7696,6 +7897,7 @@ function hours(sec)
 function showTimes(d)
 {
   el("upTime").innerText = clock(d.up);
+  showWatch(d);
 
   if(d.bat >= 0)
   {
@@ -8013,6 +8215,12 @@ async function updateData()
 // Ask again only after the previous answer arrived
 async function pollLoop()
 {
+  if(watchOnly)
+  {
+    setTimeout(pollLoop, 500);
+    return;
+  }
+
   await updateData();
   setTimeout(pollLoop, 100);
 }
@@ -8601,8 +8809,171 @@ String watchJson()
   return json;
 }
 
+// ---------- The watch's link, for the phone ----------
+
+unsigned long watchBtAt = 0;            // last "/wping" or "/watch" from the watch over Bluetooth
+int watchBtRssi = 0;                    // how strong the watch hears the rod (dBm, 0 = unknown)
+
+int rssiBars(int rssi)
+{
+  if(rssi == 0) return 0;
+  if(rssi >= -60) return 4;
+  if(rssi >= -70) return 3;
+  if(rssi >= -80) return 2;
+
+  return 1;
+}
+
+// "wlink": bt / lora / none. Bluetooth wins when both work (the watch uses it).
+void addWatchLink(String& json)
+{
+  bool bt = watchBtAt != 0 && millis() - watchBtAt < 6000;      // it pings every 2 s
+  bool lora = false;
+  int loraBarsNow = 0;
+
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  lora = watchConnected();
+  loraBarsNow = lora ? loraWatchBars() : 0;
+#endif
+
+  json += ",\"wlink\":\"";
+  json += bt ? "bt" : lora ? "lora" : "none";
+  json += "\"";
+
+  addField(json, "wbars", (long)(bt ? rssiBars(watchBtRssi) : loraBarsNow));
+  addField(json, "wlora", lora);
+}
+
+// ---------- The last strikes, for the phone ----------
+//
+// A fight lasts from the strike until the rod is quiet (tilt back inside the
+// pull allowance, no knock) for 10 s, at most 10 minutes or until reeled in.
+
+const int SLIST_N = 10;
+const unsigned long FIGHT_QUIET_MS = 10000;
+const unsigned long FIGHT_MAX_MS = 600000;
+
+struct StrikeSummary
+{
+  unsigned long id;
+  char type[20];
+  unsigned long startMs;
+  unsigned long lastActiveMs;
+  float peakTilt;                       // strongest pull, degrees
+  float peakKnock;                      // biggest knock, x the knock limit
+  int knocks;
+  bool done;
+};
+
+StrikeSummary slist[SLIST_N];
+int slistCount = 0;                     // newest is slist[slistCount - 1]
+bool fightWasKnock = false;
+
+void fightOnStrike()
+{
+  if(slistCount > 0 && !slist[slistCount - 1].done)
+    slist[slistCount - 1].done = true;      // a new strike ends the old fight
+
+  if(slistCount == SLIST_N)
+  {
+    for(int i = 1; i < SLIST_N; i++)
+      slist[i - 1] = slist[i];
+
+    slistCount--;
+  }
+
+  StrikeSummary& s = slist[slistCount++];
+  memset(&s, 0, sizeof(s));
+  s.id = strikeEventID;
+  strncpy(s.type, strikeType.c_str(), sizeof(s.type) - 1);
+  s.startMs = millis();
+  s.lastActiveMs = s.startMs;
+  s.peakTilt = fabs(tiltDeg);
+}
+
+// Every reading
+void updateFight()
+{
+  if(slistCount == 0)
+    return;
+
+  StrikeSummary& s = slist[slistCount - 1];
+
+  if(s.done)
+    return;
+
+  unsigned long now = millis();
+  float thr = knockThreshold > 0 ? knockThreshold : 1;
+  bool knock = knockEnergy > thr;
+  bool pulled = fabs(tiltDeg) > pullAllow;
+
+  if(knock && !fightWasKnock)
+    s.knocks++;
+
+  fightWasKnock = knock;
+
+  if(knock || pulled)                 // an alarm nobody answered is not a fight
+    s.lastActiveMs = now;
+
+  if(fabs(tiltDeg) > s.peakTilt)
+    s.peakTilt = fabs(tiltDeg);
+
+  if(knockEnergy / thr > s.peakKnock)
+    s.peakKnock = knockEnergy / thr;
+
+  if(now - s.lastActiveMs > FIGHT_QUIET_MS || now - s.startMs > FIGHT_MAX_MS || rodState == ST_PAUSED)
+    s.done = true;
+}
+
+// The watch: "I'm here over Bluetooth, hearing you this strong" (every 2 s)
+void handleWatchPing()
+{
+  watchBtAt = millis();
+  watchBtRssi = server.arg("r").toInt();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleStrikes()
+{
+  String json;
+  json.reserve(120 + SLIST_N * 120);
+
+  json += "{\"time\":";
+  json += String((unsigned long)nowEpoch());
+  json += ",\"list\":[";
+
+  unsigned long now = millis();
+
+  for(int i = 0; i < slistCount; i++)
+  {
+    StrikeSummary& s = slist[i];
+    unsigned long end = s.done ? s.lastActiveMs : now;
+
+    if(i > 0) json += ",";
+
+    json += "{\"id\":";
+    json += String(s.id);
+    json += ",\"type\":\"";
+    json += s.type;
+    json += "\"";
+    addField(json, "ago", (long)((now - s.startMs) / 1000));
+    addField(json, "fight", (long)((end - s.startMs) / 1000));
+    addField(json, "peak", s.peakTilt, 2);
+    addField(json, "knock", s.peakKnock, 2);
+    addField(json, "knocks", (long)s.knocks);
+    addField(json, "done", s.done);
+    json += "}";
+  }
+
+  json += "]}";
+
+  server.send(200, "application/json", json);
+}
+
 void handleWatch()
 {
+  watchBtAt = millis();
+  watchBtRssi = server.arg("r").toInt();
   server.send(200, "application/json", watchJson());
 }
 
@@ -8777,6 +9148,8 @@ void handleData()
   addField(json, "bat", (long)batPercent);
   addField(json, "batv", batVolts, 2);
 
+  addWatchLink(json);
+
   addVibrationSamples(json);
 
   json += "}";
@@ -8883,6 +9256,8 @@ void setup()
   server.on("/skippull", handleSkipPull);
   server.on("/sea", handleSea);
   server.on("/strike", handleStrike);
+  server.on("/strikes", handleStrikes);
+  server.on("/wping", handleWatchPing);
   server.on("/settings", handleSettings);
   server.on("/set", handleSet);
   server.on("/savesettings", handleSaveSettings);

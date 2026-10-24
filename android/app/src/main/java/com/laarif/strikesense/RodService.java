@@ -29,6 +29,16 @@ public class RodService extends Service
     static final String ACTION_WATCHING = "com.laarif.strikesense.WATCHING";
     static final String ACTION_SILENCE = "com.laarif.strikesense.SILENCE";
     static final String ACTION_APP_VISIBLE = "com.laarif.strikesense.APP_VISIBLE";
+    static final String ACTION_WATCH_ONLY = "com.laarif.strikesense.WATCH_ONLY";
+    static final String EXTRA_ON = "on";
+
+    // Watch only: the phone leaves the rod; every 2 min it connects for a
+    // moment to check the watch is still there (and to collect strikes)
+    private static final long CHECK_EVERY_MS = 120000;
+    private static final long CHECK_GIVE_UP_MS = 30000;      // rod not found: try again later
+    private static final long RECHECK_MS = 10000;            // watch missing: look once more before alarming
+
+    static volatile String watchOnlyInfo = "";
 
     private static final String CH_WATCH = "watch";
     private static final String CH_STRIKE = "strike";
@@ -58,6 +68,20 @@ public class RodService extends Service
     private long lostSince = 0;
     private long lastStrikeId = Long.MIN_VALUE;
     private String lastStatus = "";
+
+    private boolean watchOnly = false;
+    private boolean checking = false;
+    private long checkStartedAt = 0;
+    private long nextCheckAt = 0;
+    private long missingSince = 0;
+
+    private JSONObject lastData;            // waves / wind for the strikes saved
+    private long lastStrikesAt = 0;
+    private long lastGraphTry = 0;
+    private long seenStrikeId = Long.MIN_VALUE;
+    private boolean strikesDirty = true;
+    private HandlerThread cloudThread;
+    private Handler cloud;
 
     @Override
     public void onCreate()
@@ -104,7 +128,22 @@ public class RodService extends Service
             }
         });
 
-        link.start();
+        cloudThread = new HandlerThread("cloud");
+        cloudThread.start();
+        cloud = new Handler(cloudThread.getLooper());
+        cloud.post(cloudSync);
+
+        watchOnly = isWatchOnly(this);
+
+        if(watchOnly)
+        {
+            nextCheckAt = System.currentTimeMillis() + 3000;      // check soon after a restart
+            watchOnlyInfo = "checking soon";
+        }
+        else
+        {
+            link.start();
+        }
 
         running = true;
         worker.post(poll);
@@ -136,6 +175,19 @@ public class RodService extends Service
         else if(ACTION_SILENCE.equals(action) || ACTION_APP_VISIBLE.equals(action))
         {
             silence();
+        }
+        else if(ACTION_WATCH_ONLY.equals(action))
+        {
+            final boolean on = intent.getBooleanExtra(EXTRA_ON, false);
+
+            worker.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    setWatchOnly(on);
+                }
+            });
         }
 
         return START_STICKY;
@@ -169,6 +221,12 @@ public class RodService extends Service
         RodLink link = RodLink.get(this);
         long now = System.currentTimeMillis();
 
+        if(watchOnly)
+        {
+            checkWatchOnly(link, now);
+            return;
+        }
+
         if(link.ready())
         {
             lostSince = 0;
@@ -176,11 +234,14 @@ public class RodService extends Service
             if(now - link.lastDataAt() > 1500)
                 link.request("/data", 3000);       // the answer arrives in handle()
 
+            collectStrikes(link, now);
             return;
         }
 
         if(lostSince == 0)
             lostSince = now;
+
+        StrikeStore.get(this).refreshFix();
 
         if(everConnected && now - lostSince > LOST_MS && !lostNotified)
         {
@@ -207,6 +268,18 @@ public class RodService extends Service
 
         boolean strike = d.optBoolean("strike", false);
         long strikeId = d.optLong("strikeid", -1);
+
+        if(d.has("wave"))
+            lastData = d;
+
+        if(strikeId != seenStrikeId)
+        {
+            seenStrikeId = strikeId;
+            strikesDirty = true;                 // a new strike: get it into MY STRIKES soon
+        }
+
+        if(watchOnly)
+            return;                              // the watch alerts; the phone only checks
 
         if(strike && strikeId != lastStrikeId)
         {
@@ -247,6 +320,205 @@ public class RodService extends Service
         if(s.equals("paused")) return "Reeled in – press READY after casting";
 
         return "Connected";
+    }
+
+    // ---------- MY STRIKES: from the rod to the phone (and the Google Sheet) ----------
+
+    private void collectStrikes(RodLink link, long now)
+    {
+        StrikeStore store = StrikeStore.get(this);
+        long every = strikesDirty || store.fightOpen() ? 3000 : 20000;
+
+        if(now - lastStrikesAt >= every)
+        {
+            lastStrikesAt = now;
+            RodLink.Response r = link.request("/strikes", 3000);
+
+            if(r != null && r.code == 200)
+            {
+                strikesDirty = false;
+
+                try
+                {
+                    store.fromRod(new JSONObject(new String(r.body, "UTF-8")), System.currentTimeMillis(), lastData);
+                }
+                catch(Exception e)
+                {
+                }
+            }
+        }
+
+        // the graph of a finished fight (the rod keeps only its last strike)
+        JSONObject s = store.needsGraph();
+
+        if(s != null && now - lastGraphTry > 5000)
+        {
+            lastGraphTry = now;
+            RodLink.Response r = link.request("/laststrike", 8000);
+
+            try
+            {
+                JSONObject g = r != null && r.code == 200 ? new JSONObject(new String(r.body, "UTF-8")) : null;
+
+                if(g != null && g.optBoolean("have") && !g.optBoolean("recording"))
+                {
+                    long count = g.optLong("count");
+                    long id = s.optLong("rodid");
+
+                    if(count == id)
+                        store.setGraph(s.optString("uid"), g);
+                    else if(count > id)
+                        store.noGraph(s.optString("uid"));
+                }
+            }
+            catch(Exception e)
+            {
+            }
+        }
+    }
+
+    // Names places and sends new strikes to the Google Sheet (network: own thread)
+    private final Runnable cloudSync = new Runnable()
+    {
+        @Override
+        public void run()
+        {
+            if(!running && cloudThread == null)
+                return;
+
+            try
+            {
+                StrikeStore.get(RodService.this).syncNow(false);
+            }
+            catch(Exception e)
+            {
+            }
+
+            cloud.postDelayed(this, 30000);
+        }
+    };
+
+    // ---------- Watch only ----------
+
+    static boolean isWatchOnly(android.content.Context c)
+    {
+        return c.getSharedPreferences("app", MODE_PRIVATE).getBoolean("watchOnly", false);
+    }
+
+    private void setWatchOnly(boolean on)
+    {
+        if(on == watchOnly)
+            return;
+
+        watchOnly = on;
+        getSharedPreferences("app", MODE_PRIVATE).edit().putBoolean("watchOnly", on).apply();
+
+        RodLink link = RodLink.get(this);
+        checking = false;
+        missingSince = 0;
+
+        if(on)
+        {
+            stopAlarm(true);
+            link.stop();
+            nextCheckAt = System.currentTimeMillis() + CHECK_EVERY_MS;
+            watchOnlyInfo = "next check in 2 min";
+            status("Watch only – the watch alerts you");
+        }
+        else
+        {
+            watchOnlyInfo = "";
+            lostSince = 0;
+            link.start();
+            lastStatus = "";
+            status("Looking for the rod (Bluetooth)…");
+        }
+    }
+
+    private void checkWatchOnly(RodLink link, long now)
+    {
+        if(!checking)
+        {
+            if(now < nextCheckAt)
+                return;
+
+            checking = true;
+            checkStartedAt = now;
+            link.start();
+            return;
+        }
+
+        if(!link.ready())
+        {
+            if(now - checkStartedAt > CHECK_GIVE_UP_MS)
+            {
+                // phone too far from the rod for Bluetooth: nothing to check, try later
+                endCheck(link, now, "rod not reached at " + hhmm(now) + " (too far for Bluetooth)");
+            }
+
+            return;
+        }
+
+        RodLink.Response r = link.request("/data", 3000);
+
+        if(r == null || r.code != 200)
+            return;
+
+        JSONObject d;
+
+        try
+        {
+            d = new JSONObject(new String(r.body, "UTF-8"));
+        }
+        catch(Exception e)
+        {
+            return;
+        }
+
+        lastData = d;
+        collectStrikes(link, now);
+
+        String w = d.optString("wlink", "");
+
+        if(w.equals("bt") || w.equals("lora") || w.isEmpty())   // empty: older rod, can't tell
+        {
+            missingSince = 0;
+            endCheck(link, now, "checked " + hhmm(now) + ": watch on " + (w.equals("bt") ? "Bluetooth" : w.equals("lora") ? "LoRa" : "the rod"));
+            return;
+        }
+
+        // watch not there: look once more, then the phone takes over
+        if(missingSince == 0)
+        {
+            missingSince = now;
+            return;
+        }
+
+        if(now - missingSince < RECHECK_MS)
+            return;
+
+        checking = false;
+        setWatchOnly(false);
+        info("Watch lost – phone back on the rod",
+             "The rod can't hear the watch (battery empty or switched off?). The phone is watching the rod again and gives the alarms.", true);
+
+        if(!MainActivity.visible)
+            buzz(new long[] { 0, 500, 250, 500, 250, 500 }, -1);
+    }
+
+    private void endCheck(RodLink link, long now, String what)
+    {
+        checking = false;
+        missingSince = 0;
+        nextCheckAt = now + CHECK_EVERY_MS;
+        watchOnlyInfo = what;
+        link.stop();
+        status("Watch only – " + what);
+    }
+
+    private static String hhmm(long t)
+    {
+        return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(new java.util.Date(t));
     }
 
     // ---------- alarm ----------
@@ -446,9 +718,25 @@ public class RodService extends Service
         try
         {
             if(Build.VERSION.SDK_INT >= 29)
-                startForeground(ID_WATCH, watchNotification(text), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            {
+                // with the location type the strike places also work with the screen off
+                boolean gps = checkSelfPermission("android.permission.ACCESS_FINE_LOCATION") == android.content.pm.PackageManager.PERMISSION_GRANTED
+                           || checkSelfPermission("android.permission.ACCESS_COARSE_LOCATION") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+
+                try
+                {
+                    startForeground(ID_WATCH, watchNotification(text), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                                    | (gps ? ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION : 0));
+                }
+                catch(Exception e)
+                {
+                    startForeground(ID_WATCH, watchNotification(text), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+                }
+            }
             else
+            {
                 startForeground(ID_WATCH, watchNotification(text));
+            }
         }
         catch(Exception e)
         {
@@ -518,6 +806,12 @@ public class RodService extends Service
 
         if(thread != null)
             thread.quitSafely();
+
+        if(cloud != null)
+            cloud.removeCallbacksAndMessages(null);
+
+        if(cloudThread != null)
+            cloudThread.quitSafely();
 
         if(wakeLock != null && wakeLock.isHeld())
             wakeLock.release();

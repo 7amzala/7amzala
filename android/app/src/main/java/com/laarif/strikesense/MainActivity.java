@@ -15,6 +15,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -24,6 +25,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -48,6 +50,7 @@ public class MainActivity extends Activity
     static volatile boolean visible = false;
 
     private WebView web;
+    private WebView strikes;                 // MY STRIKES, on top of the dashboard (which keeps running)
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean onDashboard = false;
     private boolean askedBluetoothOn = false;
@@ -65,7 +68,11 @@ public class MainActivity extends Activity
 
         web = new WebView(this);
         web.setBackgroundColor(Color.rgb(3, 8, 20));
-        setContentView(web);
+
+        FrameLayout root = new FrameLayout(this);
+        root.addView(web);
+        setContentView(root);
+        makeStrikesView(root);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -105,11 +112,21 @@ public class MainActivity extends Activity
         if(Build.VERSION.SDK_INT >= 33)
             need.add("android.permission.POST_NOTIFICATIONS");
 
+        // where each strike was (MY STRIKES): asked once, works without it too
+        SharedPreferences prefs = getSharedPreferences("app", MODE_PRIVATE);
+
+        if(Build.VERSION.SDK_INT >= 31 && !prefs.getBoolean("askedGps", false))
+        {
+            prefs.edit().putBoolean("askedGps", true).apply();
+            need.add("android.permission.ACCESS_FINE_LOCATION");
+            need.add("android.permission.ACCESS_COARSE_LOCATION");
+        }
+
         List<String> missing = new ArrayList<>();
 
         for(String p : need)
         {
-            if(checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED)
+            if(checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED && !missing.contains(p))
                 missing.add(p);
         }
 
@@ -211,10 +228,11 @@ public class MainActivity extends Activity
         public void run()
         {
             RodLink link = RodLink.get(MainActivity.this);
+            boolean watchOnly = RodService.isWatchOnly(MainActivity.this);
 
             if(!onDashboard)
             {
-                if(link.ready())
+                if(link.ready() || watchOnly)     // Watch only: the dashboard, so the phone can come back
                 {
                     onDashboard = true;
                     web.loadUrl(DASHBOARD_URL);
@@ -228,7 +246,8 @@ public class MainActivity extends Activity
             {
                 // coloured signal bars (dashboard 2.3+); older page: the text
                 js("if(window.setLink) setLink(" + link.ready() + "," + link.rssi() + ");"
-                   + " else { var e=document.getElementById('linkInfo'); if(e) e.textContent=" + quote(linkText(link)) + "; }");
+                   + " else { var e=document.getElementById('linkInfo'); if(e) e.textContent=" + quote(linkText(link)) + "; }"
+                   + " if(window.setWatchOnlyView) setWatchOnlyView(" + watchOnly + "," + quote(RodService.watchOnlyInfo) + ");");
             }
 
             handler.postDelayed(this, 1000);
@@ -293,6 +312,12 @@ public class MainActivity extends Activity
                 // the alarm sounds (screaming reel, reel clicks, rod bell, falling tone)
                 if(path.matches("/sounds/[a-z_]+\\.ogg"))
                     return asset(path.substring(1), "audio/ogg");
+
+                // MY STRIKES pages (and the map library), in the app
+                if(path.matches("/app/[a-z_]+\\.(html|js|css|png)"))
+                    return asset(path.substring(1), path.endsWith(".html") ? "text/html"
+                                 : path.endsWith(".js") ? "application/javascript"
+                                 : path.endsWith(".css") ? "text/css" : "image/png");
 
                 if(path.equals("/favicon.ico"))
                     return answer(404, "text/plain", new byte[0]);
@@ -393,7 +418,135 @@ public class MainActivity extends Activity
     @Override
     public void onBackPressed()
     {
+        if(strikes.getVisibility() == View.VISIBLE)
+        {
+            // the page goes back a step (strike -> list); on the list: close
+            strikes.evaluateJavascript("window.appBack ? appBack() : false", new android.webkit.ValueCallback<String>()
+            {
+                @Override
+                public void onReceiveValue(String r)
+                {
+                    if(!"true".equals(r))
+                        closeStrikes();
+                }
+            });
+            return;
+        }
+
         moveTaskToBack(true);      // keep watching in the background
+    }
+
+    // ---------- MY STRIKES ----------
+
+    @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
+    private void makeStrikesView(FrameLayout root)
+    {
+        strikes = new WebView(this);
+        strikes.setBackgroundColor(Color.rgb(3, 8, 20));
+        strikes.setVisibility(View.GONE);
+
+        WebSettings s = strikes.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setTextZoom(100);
+
+        strikes.addJavascriptInterface(new StrikesBridge(), "StrikeStore");
+        strikes.setWebChromeClient(new WebChromeClient());
+        strikes.setWebViewClient(new Client());
+        root.addView(strikes);
+    }
+
+    private void openStrikes()
+    {
+        strikes.setVisibility(View.VISIBLE);
+        strikes.loadUrl(DASHBOARD_URL + "app/strikes.html");
+    }
+
+    private void closeStrikes()
+    {
+        strikes.setVisibility(View.GONE);
+        strikes.loadUrl("about:blank");
+    }
+
+    // Called from the MY STRIKES page
+    private class StrikesBridge
+    {
+        @JavascriptInterface
+        public String list()
+        {
+            return StrikeStore.get(MainActivity.this).listJson();
+        }
+
+        @JavascriptInterface
+        public String strike(String uid)
+        {
+            return StrikeStore.get(MainActivity.this).strikeJson(uid);
+        }
+
+        @JavascriptInterface
+        public void delete(String uid)
+        {
+            StrikeStore.get(MainActivity.this).delete(uid);
+        }
+
+        @JavascriptInterface
+        public String cloudNote()
+        {
+            return StrikeStore.get(MainActivity.this).cloudNote();
+        }
+
+        @JavascriptInterface
+        public String cloudUrl()
+        {
+            return StrikeStore.get(MainActivity.this).cloudUrl();
+        }
+
+        @JavascriptInterface
+        public void setCloudUrl(String url)
+        {
+            StrikeStore.get(MainActivity.this).setCloudUrl(url);
+        }
+
+        // send now / get everything back from the sheet: the page is told when done
+        @JavascriptInterface
+        public void sync(final boolean restore)
+        {
+            new Thread(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    StrikeStore st = StrikeStore.get(MainActivity.this);
+                    int got = restore ? st.restore() : 0;
+                    st.syncNow(true);
+                    final String note = restore
+                        ? (got >= 0 ? got + " strikes loaded from the sheet" : got == -1 ? "Google Sheet not set up" : "could not reach the sheet")
+                        : st.cloudNote();
+
+                    handler.post(new Runnable()
+                    {
+                        @Override
+                        public void run()
+                        {
+                            strikes.evaluateJavascript("window.synced && synced(" + quote(note) + ")", null);
+                        }
+                    });
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void close()
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    closeStrikes();
+                }
+            });
+        }
     }
 
     @Override
@@ -401,6 +554,7 @@ public class MainActivity extends Activity
     {
         handler.removeCallbacksAndMessages(null);
         web.destroy();
+        strikes.destroy();
         super.onDestroy();
     }
 
@@ -463,6 +617,36 @@ public class MainActivity extends Activity
                 return;
 
             getSharedPreferences("sounds", MODE_PRIVATE).edit().putString(cat, name).apply();
+        }
+
+        @JavascriptInterface
+        public void openStrikes()
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    MainActivity.this.openStrikes();
+                }
+            });
+        }
+
+        // Phone + watch (false) / Watch only (true)
+        @JavascriptInterface
+        public void setWatchOnly(boolean on)
+        {
+            Intent i = new Intent(MainActivity.this, RodService.class)
+                .setAction(RodService.ACTION_WATCH_ONLY)
+                .putExtra(RodService.EXTRA_ON, on);
+
+            try
+            {
+                startService(i);
+            }
+            catch(Exception e)
+            {
+            }
         }
 
         @JavascriptInterface

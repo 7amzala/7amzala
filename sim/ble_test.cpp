@@ -289,6 +289,50 @@ int main()
     BLECharacteristic::slowLink() = 0;
   }
 
+  // ---- for the phone app: how the watch is connected, the last strikes ----
+  printf("\n=== WATCH LINK + STRIKE LIST (phone app) ===\n");
+  {
+    const size_t NO = std::string::npos;
+    Answer b;
+    step(7);
+    ask(700001, "/data", b);
+    check(b.body.find("\"wlink\":\"none\"") != NO, "watch not pinging: phone shows 'watch not connected'");
+    check(ask(500030, "/wping?r=-66", b) && b.body == "OK", "watch ping (every 2 s) answered");
+    ask(700002, "/data", b);
+    check(b.body.find("\"wlink\":\"bt\"") != NO && b.body.find("\"wbars\":3") != NO, "watch on Bluetooth at -66 dBm: phone shows 'Watch Bluetooth', 3 bars");
+    step(7);
+    ask(700003, "/data", b);
+    check(b.body.find("\"wlink\":\"none\"") != NO, "watch gone (no ping for 6 s): 'not connected'");
+
+    ask(700004, "/strikes", b);
+    printf("        /strikes = %s\n", b.body.c_str());
+    check(b.body.find("\"type\":\"SLOW PULL\"") != NO && b.body.find("\"done\":true") != NO, "/strikes: the earlier strike, fight finished");
+
+    // a fish: pull 3 degrees for 6 s
+    strikeActive = false;
+    rodState = ST_MONITORING;
+    events.push_back({ (float)(simMillis / 1000.0), 1, 3.0, 0.5, 6 });
+    startStrike("SHARP STRIKE");
+    step(3);
+    ask(700005, "/strikes", b);
+    check(b.body.rfind("\"done\":false") != NO && b.body.find("SHARP STRIKE") != NO, "fight still going: done false");
+    cmdWatching();
+    step(25);
+    events.clear();
+    ask(700006, "/strikes", b);
+    size_t at = b.body.find("SHARP STRIKE");
+    long fight = at != NO ? atol(b.body.c_str() + b.body.find("\"fight\":", at) + 8) : -1;
+    float peak = at != NO ? atof(b.body.c_str() + b.body.find("\"peak\":", at) + 7) : 0;
+    printf("        fight %ld s, strongest pull %.2f deg\n", fight, peak);
+    check(b.body.find("\"done\":true", at) != NO && fight >= 4 && fight <= 12, "fight time = while the fish pulled (about 6 s)");
+    check(peak >= 2.0, "strongest pull recorded");
+
+    for (int i = 0; i < 12; i++) { strikeActive = false; startStrike("SLOW PULL"); step(0.2); }
+    ask(700007, "/strikes", b);
+    int n = 0; for (size_t p = b.body.find("\"id\":"); p != NO; p = b.body.find("\"id\":", p + 1)) n++;
+    check(n == 10 && b.body.size() < 1500, "/strikes keeps the last 10 (small answer)");
+  }
+
   // ---- 5 named setups (presets), kept on the rod ----
   {
     Answer b;

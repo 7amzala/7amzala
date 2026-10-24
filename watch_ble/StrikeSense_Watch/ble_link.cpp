@@ -63,6 +63,7 @@ static volatile bool wantLast = false;
 static ble_last_strike_t lastStrike;   // guarded by mux
 
 static uint32_t lastLiveMs = 0;
+static uint32_t lastPingMs = 0;         // "/wping": tells the rod (and the phone) the watch is here
 
 // Bluetooth link speed: slower while the rod is calm and the signal strong
 static bool linkFast = true;
@@ -754,6 +755,16 @@ void ble_link_poll(void)
     askedAt = now;
     lastAsk = now;
     send(askId, "/watch");
+  }
+
+  // every 2 s: "the watch is here over Bluetooth, hearing you this strong"
+  // (the phone app shows it; the answer is not needed)
+  if(now - lastPingMs >= 2000)
+  {
+    lastPingMs = now;
+    char path[24];
+    snprintf(path, sizeof(path), "/wping?r=%d", rssi);
+    send(newId(), path);
   }
 
   // LAST STRIKE page asked for the rod's last strike
