@@ -35,10 +35,9 @@ read from an AXP2101 chip if there is one, else GPIO 4 (Serial: `[BAT] ...`).
    belong together: the screen and touch drivers are the same as the
    Waveshare demo).
 2. Library: **lvgl 8.3.x** (Library Manager), as for the Waveshare demo.
-3. `lv_conf.h`: use the one here (copy it next to the `lvgl` folder in your
-   Arduino `libraries` folder), or in yours switch on the bigger fonts:
-   `LV_FONT_MONTSERRAT_28`, `_36`, `_48` (16 and 20 too). Without them the
-   watch still works, with smaller titles.
+3. LVGL settings: nothing to copy. `build_opt.h` in the sketch folder gives
+   LVGL its settings (64 KB memory, fonts) and any `lv_conf.h` in your
+   libraries folder is ignored. Keep `build_opt.h` next to the .ino.
 4. Tools: Board **ESP32S3 Dev Module**, Flash Size **16MB**, Partition Scheme
    **Huge APP (3MB No OTA/1MB SPIFFS)**, PSRAM **OPI PSRAM**,
    USB CDC On Boot **Enabled**.
@@ -84,9 +83,8 @@ The phone app pairs the same way (its own pairing page). In the app:
 Settings > MY ROD > **Forget my devices** makes the rod forget the phone and
 the watch (new phone, lost watch); then pair again with the PIN.
 
-**lv_conf.h:** copy the new one (LVGL memory 64 KB) next to the `lvgl`
-folder in your Arduino libraries, or the watch sketch stops with a message
-telling you to.
+**LVGL settings:** come from `build_opt.h` in the sketch folder (64 KB
+memory); no `lv_conf.h` to copy.
 
 ## LoRa backup (optional): far from the rods
 

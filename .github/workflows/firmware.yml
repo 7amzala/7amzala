@@ -44,7 +44,10 @@ jobs:
           arduino-cli core install esp32:esp32
           arduino-cli lib update-index
           arduino-cli lib install "SparkFun LIS3DH Arduino Library" RadioLib "lvgl@8.3.11"
-          cp watch_ble/lv_conf.h ~/Arduino/libraries/lv_conf.h
+          # An old-style lv_conf.h (48 KB, no big fonts) like on a tester's PC:
+          # the watch must still build, because its build_opt.h overrides it.
+          sed -e 's/(64U \* 1024U)/(48U * 1024U)/' -e 's/MONTSERRAT_\(28\|36\|48\) 1/MONTSERRAT_\1 0/' watch_ble/lv_conf.h > ~/Arduino/libraries/lv_conf.h
+          grep -n "LV_MEM_SIZE (\|MONTSERRAT_\(28\|36\|48\) " ~/Arduino/libraries/lv_conf.h
           arduino-cli core list
 
       - name: Compile StrikeSense_NoLoRa

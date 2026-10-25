@@ -50,10 +50,10 @@
 #include "watch_ui.h"
 #include "lvgl.h"
 
-// The screens need 64 KB of LVGL memory (lv_conf.h next to the lvgl library:
-// LV_MEM_SIZE). 48 KB froze the watch on its boot picture.
+// The screens need 64 KB of LVGL memory. build_opt.h (in this sketch folder)
+// gives LVGL its settings, so no lv_conf.h is needed. 48 KB froze the watch.
 #if defined(LV_MEM_SIZE) && LV_MEM_SIZE < (64U * 1024U) && !defined(WATCH_UI_HOST_TEST)
-#error "Copy the new lv_conf.h (watch_ble/lv_conf.h, LV_MEM_SIZE 64 KB) into your Arduino libraries folder, next to the lvgl folder"
+#error "build_opt.h is missing: keep it in the StrikeSense_Watch folder, next to StrikeSense_Watch.ino"
 #endif
 #include "ble_link.h"
 #include "buzz.h"
