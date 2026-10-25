@@ -8,6 +8,20 @@
 // =====================================================
 
 #include "lvgl.h"
+
+// Bigger fonts only if lv_conf.h enables them (else fall back to 20)
+#if LV_FONT_MONTSERRAT_36
+  #define PFONT_BIG (&lv_font_montserrat_36)
+#elif LV_FONT_MONTSERRAT_28
+  #define PFONT_BIG (&lv_font_montserrat_28)
+#else
+  #define PFONT_BIG (&lv_font_montserrat_20)
+#endif
+#if LV_FONT_MONTSERRAT_28
+  #define PFONT_MID (&lv_font_montserrat_28)
+#else
+  #define PFONT_MID (&lv_font_montserrat_20)
+#endif
 #include "ble_link.h"
 #include "pair_ui.h"
 #include <stdio.h>
@@ -226,7 +240,7 @@ void pair_ui_create(void)
   lv_obj_set_style_bg_color(scr, COL_BG, 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-  head = text(&lv_font_montserrat_28, COL_DIM);
+  head = text(PFONT_MID, COL_DIM);
   lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 62);
 
   info = text(&lv_font_montserrat_20, COL_DIM);
@@ -238,7 +252,7 @@ void pair_ui_create(void)
     lv_obj_add_event_cb(rod_btn[i], rod_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
     rod_name[i] = lv_label_create(rod_btn[i]);
-    lv_obj_set_style_text_font(rod_name[i], &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(rod_name[i], PFONT_MID, 0);
     lv_obj_set_style_text_color(rod_name[i], COL_TEXT, 0);
     lv_obj_align(rod_name[i], LV_ALIGN_LEFT_MID, 10, 0);
 
@@ -248,7 +262,7 @@ void pair_ui_create(void)
     lv_obj_align(rod_sig[i], LV_ALIGN_RIGHT_MID, -6, 0);
   }
 
-  pin_label = text(&lv_font_montserrat_36, COL_TEXT);
+  pin_label = text(PFONT_BIG, COL_TEXT);
   lv_obj_set_style_text_letter_space(pin_label, 6, 0);
   lv_obj_align(pin_label, LV_ALIGN_TOP_MID, 0, 140);
 
@@ -264,7 +278,7 @@ void pair_ui_create(void)
       lv_obj_set_style_bg_color(keys[i], COL_CYAN, 0);
 
     lv_obj_t *l = lv_label_create(keys[i]);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(l, PFONT_MID, 0);
     lv_obj_set_style_text_color(l, i == 11 ? lv_color_hex(0x04121a) : COL_TEXT, 0);
     lv_label_set_text(l, k[i]);
     lv_obj_center(l);
