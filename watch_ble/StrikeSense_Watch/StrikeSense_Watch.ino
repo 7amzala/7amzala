@@ -61,6 +61,13 @@ static const char *resetReason()
   }
 }
 
+// Paired (pair_ui.c) or the rod forgot this watch: start again in the right screens
+extern "C" void pair_restart(void)
+{
+  delay(200);
+  ESP.restart();
+}
+
 void setup()
 {
   Serial.begin(115200);

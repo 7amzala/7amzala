@@ -15,7 +15,11 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
@@ -25,7 +29,9 @@ import android.os.ParcelUuid;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,7 +56,38 @@ final class RodLink
     private static final long CONNECT_TIMEOUT_MS = 15000;
     private static final long RETRY_MS = 1500;
 
-    enum State { NO_PERMISSION, BLUETOOTH_OFF, SEARCHING, CONNECTING, CONNECTED }
+    enum State { NO_PERMISSION, BLUETOOTH_OFF, NOT_PAIRED, SEARCHING, CONNECTING, CONNECTED }
+    enum PairState { IDLE, WORKING, OK, FAILED }
+
+    // ---------- pairing: this app talks only to its own rod ----------
+    //
+    // A rod shows its ID (ROD-4F2A) only while it is open for pairing (the
+    // first 3 min after switching on). The user picks it and types its PIN
+    // (on the rod box); Android pairs (encrypted) and from then on the app
+    // connects only to that rod's address.
+
+    static final class RodSeen
+    {
+        final String id, address;
+        final int rssi;
+        final long at;
+
+        RodSeen(String id, String address, int rssi)
+        {
+            this.id = id;
+            this.address = address;
+            this.rssi = rssi;
+            at = System.currentTimeMillis();
+        }
+    }
+
+    private volatile String pairedAddress = "";
+    private volatile String pairedId = "";
+    private volatile boolean pairScan = false;
+    private final Map<String, RodSeen> pairSeen = new ConcurrentHashMap<>();
+    private volatile PairState pairState = PairState.IDLE;
+    private String pairAddress = "", pairIdWanted = "", pairPin = "";
+    private boolean receiversOn = false;
 
     interface Listener
     {
@@ -124,6 +161,203 @@ final class RodLink
         HandlerThread t = new HandlerThread("rodlink");
         t.start();
         h = new Handler(t.getLooper());
+
+        SharedPreferences p = app.getSharedPreferences("rod", Context.MODE_PRIVATE);
+        pairedAddress = p.getString("address", "");
+        pairedId = p.getString("id", "");
+    }
+
+    // ---------- pairing (public) ----------
+
+    boolean paired()
+    {
+        return !pairedAddress.isEmpty();
+    }
+
+    String rodId()
+    {
+        return pairedId;
+    }
+
+    // look for rods open for pairing (the pairing page is on screen)
+    void setPairScan(final boolean on)
+    {
+        h.post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                if(on == pairScan)
+                    return;
+
+                pairScan = on;
+
+                if(on)
+                    pairSeen.clear();
+
+                if(!paired())
+                {
+                    stopScan();
+                    connectOrScan();
+                }
+            }
+        });
+    }
+
+    List<RodSeen> pairList()
+    {
+        List<RodSeen> l = new ArrayList<>();
+        long now = System.currentTimeMillis();
+
+        for(RodSeen r : pairSeen.values())
+            if(now - r.at < 15000)
+                l.add(r);
+
+        return l;
+    }
+
+    PairState pairState()
+    {
+        return pairState;
+    }
+
+    @SuppressLint("MissingPermission")
+    void pair(final String address, final String id, final String pin)
+    {
+        h.post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                pairAddress = address;
+                pairIdWanted = id;
+                pairPin = pin;
+                pairState = PairState.WORKING;
+                stopScan();
+                listenForBonding();
+
+                try
+                {
+                    BluetoothDevice d = adapter.getRemoteDevice(address);
+
+                    if(d.getBondState() == BluetoothDevice.BOND_BONDED)
+                        removeBond(d);         // an old pairing: start fresh with the PIN
+
+                    if(!d.createBond())
+                        pairState = PairState.FAILED;
+                }
+                catch(Exception e)
+                {
+                    pairState = PairState.FAILED;
+                }
+            }
+        });
+    }
+
+    // "Forget my devices": the rod forgets every phone and watch, and this
+    // app forgets the rod (pair again with the PIN)
+    void forget()
+    {
+        if(ready())
+            request("/forget", 3000);
+
+        h.post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    if(!pairedAddress.isEmpty())
+                        removeBond(adapter.getRemoteDevice(pairedAddress));
+                }
+                catch(Exception e)
+                {
+                }
+
+                savePairing("", "");
+                closeGatt();
+                stopScan();
+                pairState = PairState.IDLE;
+                connectOrScan();
+            }
+        });
+    }
+
+    private void savePairing(String address, String id)
+    {
+        pairedAddress = address;
+        pairedId = id;
+        app.getSharedPreferences("rod", Context.MODE_PRIVATE).edit().putString("address", address).putString("id", id).apply();
+    }
+
+    private static void removeBond(BluetoothDevice d)
+    {
+        try
+        {
+            d.getClass().getMethod("removeBond").invoke(d);
+        }
+        catch(Exception e)
+        {
+        }
+    }
+
+    // Android asks for the PIN: give the one typed in the app; the result of the pairing
+    private final BroadcastReceiver bonding = new BroadcastReceiver()
+    {
+        @SuppressLint("MissingPermission")
+        @Override
+        public void onReceive(Context c, Intent i)
+        {
+            BluetoothDevice d = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+
+            if(d == null || !d.getAddress().equalsIgnoreCase(pairAddress))
+                return;
+
+            if(BluetoothDevice.ACTION_PAIRING_REQUEST.equals(i.getAction()))
+            {
+                try
+                {
+                    d.setPin(pairPin.getBytes(StandardCharsets.UTF_8));
+                }
+                catch(Exception e)
+                {
+                    // Android shows its own box: the user types the PIN there
+                }
+                return;
+            }
+
+            int now = i.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE);
+            int before = i.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE);
+
+            if(now == BluetoothDevice.BOND_BONDED)
+            {
+                savePairing(pairAddress, pairIdWanted);
+                pairState = PairState.OK;
+                pairScan = false;
+                kick();
+            }
+            else if(now == BluetoothDevice.BOND_NONE && before == BluetoothDevice.BOND_BONDING)
+            {
+                pairState = PairState.FAILED;      // wrong PIN, or the rod's 3 minutes are over
+            }
+        }
+    };
+
+    private void listenForBonding()
+    {
+        if(receiversOn)
+            return;
+
+        receiversOn = true;
+        IntentFilter f = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        f.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        f.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY - 1);
+
+        if(Build.VERSION.SDK_INT >= 33)
+            app.registerReceiver(bonding, f, Context.RECEIVER_EXPORTED);
+        else
+            app.registerReceiver(bonding, f);
     }
 
     static synchronized RodLink get(Context context)
@@ -315,6 +549,18 @@ final class RodLink
             return;
         }
 
+        if(!paired())
+        {
+            state = State.NOT_PAIRED;
+
+            if(pairScan)
+                startScan();                     // list the rods open for pairing
+            else
+                h.postDelayed(retry, 3000);
+
+            return;
+        }
+
         startScan();
     }
 
@@ -329,6 +575,21 @@ final class RodLink
                 public void run()
                 {
                     if(!scanning || gatt != null)
+                        return;
+
+                    // pairing page: list the rods (by their ID), connect to none
+                    if(!paired())
+                    {
+                        String name = result.getScanRecord() != null ? result.getScanRecord().getDeviceName() : null;
+
+                        if(name != null && name.startsWith("ROD-"))
+                            pairSeen.put(result.getDevice().getAddress(), new RodSeen(name, result.getDevice().getAddress(), result.getRssi()));
+
+                        return;
+                    }
+
+                    // only our own rod (the scan filter already asks for its address)
+                    if(!result.getDevice().getAddress().equalsIgnoreCase(pairedAddress))
                         return;
 
                     stopScan();
@@ -376,14 +637,18 @@ final class RodLink
             return;
         }
 
-        ScanFilter filter = new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE)).build();
+        // paired: our rod's address only (it hides its name after pairing);
+        // not paired: rods open for pairing show the StrikeSense service
+        ScanFilter filter = paired()
+            ? new ScanFilter.Builder().setDeviceAddress(pairedAddress.toUpperCase(java.util.Locale.ROOT)).build()
+            : new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE)).build();
         ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
 
         try
         {
             scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
             scanning = true;
-            state = State.SEARCHING;
+            state = paired() ? State.SEARCHING : State.NOT_PAIRED;
             h.postDelayed(restartScan, SCAN_RESTART_MS);
         }
         catch(Exception e)

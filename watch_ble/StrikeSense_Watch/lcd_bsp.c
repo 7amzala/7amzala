@@ -1,5 +1,7 @@
 #include "lcd_bsp.h"
 #include "watch_ui.h"
+#include "pair_ui.h"
+#include "ble_link.h"
 #include "esp_lcd_sh8601.h"
 #include "lcd_config.h"
 #include "FT3168.h"
@@ -153,7 +155,10 @@ void lcd_lvgl_Init(void)
   xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
   if (example_lvgl_lock(-1))
   {
-    watch_ui_create();       // StrikeSense watch screens (watch_ui.c)
+    if(ble_link_is_paired())
+      watch_ui_create();     // StrikeSense watch screens (watch_ui.c)
+    else
+      pair_ui_create();      // no rod yet: PAIR YOUR ROD (pair_ui.c)
 
     // Release the mutex
     example_lvgl_unlock();

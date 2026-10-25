@@ -33,6 +33,7 @@ class BLECharacteristic
 {
 public:
   static const uint32_t PROPERTY_WRITE = 1, PROPERTY_WRITE_NR = 2, PROPERTY_NOTIFY = 4;
+  static const uint32_t PROPERTY_WRITE_ENC = 0, PROPERTY_WRITE_AUTHEN = 0;   // (NimBLE only)
   BLECharacteristicCallbacks* cb = nullptr;
   std::string value;
   std::vector<std::string> notified;          // every notification the rod sent
@@ -78,18 +79,43 @@ public:
   BLEService* createService(const char*) { service = new BLEService(); return service; }
 };
 
+struct BLEUUID { std::string u; BLEUUID(const char* s) : u(s) {} };
+
+// what the rod puts in its radio signal
+struct BLEAdvertisementData
+{
+  std::string name, service;
+  void setFlags(uint8_t) {}
+  void setName(String n) { name = n.c_str(); }
+  void setCompleteServices(BLEUUID u) { service = u.u; }
+};
+
 struct BLEAdvertising
 {
   int started = 0;
+  BLEAdvertisementData adv, scan;
   void addServiceUUID(const char*) {}
   void setScanResponse(bool) {}
+  void setAdvertisementData(BLEAdvertisementData& a) { adv = a; }
+  void setScanResponseData(BLEAdvertisementData& a) { scan = a; }
+};
+
+// pairing with a PIN (the real stack does the encryption)
+#define ESP_IO_CAP_OUT 0
+struct BLESecurity
+{
+  static uint32_t& pin() { static uint32_t p = 0; return p; }
+  static uint32_t setPassKey(bool, uint32_t p) { pin() = p; return p; }
+  static void setCapability(uint8_t) {}
+  static void setAuthenticationMode(bool, bool, bool) {}
 };
 
 struct BLEDevice
 {
   static BLEServer*& server() { static BLEServer* s = nullptr; return s; }
   static BLEAdvertising& adv() { static BLEAdvertising a; return a; }
-  static void init(const char*) {}
+  static String& name() { static String n; return n; }
+  static void init(String n) { name() = n; }
   static void setMTU(int) {}
   static BLEServer* createServer() { server() = new BLEServer(); return server(); }
   static BLEAdvertising* getAdvertising() { return &adv(); }

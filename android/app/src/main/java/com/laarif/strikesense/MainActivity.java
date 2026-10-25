@@ -46,6 +46,8 @@ public class MainActivity extends Activity
     static final String HOST = "rod.strikesense";
     static final String DASHBOARD_URL = "http://" + HOST + "/";
     private static final String HELP_URL = "file:///android_asset/offline.html";
+    private static final String PAIR_URL = DASHBOARD_URL + "app/pair.html";
+    private boolean onPairPage = false;
 
     private static final int REQ_PERMISSIONS = 1;
     private static final int REQ_BLUETOOTH_ON = 2;
@@ -246,10 +248,24 @@ public class MainActivity extends Activity
 
             if(!onDashboard)
             {
-                if(link.ready() || watchOnly)     // Watch only: the dashboard, so the phone can come back
+                if(link.ready() || (watchOnly && link.paired()))     // Watch only: the dashboard, so the phone can come back
                 {
                     onDashboard = true;
+                    onPairPage = false;
                     web.loadUrl(DASHBOARD_URL);
+                }
+                else if(!link.paired() && link.state() == RodLink.State.NOT_PAIRED)
+                {
+                    // no rod yet: PAIR YOUR ROD
+                    if(!onPairPage)
+                    {
+                        onPairPage = true;
+                        web.loadUrl(PAIR_URL);
+                    }
+                }
+                else if(onPairPage && link.paired())
+                {
+                    // just paired: the page says so until the rod connects
                 }
                 else
                 {
@@ -743,6 +759,75 @@ public class MainActivity extends Activity
                     MainActivity.this.openStrikes();
                 }
             });
+        }
+
+        // ---------- PAIR YOUR ROD page ----------
+
+        @JavascriptInterface
+        public void pairScan(boolean on)
+        {
+            RodLink.get(MainActivity.this).setPairScan(on);
+        }
+
+        @JavascriptInterface
+        public String pairList()
+        {
+            StringBuilder b = new StringBuilder("[");
+
+            for(RodLink.RodSeen r : RodLink.get(MainActivity.this).pairList())
+            {
+                if(b.length() > 1) b.append(',');
+                b.append("{\"id\":").append(org.json.JSONObject.quote(r.id))
+                 .append(",\"address\":").append(org.json.JSONObject.quote(r.address))
+                 .append(",\"rssi\":").append(r.rssi).append('}');
+            }
+
+            return b.append(']').toString();
+        }
+
+        @JavascriptInterface
+        public void pair(String address, String id, String pin)
+        {
+            if(address != null && id != null && pin != null && pin.matches("[0-9]{6}"))
+                RodLink.get(MainActivity.this).pair(address, id, pin);
+        }
+
+        @JavascriptInterface
+        public String pairState()
+        {
+            RodLink link = RodLink.get(MainActivity.this);
+            return link.pairState().name().toLowerCase(java.util.Locale.ROOT) + (link.ready() ? ",connected" : "");
+        }
+
+        @JavascriptInterface
+        public String rodId()
+        {
+            return RodLink.get(MainActivity.this).rodId();
+        }
+
+        // Settings > MY ROD > Forget my devices
+        @JavascriptInterface
+        public void forgetRod()
+        {
+            new Thread(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    RodLink.get(MainActivity.this).forget();
+
+                    handler.post(new Runnable()
+                    {
+                        @Override
+                        public void run()
+                        {
+                            onDashboard = false;
+                            onPairPage = false;
+                            showTab(TAB_ROD);
+                        }
+                    });
+                }
+            }).start();
         }
 
         // the settings panel was closed on the page: the Rod tab lights again

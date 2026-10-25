@@ -66,3 +66,7 @@ inline int digitalRead(int) { return LOW; }
 #define D1 2
 inline unsigned analogReadMilliVolts(int) { return 1950; }   // 3.90 V battery
 inline void delayMicroseconds(unsigned) {}
+// chip ID and random numbers (rod ID + PIN)
+#define ESP_MAC_BT 2
+inline int esp_read_mac(uint8_t* m, int) { const uint8_t mac[6] = { 0x34, 0x85, 0x18, 0x00, 0x4F, 0x2A }; for(int i = 0; i < 6; i++) m[i] = mac[i]; return 0; }
+inline uint32_t esp_random() { return (uint32_t)rand() * 2654435761u; }

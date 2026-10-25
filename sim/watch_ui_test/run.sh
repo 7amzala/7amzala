@@ -18,3 +18,7 @@ gcc -O1 -Wall -fsyntax-only -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W $W/watch_ui.c
 gcc -O1 -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c host.c -o host.o
 gcc -o host host.o obj/*.o -lm
 ./host
+# the PAIR YOUR ROD screens
+gcc -O1 -w -DLV_CONF_INCLUDE_SIMPLE -I. -I$L -I$W -c host_pair.c -o host_pair.o
+gcc -o host_pair host_pair.o obj/*.o -lm
+./host_pair

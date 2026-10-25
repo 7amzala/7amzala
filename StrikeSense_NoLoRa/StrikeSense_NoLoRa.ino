@@ -1,6 +1,8 @@
 #if defined(ESP32)
 #include <BLEDevice.h>
 #include <BLEServer.h>
+#include <BLESecurity.h>
+#include <esp_mac.h>
 #if !defined(CONFIG_NIMBLE_ENABLED)
 #include <BLE2902.h>
 #endif
@@ -20,6 +22,91 @@ const char* resetReason();
 // ADXL355 wiring: pin 1 SCL -> D5, pin 2 SDA -> D4, pin 5 GND, pin 6 3V3,
 // on the sensor link pin 3 -> 12 and pin 4 -> 11.
 LIS3DH myIMU(I2C_MODE, 0x19);
+// ---------- Private Bluetooth: rod ID + PIN, pairing window ----------
+
+String rodId = "ROD-0000";
+uint32_t rodPin = 0;
+const unsigned long PAIR_WINDOW_MS = 180000;     // new phone / watch: first 3 min after switching on
+
+int bondedDevices()
+{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  return esp_ble_get_bond_device_num();
+#else
+  return 0;
+#endif
+}
+
+// pairing is open while nothing is paired yet, or just after switching on
+bool pairWindowOpen()
+{
+  return bondedDevices() == 0 || millis() < PAIR_WINDOW_MS;
+}
+
+// ID from the chip (Bluetooth address), PIN made once at random
+void privacyBegin()
+{
+  uint8_t mac[6] = { 0 };
+  esp_read_mac(mac, ESP_MAC_BT);
+
+  char id[12];
+  snprintf(id, sizeof(id), "ROD-%02X%02X", mac[4], mac[5]);
+  rodId = id;
+
+  Preferences p;
+  p.begin("strikesense", false);
+  rodPin = p.getULong("pin", 0);
+
+  if(rodPin < 100000 || rodPin > 999999)
+  {
+    rodPin = 100000 + esp_random() % 900000;
+    p.putULong("pin", rodPin);
+  }
+
+  p.end();
+
+  Serial.println();
+  Serial.printf("==== %s   PIN %06lu   (write both on the rod box) ====\n", rodId.c_str(), (unsigned long)rodPin);
+}
+
+void forgetPairedDevices()
+{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  int n = esp_ble_get_bond_device_num();
+
+  if(n > 0)
+  {
+    esp_ble_bond_dev_t* list = (esp_ble_bond_dev_t*)malloc(sizeof(esp_ble_bond_dev_t) * n);
+
+    if(list && esp_ble_get_bond_device_list(&n, list) == ESP_OK)
+    {
+      for(int i = 0; i < n; i++)
+        esp_ble_remove_bond_device(list[i].bd_addr);
+    }
+
+    free(list);
+  }
+#endif
+
+  Serial.println("Bluetooth: all paired devices forgotten - pairing open");
+}
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+// A new phone or watch asks to pair: only while pairing is open, with the PIN
+class PairCallbacks : public BLESecurityCallbacks
+{
+  uint32_t onPassKeyRequest() override { return rodPin; }
+  void onPassKeyNotify(uint32_t) override {}
+  bool onSecurityRequest() override { return pairWindowOpen(); }
+  bool onConfirmPIN(uint32_t) override { return pairWindowOpen(); }
+
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t d) override
+  {
+    Serial.printf("Bluetooth: pairing %s\n", d.success ? "OK (encrypted)" : "refused or wrong PIN");
+  }
+};
+#endif
+
 // =====================================================
 // BLUETOOTH LINK TO THE PHONE APP
 //
@@ -60,8 +147,17 @@ public:
 
   void begin()
   {
-    BLEDevice::init("StrikeSense");
+    privacyBegin();
+
+    BLEDevice::init(rodId);
     BLEDevice::setMTU(517);
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    BLEDevice::setSecurityCallbacks(new PairCallbacks());
+#endif
+    BLESecurity::setPassKey(true, rodPin);
+    BLESecurity::setCapability(ESP_IO_CAP_OUT);              // the PIN is on the box: the phone / watch types it
+    BLESecurity::setAuthenticationMode(true, true, true);    // bond, PIN protected, Secure Connections
 
     BLEServer* srv = BLEDevice::createServer();
     srv->setCallbacks(new Callbacks(this));
@@ -70,21 +166,68 @@ public:
 
     BLECharacteristic* rx = service->createCharacteristic(
       BLE_RX_UUID,
-      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR |
+      BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);   // (NimBLE)
     rx->setCallbacks(new RxCallbacks(this));
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    rx->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);  // only a paired device can ask anything
+#endif
 
     tx = service->createCharacteristic(BLE_TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
 
 #if !defined(CONFIG_NIMBLE_ENABLED)
-    tx->addDescriptor(new BLE2902());    // older ESP32 boards (Bluedroid); NimBLE adds it by itself
+    BLE2902* cccd = new BLE2902();       // older ESP32 boards (Bluedroid); NimBLE adds it by itself
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    cccd->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM | ESP_GATT_PERM_WRITE_ENC_MITM);   // only a paired device gets the data
+#endif
+    tx->addDescriptor(cccd);
 #endif
 
     service->start();
 
-    BLEAdvertising* adv = BLEDevice::getAdvertising();
-    adv->addServiceUUID(BLE_SERVICE_UUID);
-    adv->setScanResponse(true);
+    advertiseFor(pairWindowOpen());
     BLEDevice::startAdvertising();
+  }
+
+  // Pairing open: "ROD-4F2A" + the StrikeSense service, so the app and the
+  // watch can list it. Locked: no name, no service (paired devices find
+  // the rod by its address).
+  void advertiseFor(bool pairing)
+  {
+    advPairing = pairing;
+
+    BLEAdvertisementData adv, scan;
+    adv.setFlags(0x06);
+
+    if(pairing)
+    {
+      adv.setCompleteServices(BLEUUID(BLE_SERVICE_UUID));
+      scan.setName(rodId);
+    }
+
+    BLEAdvertising* a = BLEDevice::getAdvertising();
+    a->setAdvertisementData(adv);
+    a->setScanResponseData(scan);
+    a->setScanResponse(true);
+
+    Serial.printf("Bluetooth: %s\n", pairing ? "pairing OPEN - the rod shows its ID" : "pairing locked - the rod is hidden");
+  }
+
+  // A device that connects but never pairs (writes nothing) within 30 s is sent away
+  void kickStrangers()
+  {
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    for(int i = 0; i < MAX_CONNS; i++)
+    {
+      if(conns[i].used && !conns[i].talked && millis() - conns[i].since > 30000)
+      {
+        Serial.printf("Bluetooth: device %d never paired - sent away\n", conns[i].id);
+        conns[i].used = false;
+        BLEDevice::getServer()->disconnect(conns[i].id);
+      }
+    }
+#endif
   }
 
   bool connected() const
@@ -99,6 +242,11 @@ public:
     // Keep advertising while there is room for another phone/watch
     if(advertiseAgain || millis() - lastAdvertiseCheck >= 5000)
     {
+      kickStrangers();
+
+      if(pairWindowOpen() != advPairing)
+        advertiseFor(pairWindowOpen());
+
       if(!advertiseAgain)
         Serial.printf("Bluetooth: %s, %d connected\n",
                       clients < MAX_CLIENTS ? "advertising" : "full (not advertising)", (int)clients);
@@ -243,6 +391,46 @@ private:
   int routeCount = 0;
 
   static const int MAX_CLIENTS = 2;         // phone + watch
+  bool advPairing = true;
+
+  // who is connected, and did it pair (a paired device can write)
+  static const int MAX_CONNS = 4;
+
+  struct Conn
+  {
+    bool used;
+    bool talked;
+    uint16_t id;
+    unsigned long since;
+  };
+
+  Conn conns[MAX_CONNS] = {};
+
+  void connOpened(uint16_t id)
+  {
+    for(int i = 0; i < MAX_CONNS; i++)
+    {
+      if(!conns[i].used)
+      {
+        conns[i] = { true, false, id, millis() };
+        return;
+      }
+    }
+  }
+
+  void connTalked(uint16_t id)
+  {
+    for(int i = 0; i < MAX_CONNS; i++)
+      if(conns[i].used && conns[i].id == id)
+        conns[i].talked = true;
+  }
+
+  void connClosed(uint16_t id)
+  {
+    for(int i = 0; i < MAX_CONNS; i++)
+      if(conns[i].used && conns[i].id == id)
+        conns[i].used = false;
+  }
 
   BLECharacteristic* tx = nullptr;
   volatile int clients = 0;
@@ -293,6 +481,19 @@ private:
       Serial.printf("Bluetooth: disconnected (%d left)\n", (int)owner->clients);
     }
 
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    // (the library calls both onConnect versions)
+    void onConnect(BLEServer*, esp_ble_gatts_cb_param_t* p) override
+    {
+      owner->connOpened(p->connect.conn_id);
+    }
+
+    void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t* p) override
+    {
+      owner->connClosed(p->disconnect.conn_id);
+    }
+#endif
+
   private:
     BleServer* owner;
   };
@@ -309,6 +510,15 @@ private:
       for(size_t i = 0; i < v.length(); i++)
         owner->received(v[i]);
     }
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+    // only a paired (encrypted) device can write: this one is ours
+    void onWrite(BLECharacteristic* c, esp_ble_gatts_cb_param_t* p) override
+    {
+      owner->connTalked(p->write.conn_id);
+      onWrite(c);
+    }
+#endif
 
   private:
     BleServer* owner;
@@ -7904,6 +8114,7 @@ function showTimes(d)
   el("upTime").innerText = clock(d.up);
   showWatch(d);
   showLinkMode(d);
+  showRod(d);
 
   if(d.bat >= 0)
   {
@@ -8322,6 +8533,38 @@ async function setLinkMode(m)
   catch(e)
   {
   }
+}
+</script>
+
+<div class="setGroup" id="rodGroup">MY ROD</div>
+<div class="setHelp" id="rodInfo">&ndash;</div>
+<button class="soundButton appOnly" id="forgetBtn" onclick="forgetRod()">FORGET MY DEVICES</button>
+
+<script>
+// rod 2.3+: "rodid", "paired", "pairopen" in /data
+function showRod(d)
+{
+  var show = d.rodid !== undefined;
+  el('rodGroup').style.display = el('rodInfo').style.display = show ? '' : 'none';
+
+  if(!show)
+    return;
+
+  el('rodInfo').innerHTML = '<b style="font-size:15px;color:#eaf3ff">' + d.rodid + ' &#128274;</b><br>' +
+    d.paired + ' paired device' + (d.paired == 1 ? '' : 's') + ' (phone, watch) &middot; encrypted &middot; ' +
+    (d.pairopen ? '<span style="color:#ffba52">open for pairing now</span>' : 'locked');
+}
+
+function forgetRod()
+{
+  if(!window.StrikeApp || !StrikeApp.forgetRod)
+    return;
+
+  if(!confirm('Forget my devices?\n\nThe rod forgets this phone AND the watch. To use them again, pair each one with the PIN on the rod box (in the 3 minutes after switching the rod on).'))
+    return;
+
+  closeSettings();
+  StrikeApp.forgetRod();
 }
 </script>
 
@@ -9047,6 +9290,14 @@ void updateFight()
     s.done = true;
 }
 
+// From a paired phone: forget every paired phone and watch (new phone, lost watch).
+// Pairing is open again until the next device pairs.
+void handleForget()
+{
+  server.send(200, "text/plain", "OK");
+  forgetPairedDevices();
+}
+
 // The watch: "I'm here over Bluetooth, hearing you this strong" (every 2 s)
 void handleWatchPing()
 {
@@ -9271,6 +9522,11 @@ void handleData()
   addField(json, "batv", batVolts, 2);
 
   addWatchLink(json);
+  json += ",\"rodid\":\"";
+  json += rodId;
+  json += "\"";
+  addField(json, "paired", (long)bondedDevices());
+  addField(json, "pairopen", pairWindowOpen());
   addLinkMode(json);
 
   addVibrationSamples(json);
@@ -9381,6 +9637,7 @@ void setup()
   server.on("/strike", handleStrike);
   server.on("/strikes", handleStrikes);
   server.on("/wping", handleWatchPing);
+  server.on("/forget", handleForget);
   server.on("/linkmode", handleLinkMode);
   server.on("/settings", handleSettings);
   server.on("/set", handleSet);

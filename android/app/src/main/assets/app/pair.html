@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Pair your rod</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%) fixed;padding:20px 16px;-webkit-tap-highlight-color:transparent}
+.logo{width:64px;height:64px;border-radius:50%;margin:6px auto 10px;display:block;box-shadow:0 0 18px rgba(30,150,255,.55)}
+h1{font-size:23px;margin:0 0 4px;text-align:center}
+.sub{color:#8ea6c8;font-size:14px;text-align:center;margin-bottom:18px;line-height:1.45}
+.rod{display:flex;align-items:center;gap:10px;padding:14px;border-radius:14px;border:1px solid #24324f;background:#0b1428;margin-bottom:8px;cursor:pointer;font-size:19px;font-weight:900}
+.rod.on{border-color:#22d3ff;background:#082440}
+.bars{display:inline-flex;gap:2px;align-items:flex-end;margin-left:auto}
+.bars i{display:block;width:5px;border-radius:1px;background:#262b36}
+.card{background:rgba(14,22,40,.88);border:1px solid #1d2a44;border-radius:15px;padding:14px;margin-top:12px}
+.lbl{font-size:12px;color:#8ea6c8;letter-spacing:.8px;font-weight:800;margin-bottom:8px}
+input{width:100%;font-size:30px;letter-spacing:10px;text-align:center;padding:12px;border-radius:12px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff}
+.btn{display:block;width:100%;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border:0;border-radius:12px;padding:14px;font-weight:900;font-size:16px;margin-top:12px;cursor:pointer}
+.btn:disabled{opacity:.4}
+.msg{text-align:center;margin-top:14px;font-size:14px;line-height:1.5;min-height:22px}
+.wait{color:#8ea6c8;text-align:center;padding:26px 8px;line-height:1.6}
+.spin{width:26px;height:26px;border-radius:50%;border:3px solid #24324f;border-top-color:#22d3ff;margin:0 auto 10px;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<img class="logo" src="/logo.webp" alt="">
+<h1>Pair your rod</h1>
+<div class="sub">Switch your rod on. For 3 minutes it shows its ID.<br>Pick the ID that is on your rod box.</div>
+
+<div id="list"><div class="wait"><div class="spin"></div>Looking for rods&hellip;</div></div>
+
+<div class="card" id="pinCard" style="display:none">
+ <div class="lbl" id="pinFor">PIN</div>
+ <input id="pin" type="tel" inputmode="numeric" maxlength="6" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="off">
+ <button class="btn" id="pairBtn" onclick="doPair()" disabled>PAIR</button>
+</div>
+
+<div class="msg" id="msg"></div>
+
+<script>
+const APP = window.StrikeApp || null;
+let chosen = null, working = false, shown = '';
+
+function bars(rssi)
+{
+  const n = rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
+  const c = n >= 3 ? '#3ddc84' : n == 2 ? '#ffba52' : '#ff4d5e';
+  return '<span class="bars">' + [5, 8, 11, 14].map((h, i) => `<i style="height:${h}px;${i < n ? 'background:' + c : ''}"></i>`).join('') + '</span>';
+}
+
+function refresh()
+{
+  let rods = [];
+  try { rods = APP ? JSON.parse(APP.pairList()) : [{ id: 'ROD-4F2A', address: 'AA', rssi: -58 }, { id: 'ROD-91C7', address: 'BB', rssi: -76 }]; } catch(e) {}
+  rods.sort((a, b) => b.rssi - a.rssi);
+
+  const key = rods.map(r => r.id + Math.round(r.rssi / 8)).join() + (chosen ? chosen.address : '');
+
+  if(key != shown && !working)
+  {
+    shown = key;
+    document.getElementById('list').innerHTML = rods.length
+      ? rods.map(r => `<div class="rod${chosen && chosen.address == r.address ? ' on' : ''}" onclick='choose(${JSON.stringify(r)})'>${r.id}${bars(r.rssi)}</div>`).join('')
+      : '<div class="wait"><div class="spin"></div>Looking for rods&hellip;<br><small>Not showing? Switch the rod off and on, and keep the phone close.</small></div>';
+  }
+
+  if(working && APP)
+  {
+    const st = APP.pairState();
+
+    if(st.startsWith('ok'))
+      say(st.includes('connected') ? '&#128274; Paired with ' + chosen.id + ' &mdash; opening&hellip;' : '&#128274; Paired with ' + chosen.id + '. Connecting&hellip;', '#3ddc84');
+    else if(st == 'failed')
+    {
+      working = false;
+      document.getElementById('pairBtn').disabled = false;
+      say('Not paired. Check the PIN on the rod box.<br>If it is right, the rod\'s 3 minutes are over: switch it off and on, then try again.', '#ff4d5e');
+    }
+  }
+}
+
+function choose(r)
+{
+  if(working) return;
+  chosen = r;
+  shown = '';
+  document.getElementById('pinCard').style.display = '';
+  document.getElementById('pinFor').textContent = 'PIN OF ' + r.id + ' (ON THE ROD BOX)';
+  document.getElementById('pin').focus();
+  say('', '');
+  refresh();
+}
+
+function say(t, c)
+{
+  const m = document.getElementById('msg');
+  m.innerHTML = t;
+  m.style.color = c || '#8ea6c8';
+}
+
+document.getElementById('pin').addEventListener('input', e =>
+{
+  e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+  document.getElementById('pairBtn').disabled = e.target.value.length != 6 || working;
+});
+
+function doPair()
+{
+  const pin = document.getElementById('pin').value;
+  if(!chosen || pin.length != 6) return;
+  working = true;
+  document.getElementById('pairBtn').disabled = true;
+  say('Pairing with ' + chosen.id + '&hellip; (if Android asks for the PIN, type it there too)', '#8ea6c8');
+  if(APP) APP.pair(chosen.address, chosen.id, pin);
+}
+
+if(APP) APP.pairScan(true);
+window.addEventListener('beforeunload', () => { if(APP) APP.pairScan(false); });
+refresh();
+setInterval(refresh, 700);
+</script>
+</body></html>

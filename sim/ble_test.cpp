@@ -333,6 +333,26 @@ int main()
     check(n == 10 && b.body.size() < 1500, "/strikes keeps the last 10 (small answer)");
   }
 
+  // ---- private Bluetooth: rod ID + PIN ----
+  {
+    const size_t NO = std::string::npos;
+    Answer b;
+    printf("        %s  PIN %06u\n", rodId.c_str(), (unsigned)rodPin);
+    check(rodId == "ROD-4F2A", "rod ID from the chip: ROD-4F2A");
+    uint32_t pin = rodPin;
+    check(pin >= 100000 && pin <= 999999 && BLESecurity::pin() == pin, "6-digit PIN given to the Bluetooth pairing");
+    privacyBegin();
+    check(rodPin == pin, "same PIN after a restart (kept in flash)");
+    check(BLEDevice::name() == "ROD-4F2A", "Bluetooth name = rod ID (no 'StrikeSense')");
+    BLEAdvertising& ad = BLEDevice::adv();
+    check(ad.scan.name == "ROD-4F2A" && !ad.adv.service.empty(), "pairing open: the signal shows the rod ID");
+    server.advertiseFor(false);
+    check(ad.scan.name.empty() && ad.adv.service.empty() && ad.adv.name.empty(), "locked: no name, no service in the signal");
+    server.advertiseFor(true);
+    ask(700201, "/data", b);
+    check(b.body.find("\"rodid\":\"ROD-4F2A\"") != NO && b.body.find("\"pairopen\":true") != NO, "/data tells the app the rod ID and pairing state");
+  }
+
   // ---- watch link choice (phone app) ----
   {
     const size_t NO = std::string::npos;

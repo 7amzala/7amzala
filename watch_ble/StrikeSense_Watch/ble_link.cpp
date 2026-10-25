@@ -2,10 +2,14 @@
 #include <BLEDevice.h>
 #include <BLEClient.h>
 #include <BLEScan.h>
+#include <BLESecurity.h>
+#include <Preferences.h>
 #include <string>
 
 #include "ble_link.h"
 #include "link_merge.h"
+
+extern "C" void pair_restart(void);     // StrikeSense_Watch.ino
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include "host/ble_gap.h"
@@ -79,21 +83,121 @@ static volatile int seenCount = 0;
 static uint32_t connectedAt = 0;
 static bool firstAnswerLogged = false;
 
+// ---------- pairing: our own rod only ----------
+
+static String pairedAddr;               // our rod's Bluetooth address, "" = not paired
+static String pairedId;                 // ROD-4F2A
+
+// rods open for pairing nearby (scan task -> screen task, under mux)
+struct PairSeen
+{
+  char id[12];
+  char addr[20];
+  int rssi;
+  uint32_t at;
+};
+
+static PairSeen pairSeen[PAIR_MAX];
+static int pairSeenN = 0;
+static volatile bool pairWanted = false;
+static String pairWantAddr;
+static char pairWantId[12];
+static uint32_t pairPin = 0;
+static volatile pair_state_t pairState = PAIR_IDLE;
+static int authFails = 0;               // our rod refused us N times in a row (it forgot us)
+
+// the PIN check (Bluetooth security)
+static volatile bool authDone = false;
+static volatile bool authOk = false;
+
+class WatchSecurity : public BLESecurityCallbacks
+{
+  uint32_t onPassKeyRequest() override { return pairPin; }      // the PIN typed on the watch
+  void onPassKeyNotify(uint32_t) override {}
+  bool onSecurityRequest() override { return true; }
+  bool onConfirmPIN(uint32_t) override { return true; }
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t d) override
+  {
+    authOk = d.success;
+    authDone = true;
+  }
+#endif
+
+#if defined(CONFIG_NIMBLE_ENABLED)
+  void onAuthenticationComplete(ble_gap_conn_desc *desc, int status) override
+  {
+    authOk = status == 0 && desc != nullptr && desc->sec_state.encrypted;
+    authDone = true;
+  }
+#endif
+};
+
+static void loadPairing()
+{
+  Preferences p;
+  p.begin("pair", true);
+  pairedAddr = p.getString("addr", "");
+  pairedId = p.getString("id", "");
+  p.end();
+}
+
+static void savePairing(const String &addr, const String &id)
+{
+  Preferences p;
+  p.begin("pair", false);
+  p.putString("addr", addr);
+  p.putString("id", id);
+  p.end();
+
+  pairedAddr = addr;
+  pairedId = id;
+}
+
 // ---------- scanning ----------
 
-// The rod: our service number, or (if that did not come through) its name
+// Paired: only our rod's address. Not paired: nothing (the pairing list fills).
 static bool isRod(BLEAdvertisedDevice &d)
 {
-  if(d.haveServiceUUID() && d.isAdvertisingService(SERVICE_UUID))
-    return true;
+  return pairedAddr.length() > 0 && d.getAddress().toString().equalsIgnoreCase(pairedAddr);
+}
 
-  if(d.haveName())
+// a rod open for pairing: "ROD-xxxx" (and the StrikeSense service)
+static void notePairable(BLEAdvertisedDevice &d)
+{
+  if(!d.haveName())
+    return;
+
+  String name = d.getName();
+
+  if(!name.startsWith("ROD-") || name.length() > 10)
+    return;
+
+  String addr = d.getAddress().toString();
+
+  portENTER_CRITICAL(&mux);
+
+  int at = -1;
+
+  for(int i = 0; i < pairSeenN; i++)
+    if(strcmp(pairSeen[i].addr, addr.c_str()) == 0)
+      at = i;
+
+  if(at < 0 && pairSeenN < PAIR_MAX)
+    at = pairSeenN++;
+
+  if(at >= 0)
   {
-    String name = d.getName();
-    return name.startsWith("StrikeSense") && name != "StrikeSense Watch";
+    strncpy(pairSeen[at].id, name.c_str(), sizeof(pairSeen[at].id) - 1);
+    pairSeen[at].id[sizeof(pairSeen[at].id) - 1] = 0;
+    strncpy(pairSeen[at].addr, addr.c_str(), sizeof(pairSeen[at].addr) - 1);
+    pairSeen[at].addr[sizeof(pairSeen[at].addr) - 1] = 0;
+    pairSeen[at].rssi = d.getRSSI();
+    pairSeen[at].at = millis();
   }
 
-  return false;
+  portEXIT_CRITICAL(&mux);
 }
 
 class AdvCallbacks : public BLEAdvertisedDeviceCallbacks
@@ -103,6 +207,9 @@ class AdvCallbacks : public BLEAdvertisedDeviceCallbacks
     seenCount = seenCount + 1;
 
     bool rod = isRod(d);
+
+    if(pairedAddr.length() == 0)
+      notePairable(d);
 
     // only named devices, so the list stays short
     if(d.haveName() || rod)
@@ -587,7 +694,7 @@ static void setLinkFast(bool fast)
   Serial.printf("[BLE] link %s\n", fast ? "fast (something moves, or weak signal)" : "calm (saves power)");
 }
 
-static void connectToRod()
+static void connectToRodAt(BLEAddress addr)
 {
   setPhase(BLE_LINK_CONNECTING);
   lostFlag = false;
@@ -595,13 +702,10 @@ static void connectToRod()
   client = BLEDevice::createClient();
   client->setClientCallbacks(new ClientCallbacks());
 
-  Serial.printf("[BLE] rod found (%s), connecting...\n", found->getAddress().toString().c_str());
-  setNote("rod found - connecting...");
+  Serial.printf("[BLE] rod %s, connecting...\n", addr.toString().c_str());
+  setNote(pairState == PAIR_WORKING ? "pairing - checking the PIN..." : "rod found - connecting...");
 
-  bool ok = client->connect(found);
-
-  delete found;
-  found = nullptr;
+  bool ok = client->connect(addr);
 
   if(!ok)
   {
@@ -610,6 +714,40 @@ static void connectToRod()
     setNote("rod found but could not connect");
     return;
   }
+
+  // encrypted link: the PIN the first time, then the saved pairing
+  authDone = false;
+  authOk = false;
+  BLESecurity::resetSecurity();
+  client->secureConnection();
+
+  uint32_t waitAuth = millis();
+
+  while(!authDone && millis() - waitAuth < 20000)
+    delay(20);
+
+  if(!authOk)
+  {
+    Serial.println("[BLE] the rod refused the pairing (wrong PIN, pairing closed, or it forgot this watch)");
+    lost();
+
+    if(pairState == PAIR_WORKING)
+    {
+      pairState = PAIR_FAILED;
+    }
+    else if(++authFails >= 3)
+    {
+      // our rod forgot us (Forget my devices in the app): pair again
+      Serial.println("[BLE] our rod does not know this watch any more - pair again");
+      ble_link_forget();
+      pair_restart();                    // into the PAIR YOUR ROD screen
+    }
+
+    setNote("rod refused - pair again?");
+    return;
+  }
+
+  authFails = 0;
 
   BLERemoteService *service = client->getService(SERVICE_UUID);
   BLERemoteCharacteristic *tx = service != nullptr ? service->getCharacteristic(TX_UUID) : nullptr;
@@ -657,6 +795,13 @@ static void connectToRod()
   snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
   send(newId(), path);
 
+  if(pairState == PAIR_WORKING)
+  {
+    savePairing(pairWantAddr, String(pairWantId));
+    pairState = PAIR_OK;
+    Serial.printf("[BLE] paired with %s\n", pairWantId);
+  }
+
   setPhase(BLE_LINK_CONNECTED);
   connectedAt = millis();
   firstAnswerLogged = false;
@@ -664,7 +809,83 @@ static void connectToRod()
   Serial.printf("[BLE] connected to the rod (MTU %d)\n", mtu);
 }
 
+static void connectToRod()
+{
+  BLEAddress addr = found->getAddress();
+  delete found;
+  found = nullptr;
+  connectToRodAt(addr);
+}
+
 // ---------- public ----------
+
+bool ble_link_is_paired(void)
+{
+  if(pairedAddr.length() == 0)
+    loadPairing();
+
+  return pairedAddr.length() > 0;
+}
+
+bool ble_link_rod_id(char *out, int size)
+{
+  if(!ble_link_is_paired())
+    return false;
+
+  strncpy(out, pairedId.c_str(), size - 1);
+  out[size - 1] = 0;
+  return true;
+}
+
+int ble_link_pair_list(pair_rod_t *out, int max)
+{
+  int n = 0;
+  uint32_t now = millis();
+
+  portENTER_CRITICAL(&mux);
+
+  for(int i = 0; i < pairSeenN && n < max; i++)
+  {
+    if(now - pairSeen[i].at > 15000)
+      continue;                        // not seen lately (switched off, or pairing closed)
+
+    memcpy(out[n].id, pairSeen[i].id, sizeof(out[n].id));
+    out[n].rssi = pairSeen[i].rssi;
+    n++;
+  }
+
+  portEXIT_CRITICAL(&mux);
+  return n;
+}
+
+void ble_link_pair_start(const char *rod_id, uint32_t pin)
+{
+  strncpy(pairWantId, rod_id, sizeof(pairWantId) - 1);
+  pairWantId[sizeof(pairWantId) - 1] = 0;
+  pairPin = pin;
+  pairState = PAIR_WORKING;
+  pairWanted = true;
+}
+
+pair_state_t ble_link_pair_state(void)
+{
+  return pairState;
+}
+
+void ble_link_forget(void)
+{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  if(pairedAddr.length() > 0)
+  {
+    BLEAddress a(pairedAddr);
+    esp_ble_remove_bond_device(a.getNative());
+  }
+#endif
+
+  savePairing("", "");
+  authFails = 0;
+  Serial.println("[BLE] rod forgotten - pair again");
+}
 
 void ble_link_begin(void)
 {
@@ -673,8 +894,20 @@ void ble_link_begin(void)
   shared.batleft = -1;
   strcpy(shared.state, "");
 
+  loadPairing();
+
   BLEDevice::init("StrikeSense Watch");
   BLEDevice::setMTU(517);
+
+  // encrypted, PIN protected pairing (the PIN is typed on the watch)
+  BLEDevice::setSecurityCallbacks(new WatchSecurity());
+  BLESecurity::setCapability(ESP_IO_CAP_IN);
+  BLESecurity::setAuthenticationMode(true, true, true);
+
+  if(pairedAddr.length() > 0)
+    Serial.printf("[BLE] paired with %s (%s)\n", pairedId.c_str(), pairedAddr.c_str());
+  else
+    Serial.println("[BLE] not paired yet: pick your rod on the watch");
 
   BLEScan *scan = BLEDevice::getScan();
   scan->setAdvertisedDeviceCallbacks(new AdvCallbacks());
@@ -700,8 +933,31 @@ void ble_link_poll(void)
       return;
     }
 
+    // the user picked a rod and typed its PIN
+    if(pairWanted)
+    {
+      pairWanted = false;
+      String addr;
+
+      portENTER_CRITICAL(&mux);
+      for(int i = 0; i < pairSeenN; i++)
+        if(strcmp(pairSeen[i].id, pairWantId) == 0)
+          addr = pairSeen[i].addr;
+      portEXIT_CRITICAL(&mux);
+
+      if(addr.length() == 0)
+      {
+        pairState = PAIR_FAILED;
+        return;
+      }
+
+      pairWantAddr = addr;
+      connectToRodAt(BLEAddress(addr));
+      return;
+    }
+
     seenCount = 0;
-    BLEDevice::getScan()->start(3, false);       // up to 3 s, stops early when found
+    BLEDevice::getScan()->start(pairedAddr.length() > 0 ? 3 : 2, false);   // up to 3 s, stops early when found
     BLEDevice::getScan()->clearResults();
     scans++;
     scanEndMs = millis();

@@ -253,6 +253,7 @@ public class RodService extends Service
         if(!everConnected || now - lostSince > 5000)
             status(link.state() == RodLink.State.BLUETOOTH_OFF ? "Bluetooth is off – turn it on"
                  : link.state() == RodLink.State.NO_PERMISSION ? "Open the app to allow Bluetooth"
+                 : link.state() == RodLink.State.NOT_PAIRED ? "Pair your rod: open the app"
                  : "Looking for the rod (Bluetooth)…");
     }
 

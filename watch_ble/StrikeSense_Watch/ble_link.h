@@ -102,6 +102,35 @@ typedef struct
 void ble_link_ask_last_strike(void);                        // safe from the screen task
 bool ble_link_get_last_strike(ble_last_strike_t *out);      // copy; false = nothing yet
 
+// ---------- pairing: the watch talks only to its own rod ----------
+//
+// Not paired yet: the watch lists the rods that are open for pairing
+// (switched on in the last 3 min) by their ID, you pick yours and type its
+// PIN (on the rod box). Then it only ever connects to that rod, encrypted.
+
+#define PAIR_MAX 6
+
+typedef struct
+{
+  char id[12];              // ROD-4F2A
+  int rssi;
+} pair_rod_t;
+
+typedef enum
+{
+  PAIR_IDLE,
+  PAIR_WORKING,             // connecting + checking the PIN
+  PAIR_OK,                  // paired: restart into the normal screens
+  PAIR_FAILED               // wrong PIN, or the rod is not open for pairing
+} pair_state_t;
+
+bool ble_link_is_paired(void);                              // (reads the flash; fine before ble_link_begin)
+bool ble_link_rod_id(char *out, int size);                  // our rod's ID; false = not paired
+int ble_link_pair_list(pair_rod_t *out, int max);           // rods open for pairing nearby
+void ble_link_pair_start(const char *rod_id, uint32_t pin); // safe from the screen task
+pair_state_t ble_link_pair_state(void);
+void ble_link_forget(void);                                 // forget our rod (pair again)
+
 void ble_link_begin(void);
 void ble_link_poll(void);                                   // call from loop()
 void ble_link_get(ble_link_status_t *out, bool take_peak);  // safe from the screen task
