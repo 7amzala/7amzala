@@ -1,0 +1,155 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#05070d;font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;padding:26px 28px}
+h1{font-size:28px;margin:0 0 4px}
+.sub{color:#8ea6c8;font-size:16px;margin-bottom:18px}
+.row{display:flex;gap:22px;align-items:flex-start;margin-bottom:22px}
+.col{width:330px}
+.cap{font-size:17px;font-weight:700;margin:0 0 6px;color:#22d3ff}
+.capd{font-size:13px;color:#8ea6c8;margin:0 0 10px;min-height:32px}
+.phone{width:330px;height:640px;border-radius:34px;border:3px solid #2a3348;overflow:hidden;position:relative;
+ background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%);padding:18px 14px}
+.watch{width:330px;height:330px;border-radius:50%;border:10px solid #1b2130;background:#000;position:relative;overflow:hidden;
+ display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px}
+.title{font-weight:900;font-size:20px;margin-bottom:6px}
+.meta{font-size:12px;color:#8ea6c8;line-height:1.4}
+.card{background:rgba(14,22,40,.88);border:1px solid #1d2a44;border-radius:14px;padding:11px 12px;margin-bottom:9px}
+.lbl{font-size:11px;color:#8ea6c8;letter-spacing:.8px;font-weight:800}
+.rodrow{display:flex;align-items:center;gap:10px;padding:11px;border-radius:12px;border:1px solid #24324f;background:#0b1428;margin-bottom:7px}
+.rodrow.on{border-color:#22d3ff;background:#082440}
+.bars{display:inline-flex;gap:2px;align-items:flex-end;margin-left:auto}
+.bars i{display:block;width:4px;border-radius:1px;background:#262b36}
+.pin{display:flex;gap:6px;justify-content:center;margin:10px 0}
+.pin b{width:34px;height:44px;border-radius:9px;border:1px solid #24324f;background:#060c1a;display:flex;align-items:center;justify-content:center;font-size:22px}
+.btn{display:block;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border-radius:11px;padding:11px;font-weight:900;font-size:14px;margin-top:8px}
+.btn.ghost{background:#0b1428;color:#a9bbd6;border:1px solid #24324f}
+.seg{display:flex;background:#0b1428;border:1px solid #24324f;border-radius:11px;padding:3px}
+.seg div{flex:1;text-align:center;padding:8px 2px;border-radius:8px;font-weight:800;font-size:12px;color:#8ea6c8}
+.seg .on{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a}
+input{width:100%;padding:11px;border-radius:10px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff;font-size:14px;margin:4px 0 8px}
+.key{display:grid;grid-template-columns:repeat(3,58px);gap:6px;margin-top:6px}
+.key div{height:30px;border-radius:17px;background:#141924;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:54px;background:#070c18;border-top:1px solid #1d2a44;display:flex}
+.tabs div{flex:1;text-align:center;padding-top:9px;font-size:11px;color:#5f7799;font-weight:700}
+.tabs .on{color:#22d3ff}
+.sticker{width:330px;height:190px;border-radius:16px;background:#f4f6fa;color:#0b1428;padding:16px 18px;position:relative;box-shadow:0 0 0 2px #2a3348}
+.wseg{display:flex;flex-direction:column;gap:6px;width:200px;margin-top:8px}
+.wseg div{border-radius:18px;padding:8px;font-weight:800;font-size:14px;background:#141924;color:#8ea6c8}
+.wseg .on{background:#22d3ff;color:#04121a}
+.note{font-size:13px;color:#a9bbd6;line-height:1.5;max-width:330px}
+</style></head><body>
+<h1>Private pairing, rod ID, encryption, link choice, register</h1>
+<div class="sub">Mockup, no code yet. Each rod has its own ID + PIN; the phone and the watch pair once and then only talk to their own rod, encrypted (Bluetooth and LoRa).</div>
+
+<div class="row">
+ <div class="col">
+  <div class="cap">1. The sticker on the rod box</div>
+  <div class="capd">Made by the rod itself from its chip. Every rod is different.</div>
+  <div class="sticker">
+   <div style="font-weight:900;font-size:15px;letter-spacing:.5px">LAARIF STRIKESENSE</div>
+   <div style="font-size:11px;color:#56627a;margin-bottom:12px">smart fishing strike detector</div>
+   <div style="font-size:12px;color:#56627a;font-weight:700">ROD ID</div>
+   <div style="font-size:30px;font-weight:900;letter-spacing:1px">ROD-4F2A</div>
+   <div style="font-size:12px;color:#56627a;font-weight:700;margin-top:6px">PIN</div>
+   <div style="font-size:26px;font-weight:900;letter-spacing:3px">482 913</div>
+   <div style="position:absolute;right:18px;top:60px;width:84px;height:84px;background:
+     repeating-linear-gradient(90deg,#0b1428 0 6px,transparent 6px 12px),repeating-linear-gradient(0deg,#0b1428 0 6px,transparent 6px 11px);opacity:.85;border-radius:4px"></div>
+   <div style="position:absolute;right:18px;top:150px;font-size:10px;color:#56627a">scan to pair</div>
+  </div>
+  <div class="note" style="margin-top:12px">The rod also prints its ID and PIN on the Serial Monitor, so a lost sticker is no problem.</div>
+ </div>
+
+ <div class="col">
+  <div class="cap">2. App: pick your rod</div>
+  <div class="capd">Only in the 3 min after switching the rod on. Rods show only their ID.</div>
+  <div class="phone">
+   <div class="title">Pair your rod</div>
+   <div class="meta" style="margin-bottom:12px">Switch your rod on. Pick the ID on your sticker.</div>
+   <div class="rodrow on"><b>ROD-4F2A</b><span class="meta">&nbsp;yours?</span><span class="bars"><i style="height:5px;background:#3ddc84"></i><i style="height:8px;background:#3ddc84"></i><i style="height:11px;background:#3ddc84"></i><i style="height:14px;background:#3ddc84"></i></span></div>
+   <div class="rodrow"><b>ROD-91C7</b><span class="bars"><i style="height:5px;background:#ffba52"></i><i style="height:8px;background:#ffba52"></i><i style="height:11px"></i><i style="height:14px"></i></span></div>
+   <div class="rodrow"><b>ROD-0B3E</b><span class="bars"><i style="height:5px;background:#ffba52"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span></div>
+   <div class="card" style="margin-top:12px">
+    <div class="lbl">PIN OF ROD-4F2A</div>
+    <div class="pin"><b>4</b><b>8</b><b>2</b><b>9</b><b>1</b><b>3</b></div>
+    <div class="btn">PAIR</div>
+   </div>
+   <div class="meta" style="text-align:center">or <u>scan the sticker</u></div>
+  </div>
+ </div>
+
+ <div class="col">
+  <div class="cap">3. Watch: pick your rod</div>
+  <div class="capd">Same on the wrist: tap the ID, type the PIN.</div>
+  <div class="watch">
+   <div style="font-size:13px;color:#8ea6c8;font-weight:800;letter-spacing:.8px">PAIR YOUR ROD</div>
+   <div style="font-size:24px;font-weight:900;color:#22d3ff;margin:6px 0 2px">ROD-4F2A</div>
+   <div style="font-size:12px;color:#8ea6c8">&lsaquo; swipe for other rods &rsaquo;</div>
+   <div style="font-size:22px;font-weight:900;letter-spacing:4px;margin:4px 0 0">482 9_ _</div>
+   <div class="key"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>&#9003;</div><div>0</div><div style="background:#22d3ff;color:#04121a">OK</div></div>
+  </div>
+  <div class="watch" style="width:210px;height:210px;margin:14px auto 0;padding:20px">
+   <div style="font-size:30px">&#128274;</div>
+   <div style="font-size:16px;font-weight:900;color:#3ddc84">Paired</div>
+   <div style="font-size:12px;color:#8ea6c8">ROD-4F2A only<br>encrypted</div>
+  </div>
+ </div>
+</div>
+
+<div class="row">
+ <div class="col">
+  <div class="cap">4. App: register (first start)</div>
+  <div class="capd">Username + password only. Country and city come from the GPS.</div>
+  <div class="phone">
+   <div style="text-align:center;margin:16px 0 18px"><div style="width:70px;height:70px;border-radius:50%;margin:0 auto 10px;background:radial-gradient(circle,#22d3ff,#1e7bff 60%,#0a1a3a);box-shadow:0 0 18px rgba(30,150,255,.6)"></div>
+   <div class="title">Laarif <span style="color:#22d3ff">StrikeSense</span></div></div>
+   <div class="lbl">USERNAME</div><input value="karim_asilah">
+   <div class="lbl">PASSWORD</div><input value="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;">
+   <div class="meta" style="margin:4px 0 6px">&#9745; I share my strikes and fishing spots to improve StrikeSense</div>
+   <div class="btn">REGISTER</div>
+   <div class="btn ghost">I already have an account &rsaquo; LOG IN</div>
+  </div>
+ </div>
+
+ <div class="col">
+  <div class="cap">5. App: Settings tab</div>
+  <div class="capd">Link choice + your rod. A change here shows on the watch too.</div>
+  <div class="phone">
+   <div class="title">&#9881; Settings</div>
+   <div class="card">
+    <div class="lbl">WATCH LINK</div>
+    <div class="seg" style="margin-top:7px"><div class="on">Auto</div><div>Bluetooth only</div><div>LoRa only</div></div>
+    <div class="meta" style="margin-top:7px">Bluetooth near the rod, LoRa when far. Best for most.</div>
+   </div>
+   <div class="card">
+    <div class="lbl">MY ROD</div>
+    <div style="font-size:20px;font-weight:900;margin:4px 0">ROD-4F2A &#128274;</div>
+    <div class="meta">Paired: this phone + 1 watch &middot; encrypted</div>
+    <div class="btn ghost" style="margin-top:8px">Forget my devices (needs the PIN again)</div>
+   </div>
+   <div class="card">
+    <div class="lbl">ACCOUNT</div>
+    <div style="font-weight:800;margin-top:4px">karim_asilah</div>
+    <div class="meta">Strikes saved online automatically</div>
+   </div>
+   <div class="card" style="opacity:.5"><div class="lbl">MY SETUPS &middot; KNOCKS &middot; SOUNDS &hellip;</div><div class="meta">(your settings as now)</div></div>
+   <div class="tabs"><div>&#9673;<br>Rod</div><div>&#9776;<br>My strikes</div><div>&#9873;<br>Map</div><div class="on">&#9881;<br>Settings</div></div>
+  </div>
+ </div>
+
+ <div class="col">
+  <div class="cap">6. Watch: SETUP page</div>
+  <div class="capd">The same 3 choices. A change here shows in the app too.</div>
+  <div class="watch">
+   <div style="font-size:13px;color:#8ea6c8;font-weight:800;letter-spacing:.8px">WATCH LINK</div>
+   <div class="wseg"><div class="on">Auto</div><div>Bluetooth only</div><div>LoRa only</div></div>
+   <div style="font-size:11px;color:#8ea6c8;margin-top:8px">ROD-4F2A &#128274;</div>
+  </div>
+  <div class="note" style="margin-top:14px">
+   <b>Synced through the rod:</b> app &rarr; rod &rarr; watch, and watch &rarr; rod &rarr; app.<br><br>
+   <b>LoRa with 5 rods:</b> every message carries the rod ID and is encrypted with that rod's own key, so your watch never shows another rod. Rods "listen before talk" to take turns.
+  </div>
+ </div>
+</div>
+</body></html>
