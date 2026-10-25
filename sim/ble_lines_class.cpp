@@ -83,6 +83,9 @@ public:
 
     advertiseFor(pairWindowOpen());
     BLEDevice::startAdvertising();
+
+    Serial.println(broadcast ? "Bluetooth: one shared line for phone + watch"
+                             : "Bluetooth: own line for the phone and for the watch");
   }
 
   // Pairing open: "ROD-4F2A" + the StrikeSense service, so the app and the

@@ -349,22 +349,33 @@ public class RodService extends Service
             }
         }
 
-        // the graph of a finished fight (the rod keeps only its last strike)
+        // the graphs of finished fights, each by its number (the rod keeps the
+        // last 5). Never during a strike: the rod's Bluetooth is for the alarm then.
         JSONObject s = store.needsGraph();
+        boolean strikeNow = lastData != null && lastData.optBoolean("strike");
 
-        if(s != null && now - lastGraphTry > 5000)
+        if(s != null && !strikeNow && now - lastGraphTry > 1500)
         {
             lastGraphTry = now;
-            RodLink.Response r = link.request("/laststrike", 8000);
+            long id = s.optLong("rodid");
+            RodLink.Response r = link.request("/laststrike?n=" + id, 8000);
 
             try
             {
                 JSONObject g = r != null && r.code == 200 ? new JSONObject(new String(r.body, "UTF-8")) : null;
 
-                if(g != null && g.optBoolean("have") && !g.optBoolean("recording"))
+                if(g != null && g.has("id"))
                 {
+                    // rod 2.5+: the strike asked for, or "have":false when it's gone
+                    if(g.optBoolean("have") && !g.optBoolean("recording") && g.optLong("id") == id)
+                        store.setGraph(s.optString("uid"), g);
+                    else if(!g.optBoolean("have"))
+                        store.noGraph(s.optString("uid"));
+                }
+                else if(g != null && g.optBoolean("have") && !g.optBoolean("recording"))
+                {
+                    // older rod: only its newest strike
                     long count = g.optLong("count");
-                    long id = s.optLong("rodid");
 
                     if(count == id)
                         store.setGraph(s.optString("uid"), g);

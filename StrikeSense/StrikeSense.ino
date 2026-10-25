@@ -169,6 +169,9 @@ public:
 
     advertiseFor(pairWindowOpen());
     BLEDevice::startAdvertising();
+
+    Serial.println(broadcast ? "Bluetooth: one shared line for phone + watch"
+                             : "Bluetooth: own line for the phone and for the watch");
   }
 
   // Pairing open: "ROD-4F2A" + the StrikeSense service, so the app and the
@@ -1470,21 +1473,39 @@ int wrecCount = 0;
 float wrecEnergyMax = 0;
 int wrecTick = 0;
 
-int16_t wsK[WREC_N];                   // the finished last strike
-int16_t wsT[WREC_N];
-int wsCount = 0;
-bool wsHave = false;
-String wsType = "";
-unsigned long wsAt = 0;
-float wsTiltPeak = 0;
-int wsPull = 0;
-
 bool wsRecording = false;              // a strike is being recorded (10 s after)
 int wsPost = 0;
 String wsNextType = "";
 unsigned long wsNextAt = 0;
 float wsNextTiltPeak = 0;
 int wsNextPull = 0;
+uint32_t wsNextId = 0;                 // the strike's number
+
+// The last 5 finished strikes with their graphs, oldest first. The phone app
+// fetches each by its number (/laststrike?n=), so a quick second strike no
+// longer loses the first one's graph.
+const int ZOOM_EACH = 100;             // 2 s at 50 a second, before and after
+const int WS_KEEP = 5;
+
+struct WsRec
+{
+  uint32_t id;
+  int count;                           // points, 200 ms each
+  int pre;                             // points before the strike
+  int16_t k[WREC_N];
+  int16_t t[WREC_N];
+  int zpre;                            // zoom: points before the strike
+  int zn;
+  int16_t zk[ZOOM_EACH * 2];           // zoom: 50 a second around the strike
+  int16_t zt[ZOOM_EACH * 2];
+  char type[24];
+  unsigned long at;
+  float tiltPeak;
+  int pull;
+};
+
+WsRec wsKeep[WS_KEEP];
+int wsKeepN = 0;
 
 // Rod battery: time left from how fast the % drops
 int batStartPct = -1;
@@ -2400,6 +2421,7 @@ void updateConditions(bool immediate)
 
 void fightOnStrike();
 void updateFight();
+void finishWatchRecording();
 bool loraRadioOk();
 void loadLinkMode();
 const char* linkModeName();
@@ -2465,21 +2487,63 @@ void updateWatchRecording()
   if(++wsPost < WREC_POST)
     return;
 
-  // 10 s after the strike: keep the last 30 s
-  wsCount = wrecCount;
-  int start = (wrecHead - wrecCount + WREC_N) % WREC_N;
+  finishWatchRecording();              // 10 s after the strike
+}
 
-  for(int i = 0; i < wsCount; i++)
+// Keep the strike being recorded with its graph (the last 30 s) and zoom.
+// 10 s after it, or sooner when the next strike comes.
+void finishWatchRecording()
+{
+  if(!wsRecording)
+    return;
+
+  if(wsKeepN == WS_KEEP)
   {
-    wsK[i] = wrecK[(start + i) % WREC_N];
-    wsT[i] = wrecT[(start + i) % WREC_N];
+    for(int i = 1; i < WS_KEEP; i++)
+      wsKeep[i - 1] = wsKeep[i];
+
+    wsKeepN--;
   }
 
-  wsType = wsNextType;
-  wsAt = wsNextAt;
-  wsTiltPeak = wsNextTiltPeak;
-  wsPull = wsNextPull;
-  wsHave = true;
+  WsRec& r = wsKeep[wsKeepN++];
+  int start = (wrecHead - wrecCount + WREC_N) % WREC_N;
+
+  r.id = wsNextId;
+  r.count = wrecCount;
+  r.pre = wrecCount > wsPost ? wrecCount - wsPost : 0;
+
+  for(int i = 0; i < r.count; i++)
+  {
+    r.k[i] = wrecK[(start + i) % WREC_N];
+    r.t[i] = wrecT[(start + i) % WREC_N];
+  }
+
+  // zoom: the dashboard's recording of the same strike (50 a second)
+  int zs = savedPre - ZOOM_EACH;
+  int ze = savedPre + ZOOM_EACH;
+
+  if(zs < 0) zs = 0;
+  if(ze > savedCount) ze = savedCount;
+  if(ze < zs) ze = zs;
+
+  float thr = savedThreshold > 0 ? savedThreshold : 1;
+  r.zpre = savedPre - zs;
+  r.zn = ze - zs;
+
+  for(int i = 0; i < r.zn; i++)
+  {
+    float k = savedEnergy[zs + i] / thr * 100;
+    float t = savedTilt[zs + i] * 100;
+    r.zk[i] = (int16_t)(k > 300 ? 300 : k);
+    r.zt[i] = (int16_t)(t > 300 ? 300 : (t < -300 ? -300 : t));
+  }
+
+  strncpy(r.type, wsNextType.c_str(), sizeof(r.type) - 1);
+  r.type[sizeof(r.type) - 1] = 0;
+  r.at = wsNextAt;
+  r.tiltPeak = wsNextTiltPeak;
+  r.pull = wsNextPull;
+
   wsRecording = false;
 }
 
@@ -2487,6 +2551,7 @@ void startWatchRecording()
 {
   wsRecording = true;
   wsPost = 0;
+  wsNextId = strikeEventID;
   wsNextType = strikeType;
   wsNextAt = millis();
   wsNextTiltPeak = fabs(tiltDeg);
@@ -2614,6 +2679,7 @@ void startStrike(String type)
 
   sharpPending = false;
 
+  finishWatchRecording();
   startStrikeRecording();
   startWatchRecording();
   fightOnStrike();
@@ -10010,76 +10076,101 @@ void handleWatch()
   server.send(200, "application/json", watchJson());
 }
 
-// The watch's LAST STRIKE page (fresh after a rod restart).
-// Recording (the 10 s after a strike): what is there so far, so the watch
-// shows it at once. Plus "zk"/"zt": 2 s before + 2 s after at 50 a second.
-const int ZOOM_EACH = 100;          // 2 s at 50 a second, before and after
-
+// The watch's LAST STRIKE page and the phone app's strike graphs.
+// /laststrike: the newest strike; while it is being recorded (the 10 s
+// after it) what is there so far, so the watch shows it at once.
+// /laststrike?n=12: strike number 12 if the rod still has it (the last 5).
+// "zk"/"zt": 2 s before + 2 s after at 50 a second.
 void handleLastStrike()
 {
+  String want = server.arg("n");
+  long n = want.length() > 0 ? want.toInt() : -1;
+
+  bool live = wsRecording && (n < 0 || n == (long)wsNextId);
+  WsRec* r = nullptr;
+
+  if(!live)
+  {
+    for(int i = wsKeepN - 1; i >= 0 && r == nullptr; i--)
+      if(n < 0 || wsKeep[i].id == (uint32_t)n)
+        r = &wsKeep[i];
+  }
+
+  bool have = live || r != nullptr;
+  int count = live ? wrecCount : (r != nullptr ? r->count : 0);
+  int start = (wrecHead - wrecCount + WREC_N) % WREC_N;
+
   String json;
   json.reserve(WREC_N * 10 + ZOOM_EACH * 20 + 300);
 
-  bool live = wsRecording;
-  int n = live ? wrecCount : wsCount;
-  int start = live ? (wrecHead - wrecCount + WREC_N) % WREC_N : 0;
-  bool have = live || wsHave;
-
   json += "{\"type\":\"";
-  json += live ? wsNextType : wsType;
+  json += live ? wsNextType.c_str() : (r != nullptr ? r->type : "");
   json += "\"";
 
   addField(json, "have", have);
   addField(json, "recording", live);
-  addField(json, "ago", have ? (long)((millis() - (live ? wsNextAt : wsAt)) / 1000) : 0L);
+  addField(json, "id", (long)(live ? wsNextId : (r != nullptr ? r->id : 0)));
+  addField(json, "ago", have ? (long)((millis() - (live ? wsNextAt : r->at)) / 1000) : 0L);
   addField(json, "count", (long)strikeEventID);
-  addField(json, "tiltpeak", live ? wsNextTiltPeak : wsTiltPeak, 2);
-  addField(json, "pull", (long)(live ? wsNextPull : wsPull));
-  addField(json, "pre", (long)(live ? n - wsPost : n - WREC_POST));
+  addField(json, "tiltpeak", live ? wsNextTiltPeak : (r != nullptr ? r->tiltPeak : 0), 2);
+  addField(json, "pull", (long)(live ? wsNextPull : (r != nullptr ? r->pull : 0)));
+  addField(json, "pre", (long)(live ? count - wsPost : (r != nullptr ? r->pre : 0)));
 
   json += ",\"k\":[";
 
-  for(int i = 0; i < n; i++)
+  for(int i = 0; i < count; i++)
   {
     if(i > 0) json += ",";
-    json += String((int)(live ? wrecK[(start + i) % WREC_N] : wsK[i]));
+    json += String((int)(live ? wrecK[(start + i) % WREC_N] : r->k[i]));
   }
 
   json += "],\"t\":[";
 
-  for(int i = 0; i < n; i++)
+  for(int i = 0; i < count; i++)
   {
     if(i > 0) json += ",";
-    json += String((int)(live ? wrecT[(start + i) % WREC_N] : wsT[i]));
+    json += String((int)(live ? wrecT[(start + i) % WREC_N] : r->t[i]));
   }
 
-  // ZOOM: the dashboard's recording of the same strike (50 a second)
-  int zs = savedPre - ZOOM_EACH;
-  int ze = savedPre + ZOOM_EACH;
+  // zoom: while recording from the dashboard's recording, else the kept copy
+  int zs = 0, zn = 0, zpre = 0;
 
-  if(zs < 0) zs = 0;
-  if(ze > savedCount) ze = savedCount;
-  if(!have) ze = zs;
+  if(live)
+  {
+    zs = savedPre - ZOOM_EACH;
+    int ze = savedPre + ZOOM_EACH;
+
+    if(zs < 0) zs = 0;
+    if(ze > savedCount) ze = savedCount;
+
+    zn = ze > zs ? ze - zs : 0;
+    zpre = savedPre - zs;
+  }
+  else if(r != nullptr)
+  {
+    zn = r->zn;
+    zpre = r->zpre;
+  }
 
   float thr = savedThreshold > 0 ? savedThreshold : 1;
 
   json += "],\"zpre\":";
-  json += String(savedPre - zs);
+  json += String(zpre);
   json += ",\"zk\":[";
 
-  for(int i = zs; i < ze; i++)
+  for(int i = 0; i < zn; i++)
   {
-    float k = savedEnergy[i] / thr * 100;
-    if(i > zs) json += ",";
+    float k = live ? savedEnergy[zs + i] / thr * 100 : r->zk[i];
+    if(i > 0) json += ",";
     json += String((int)(k > 300 ? 300 : k));
   }
 
   json += "],\"zt\":[";
 
-  for(int i = zs; i < ze; i++)
+  for(int i = 0; i < zn; i++)
   {
-    float t = savedTilt[i] * 100;
-    if(i > zs) json += ",";
+    float t = live ? savedTilt[zs + i] * 100 : r->zt[i];
+    if(i > 0) json += ",";
     json += String((int)(t > 300 ? 300 : (t < -300 ? -300 : t)));
   }
 
@@ -11134,7 +11225,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.4 (private LoRa: auto channel, crowd mode) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.5 (own Bluetooth line for phone and watch) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

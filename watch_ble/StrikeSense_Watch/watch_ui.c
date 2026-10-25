@@ -1063,6 +1063,32 @@ static void swipe_timer(lv_timer_t *t)
     beyond = 0;
     swiped = !screen_on;            // dark: this touch only wakes the screen
     screen_wake(imu_present() ? SCREEN_TOUCH_MS : SCREEN_IDLE_MS);
+
+    // a strike: a touch anywhere stops the vibration at once (not when the
+    // finger lifts) and tells the rod "I'm watching" (the phone alarm stops
+    // too). On the two round buttons, the button does it.
+    if(mode == MODE_STRIKE && strike_quiet != strike_seen)
+    {
+      strike_quiet = strike_seen;
+      haptic_live = false;
+      buzz_live_stop();
+      buzz_play(BUZZ_TAP);          // (also cuts a pattern that is playing)
+
+      bool on_button = false;
+
+      for(int i = 0; i < 2; i++)
+      {
+        lv_area_t a;
+        lv_obj_get_coords(st_btn[i], &a);
+
+        if(p.x >= a.x1 - 10 && p.x <= a.x2 + 10 && p.y >= a.y1 - 10 && p.y <= a.y2 + 10)
+          on_button = true;
+      }
+
+      if(!on_button)
+        ble_link_command("/watching");
+    }
+
     return;
   }
 

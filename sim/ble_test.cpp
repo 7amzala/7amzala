@@ -430,6 +430,38 @@ int main()
   }
 
 
+  // ---- the last 5 strikes kept with their graphs (phone app: by number) ----
+  printf("\n=== LAST 5 STRIKE GRAPHS ===\n");
+  {
+    const size_t NO = std::string::npos;
+    Answer b;
+    strikeActive = false; rodState = ST_MONITORING;
+    step(5);
+    startStrike("SLOW PULL");
+    long first = (long)strikeEventID;
+    step(4);                                   // a second strike 4 s later
+    strikeActive = false;
+    startStrike("SHARP STRIKE");
+    long second = (long)strikeEventID;
+    step(12);
+    bool g1 = ask(700300, "/laststrike?n=" + std::to_string(first), b) && b.body.find("\"have\":true") != NO &&
+              b.body.find("\"id\":" + std::to_string(first) + ",") != NO && b.body.find("SLOW PULL") != NO &&
+              b.body.find("\"zk\":[") != NO && b.body.find("\"zk\":[]") == NO;
+    printf("        strike %ld (4 s before the next): %zu bytes\n", first, b.body.size());
+    bool g2 = ask(700301, "/laststrike?n=" + std::to_string(second), b) && b.body.find("\"have\":true") != NO &&
+              b.body.find("SHARP STRIKE") != NO && b.body.find("\"recording\":false") != NO;
+    check(g1, "strike 4 s before the next one: its graph + zoom still there");
+    check(g2, "the next one too");
+    check(ask(700302, "/laststrike", b) && b.body.find("SHARP STRIKE") != NO, "/laststrike without a number: the newest (watch)");
+
+    for (int i = 0; i < 6; i++) { strikeActive = false; startStrike("SLOW PULL"); step(11); }
+    bool gone = ask(700303, "/laststrike?n=" + std::to_string(first), b) && b.body.find("\"have\":false") != NO;
+    bool kept = ask(700304, "/laststrike?n=" + std::to_string((long)strikeEventID - 4), b) && b.body.find("\"have\":true") != NO;
+    check(gone && kept, "the rod keeps the newest 5 (older ones: have false)");
+    cmdWatching();
+    step(2);
+  }
+
   // ---- smooth with phone + watch: a strike while the dashboard graph runs ----
   printf("\n=== PHONE + WATCH DURING A STRIKE (smoothness) ===\n");
   {

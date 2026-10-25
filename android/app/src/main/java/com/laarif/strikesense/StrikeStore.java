@@ -166,7 +166,7 @@ final class StrikeStore
     // it had (the rod's /laststrike "count"); null = none
     synchronized JSONObject needsGraph()
     {
-        for(int i = list.length() - 1; i >= 0 && i >= list.length() - 3; i--)
+        for(int i = list.length() - 1; i >= 0 && i >= list.length() - 5; i--)     // the rod keeps the last 5
         {
             JSONObject s = list.optJSONObject(i);
 

@@ -13,6 +13,8 @@ extern "C" void pair_restart(void);     // StrikeSense_Watch.ino
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include "host/ble_gap.h"
+#elif defined(CONFIG_BLUEDROID_ENABLED)
+#include <esp_gap_ble_api.h>
 #endif
 
 // Same as the rod (StrikeSense .ino) and the phone app (RodLink.java)
@@ -702,14 +704,9 @@ static bool loraOnly(uint32_t fresh_ms)
 #endif
 }
 
-// fast: 7.5-15 ms; calm: 90-110 ms (the live message comes every 100 ms anyway)
-static void setLinkFast(bool fast)
+// Ask the rod's link for fast (7.5-15 ms) or calm (90-110 ms) timing
+static void askLinkTiming(bool fast)
 {
-  if(fast == linkFast || client == nullptr)
-    return;
-
-  linkFast = fast;
-
 #if defined(CONFIG_NIMBLE_ENABLED)
   ble_gap_upd_params p = {};
   p.itvl_min = fast ? 6 : 72;          // x 1.25 ms
@@ -717,7 +714,25 @@ static void setLinkFast(bool fast)
   p.latency = 0;
   p.supervision_timeout = 400;         // x 10 ms
   ble_gap_update_params(client->getConnId(), &p);
+#elif defined(CONFIG_BLUEDROID_ENABLED)
+  esp_ble_conn_update_params_t p = {};
+  memcpy(p.bda, *client->getPeerAddress().getNative(), sizeof(esp_bd_addr_t));
+  p.min_int = fast ? 6 : 72;           // x 1.25 ms
+  p.max_int = fast ? 12 : 88;
+  p.latency = 0;
+  p.timeout = 400;                     // x 10 ms
+  esp_ble_gap_update_conn_params(&p);
 #endif
+}
+
+// fast: 7.5-15 ms; calm: 90-110 ms (the live message comes every 100 ms anyway)
+static void setLinkFast(bool fast)
+{
+  if(fast == linkFast || client == nullptr)
+    return;
+
+  linkFast = fast;
+  askLinkTiming(fast);
 
   Serial.printf("[BLE] link %s\n", fast ? "fast (something moves, or weak signal)" : "calm (saves power)");
 }
@@ -796,15 +811,7 @@ static void connectToRodAt(BLEAddress addr)
   calmSince = 0;
 
   // Fast link, like the phone app (7.5-15 ms instead of 20-40 ms)
-#if defined(CONFIG_NIMBLE_ENABLED)
-  ble_gap_upd_params fast = {};
-  fast.itvl_min = 6;                 // x 1.25 ms
-  fast.itvl_max = 12;
-  fast.latency = 0;
-  fast.supervision_timeout = 400;    // x 10 ms
-  int rc = ble_gap_update_params(client->getConnId(), &fast);
-  Serial.printf("[BLE] fast link %s\n", rc == 0 ? "asked" : "not possible");
-#endif
+  askLinkTiming(true);
 
   // The size exchange may still be on its way
   uint32_t waitMtu = millis();

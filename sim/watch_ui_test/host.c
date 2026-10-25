@@ -408,6 +408,7 @@ int main(void)
   int strike_before = buzzed[BUZZ_STRIKE];
   run_ms(4000);
   printf("%s: strike buzz stops after I'M WATCHING\n", buzzed[BUZZ_STRIKE] == strike_before ? "PASS" : "FAIL");
+
   press(290, 354);                           // REEL IN (strike)
   scene = 5; run_ms(500); press(233, 268);   // READY
   scene = 6; run_ms(500); press(233, 360);   // SKIP
@@ -697,9 +698,35 @@ int main(void)
     sent_n = before;
   }
 
-  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
-  int ok = sent_n == 7;
-  for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 7 || strcmp(sent[i], want[i])) ok = 0; }
+  // a new strike: a touch anywhere on the screen stops the vibration the
+  // moment the finger lands (not when it lifts), and tells the rod
+  fake_strike_id = 5; scene = 4; scene_start = sim_ms; run_ms(1500);
+  {
+    int tap_before = buzzed[BUZZ_TAP], sent_before = sent_n;
+    touch_x = 233; touch_y = 200; touch_down = 1; run_ms(30);
+    int quiet_at_once = buzzed[BUZZ_TAP] > tap_before;
+    touch_down = 0; run_ms(200);
+    int strike_n = buzzed[BUZZ_STRIKE] + buzzed[BUZZ_ALARM] + buzzed[BUZZ_ALARM2] + buzzed[BUZZ_KNOCKS] + buzzed[BUZZ_SLACK];
+    run_ms(6000);
+    int strike_n2 = buzzed[BUZZ_STRIKE] + buzzed[BUZZ_ALARM] + buzzed[BUZZ_ALARM2] + buzzed[BUZZ_KNOCKS] + buzzed[BUZZ_SLACK];
+    int told = 0;
+    for(int i = sent_before; i < sent_n; i++)
+      if(strcmp(sent[i], "/watching") == 0) told++;
+    told = told == 1;
+    printf("%s: strike: a touch anywhere stops the vibration at once (%s), tells the rod (%s), no more buzz (%d)\n",
+           quiet_at_once && told && strike_n2 == strike_n ? "PASS" : "FAIL", quiet_at_once ? "yes" : "no", told ? "yes" : "no", strike_n2 - strike_n);
+  }
+
+  const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir", "/watching" };
+  int ok = 1, n = 0;
+  for(int i = 0; i < sent_n; i++)
+  {
+    if(strncmp(sent[i], "/settime", 8) == 0) continue;   // (the watch passing on the time)
+    printf("  tap %d -> %s\n", n + 1, sent[i]);
+    if(n >= 8 || strcmp(sent[i], want[n])) ok = 0;
+    n++;
+  }
+  if(n != 8) ok = 0;
   {
     lv_mem_monitor_t m; lv_mem_monitor(&m);
     printf("LVGL memory at the end: %d%% used; most ever used %d bytes, smallest biggest free block %d\n",
@@ -710,6 +737,6 @@ int main(void)
     printf("%s: LVGL memory fits the watch's 64 KB (%d bytes here, limit 60000)\n",
            mem_peak <= 60000 ? "PASS" : "FAIL", mem_peak);
   }
-  printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", sent_n, ok ? "all buttons send the right request" : "wrong");
+  printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", n, ok ? "all buttons send the right request" : "wrong");
   return 0;
 }
