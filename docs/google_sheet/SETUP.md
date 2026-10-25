@@ -13,7 +13,7 @@ The testers never do this: they only register in the app.
 1. Menu **Extensions → Apps Script**. A new tab opens.
 2. Delete everything in the editor (`function myFunction() {...}`).
 3. Paste **all** of `Code.gs` (the file I sent you).
-4. Optional: to stop strangers registering, put a tester code on line 17, e.g.
+4. Optional: to stop strangers registering, put a tester code in the line `const INVITE_CODE = '';` near the top, e.g.
    `const INVITE_CODE = 'BEACH2026';` and give it only to your testers.
 5. Click **💾 Save** (or Ctrl+S). Name the project **StrikeSense**.
 
