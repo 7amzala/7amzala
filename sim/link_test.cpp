@@ -308,6 +308,20 @@ void switching()
   check(link_path_to_cmd("/ready", &u, &tz) == CMD_READY && link_path_to_cmd("/reelin", &u, &tz) == CMD_REELIN &&
         link_path_to_cmd("/watch", &u, &tz) == 0, "every button path has its LoRa command");
 
+  // the phone app's link choice
+  linkMode = 2;
+  step(2.5);
+  check((lora_link_get_status().flags & SS_F_LORA_ONLY) != 0, "LoRa only chosen: the heartbeat tells the watch (it leaves Bluetooth)");
+  linkMode = 1;
+  uint32_t hb0 = lora_link_get_status().hb_count;
+  unsigned long sent0 = simLoraSent;
+  step(6);
+  check(lora_link_get_status().hb_count == hb0, "Bluetooth only: the rod's LoRa stays quiet (saves battery)");
+  printf("  Bluetooth only: %lu packets in 6 s\n", simLoraSent - sent0);
+  linkMode = 0;
+  step(2.5);
+  check(lora_link_get_status().hb_count > hb0 && !(lora_link_get_status().flags & SS_F_LORA_ONLY), "Auto again: heartbeats back");
+
   // back near: Bluetooth again
   s = screens(true);
   check(s.via == LINK_BT, "rod near again: back to Bluetooth");

@@ -8,6 +8,7 @@ struct Preferences {
   float getFloat(const char* k,float d){ return f().count(k)? f()[k] : d; }
   unsigned long getULong(const char* k,unsigned long d){ return f().count(k)? (unsigned long)f()[k] : d; } void putULong(const char* k,unsigned long v){ f()[k]=v; }
   void putBool(const char* k,bool v){ f()[k]=v; } void putFloat(const char* k,float v){ f()[k]=v; }
+  int getInt(const char* k,int d){ return f().count(k)? (int)f()[k] : d; } void putInt(const char* k,int v){ f()[k]=v; }
   static std::map<std::string,std::string>& s(){ static std::map<std::string,std::string> m; return m; }
   String getString(const char* k,String d){ return s().count(k)? String(s()[k].c_str()) : d; }
   void putString(const char* k,String v){ s()[k]=v.c_str(); }

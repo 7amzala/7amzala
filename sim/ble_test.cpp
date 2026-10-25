@@ -333,6 +333,21 @@ int main()
     check(n == 10 && b.body.size() < 1500, "/strikes keeps the last 10 (small answer)");
   }
 
+  // ---- watch link choice (phone app) ----
+  {
+    const size_t NO = std::string::npos;
+    Answer b;
+    ask(700101, "/data", b);
+    check(b.body.find("\"lmode\":\"auto\"") != NO && b.body.find("\"haslora\":false") != NO, "/data: link Auto, this rod build has no LoRa");
+    check(ask(700102, "/linkmode?m=lora", b) && b.body == "{\"lmode\":\"lora\"}", "/linkmode: LoRa only");
+    check(ask(500040, "/watch", b) && b.body.find("\"lmode\":\"lora\"") != NO, "the watch's answer has the choice too");
+    linkMode = 0;
+    loadLinkMode();
+    check(linkMode == 2, "the choice is kept after a rod restart");
+    check(ask(700103, "/linkmode?m=bad", b) && b.code == 400, "a wrong choice is refused");
+    ask(700104, "/linkmode?m=auto", b);
+  }
+
   // ---- 5 named setups (presets), kept on the rod ----
   {
     Answer b;

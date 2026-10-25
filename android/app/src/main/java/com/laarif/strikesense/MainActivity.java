@@ -25,7 +25,10 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.view.Gravity;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -50,7 +53,12 @@ public class MainActivity extends Activity
     static volatile boolean visible = false;
 
     private WebView web;
-    private WebView strikes;                 // MY STRIKES, on top of the dashboard (which keeps running)
+    private WebView strikes;                 // MY STRIKES and the map, on top of the dashboard (which keeps running)
+
+    // bottom tabs
+    private static final int TAB_ROD = 0, TAB_STRIKES = 1, TAB_MAP = 2, TAB_SETTINGS = 3;
+    private final TextView[] tabs = new TextView[4];
+    private int tab = TAB_ROD;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean onDashboard = false;
     private boolean askedBluetoothOn = false;
@@ -69,10 +77,16 @@ public class MainActivity extends Activity
         web = new WebView(this);
         web.setBackgroundColor(Color.rgb(3, 8, 20));
 
-        FrameLayout root = new FrameLayout(this);
-        root.addView(web);
+        FrameLayout pages = new FrameLayout(this);
+        pages.addView(web);
+        makeStrikesView(pages);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.rgb(3, 8, 20));
+        root.addView(pages, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(makeTabs(), new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
         setContentView(root);
-        makeStrikesView(root);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -418,6 +432,12 @@ public class MainActivity extends Activity
     @Override
     public void onBackPressed()
     {
+        if(tab == TAB_SETTINGS)
+        {
+            showTab(TAB_ROD);
+            return;
+        }
+
         if(strikes.getVisibility() == View.VISIBLE)
         {
             // the page goes back a step (strike -> list); on the list: close
@@ -456,16 +476,94 @@ public class MainActivity extends Activity
         root.addView(strikes);
     }
 
+    // ---------- bottom tabs: Rod / My strikes / Map / Settings ----------
+
+    private int dp(int v)
+    {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private View makeTabs()
+    {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setBackgroundColor(Color.rgb(7, 12, 24));
+
+        String[] icons = { "\u25C9", "\u2630", "\u2691", "\u2699" };
+        String[] names = { "Rod", "My strikes", "Map", "Settings" };
+
+        for(int i = 0; i < 4; i++)
+        {
+            final int which = i;
+            TextView t = new TextView(this);
+            t.setText(icons[i] + "\n" + names[i]);
+            t.setGravity(Gravity.CENTER);
+            t.setTextSize(12);
+            t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            t.setOnClickListener(new View.OnClickListener()
+            {
+                @Override
+                public void onClick(View v)
+                {
+                    showTab(which);
+                }
+            });
+            tabs[i] = t;
+            bar.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        }
+
+        lightTab(TAB_ROD);
+        return bar;
+    }
+
+    private void lightTab(int which)
+    {
+        tab = which;
+
+        for(int i = 0; i < 4; i++)
+            tabs[i].setTextColor(i == which ? Color.rgb(34, 211, 255) : Color.rgb(95, 119, 153));
+    }
+
+    private void showTab(int which)
+    {
+        if(which == TAB_STRIKES || which == TAB_MAP)
+        {
+            String page = which == TAB_MAP ? "pMap" : "pList";
+
+            if(strikes.getVisibility() != View.VISIBLE)
+            {
+                strikes.setVisibility(View.VISIBLE);
+                strikes.loadUrl(DASHBOARD_URL + "app/strikes.html#" + page);
+            }
+            else
+            {
+                strikes.evaluateJavascript("show('" + page + "')", null);
+            }
+
+            web.evaluateJavascript("if(window.closeSettings) document.getElementById('drawer').classList.remove('open')", null);
+        }
+        else
+        {
+            strikes.setVisibility(View.GONE);
+            strikes.loadUrl("about:blank");
+
+            // Settings: the dashboard's settings panel; Rod: the live screen
+            web.evaluateJavascript(which == TAB_SETTINGS
+                ? "if(window.openSettings) openSettings()"
+                : "var d=document.getElementById('drawer'); if(d) d.classList.remove('open')", null);
+        }
+
+        lightTab(which);
+    }
+
     private void openStrikes()
     {
-        strikes.setVisibility(View.VISIBLE);
-        strikes.loadUrl(DASHBOARD_URL + "app/strikes.html");
+        showTab(TAB_STRIKES);
     }
 
     private void closeStrikes()
     {
-        strikes.setVisibility(View.GONE);
-        strikes.loadUrl("about:blank");
+        showTab(TAB_ROD);
     }
 
     // Called from the MY STRIKES page
@@ -533,6 +631,21 @@ public class MainActivity extends Activity
                     });
                 }
             }).start();
+        }
+
+        // the page changed (map, list...): light the matching tab
+        @JavascriptInterface
+        public void pageShown(final String id)
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    if(strikes.getVisibility() == View.VISIBLE)
+                        lightTab("pMap".equals(id) ? TAB_MAP : TAB_STRIKES);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -628,6 +741,21 @@ public class MainActivity extends Activity
                 public void run()
                 {
                     MainActivity.this.openStrikes();
+                }
+            });
+        }
+
+        // the settings panel was closed on the page: the Rod tab lights again
+        @JavascriptInterface
+        public void settingsClosed()
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    if(tab == TAB_SETTINGS)
+                        lightTab(TAB_ROD);
                 }
             });
         }

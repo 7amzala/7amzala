@@ -1982,6 +1982,9 @@ void updateConditions(bool immediate)
 
 void fightOnStrike();
 void updateFight();
+bool loraRadioOk();
+void loadLinkMode();
+const char* linkModeName();
 bool watchConnected();
 int loraWatchBars();
 
@@ -4877,7 +4880,6 @@ AUDIO: <span id="audioStatus">OFF</span>
 
 <div class="soundControls">
 <button class="soundButton" onclick="openSettings()">&#9881; SETTINGS</button>
-<button class="soundButton appOnly" onclick="openStrikes()">&#128205; MY STRIKES</button>
 </div>
 
 <div class="woBanner" id="woBanner">&#128245; Phone off the rod: <u>WATCH ONLY</u>. No alarms on the phone. It checks every 2 min that the watch is still there.<br><span id="woInfo"></span></div>
@@ -8005,6 +8007,9 @@ function loadDefault()
 function closeSettings()
 {
   el("drawer").classList.remove("open");
+
+  if(window.StrikeApp && StrikeApp.settingsClosed)
+    StrikeApp.settingsClosed();
 }
 
 // Send while sliding, but not more than ~6 times a second
@@ -8081,6 +8086,7 @@ function showTimes(d)
 {
   el("upTime").innerText = clock(d.up);
   showWatch(d);
+  showLinkMode(d);
 
   if(d.bat >= 0)
   {
@@ -8486,6 +8492,64 @@ noiseLoop();
 </div>
 
 <div class="setHelp">Changes work immediately. Watch the live values and the dashed lines on the graph.</div>
+
+<div class="setGroup" id="lmGroup">WATCH LINK</div>
+
+<div class="whoSeg" id="lmSeg">
+<button id="lm_auto" onclick="setLinkMode('auto')">Auto</button>
+<button id="lm_bt" onclick="setLinkMode('bt')">Bluetooth only</button>
+<button id="lm_lora" onclick="setLinkMode('lora')">LoRa only</button>
+</div>
+<div class="setHelp" id="lmHelp">&ndash;</div>
+
+<script>
+// How the watch talks to the rod (rod 2.3+: "lmode", "haslora" in /data)
+var LM_HELP = {
+  auto: 'Bluetooth near the rod (smooth live graph), LoRa when far (up to ~1 km). Best for most.',
+  bt: 'LoRa off: saves rod and watch battery. Stay within ~30 m of the rod.',
+  lora: 'The watch leaves Bluetooth: updates 1-2 times a second, up to ~1 km. If LoRa goes quiet for 1 min the watch tries Bluetooth again.'
+};
+var lmWanted = '', lmWantedAt = 0;
+
+function showLinkMode(d)
+{
+  var show = d.lmode !== undefined;
+  el('lmGroup').style.display = el('lmSeg').style.display = el('lmHelp').style.display = show ? '' : 'none';
+
+  if(!show)
+    return;
+
+  // just tapped: show the choice until the rod confirms it
+  var m = lmWanted && Date.now() - lmWantedAt < 3000 ? lmWanted : d.lmode;
+
+  ['auto', 'bt', 'lora'].forEach(function(k)
+  {
+    var b = el('lm_' + k);
+    b.className = k == m ? 'on' : '';
+    b.disabled = k != 'auto' && !d.haslora;
+    b.style.opacity = b.disabled ? .35 : 1;
+  });
+
+  el('lmHelp').innerText = d.haslora ? LM_HELP[m] || ''
+    : 'This rod has no LoRa (the rod sketch without LoRa): the watch uses Bluetooth.';
+}
+
+async function setLinkMode(m)
+{
+  lmWanted = m;
+  lmWantedAt = Date.now();
+  el('lmHelp').innerText = LM_HELP[m];
+  ['auto', 'bt', 'lora'].forEach(function(k) { el('lm_' + k).className = k == m ? 'on' : ''; });
+
+  try
+  {
+    await fetch('/linkmode?m=' + m);
+  }
+  catch(e)
+  {
+  }
+}
+</script>
 
 <div class="setGroup">MY SETUPS</div>
 
@@ -9074,10 +9138,68 @@ String watchJson()
   addField(json, "wind", (long)windLevel);
   addField(json, "bat", (long)batPercent);
   addField(json, "batleft", batLeftMin);
+  json += ",\"lmode\":\"";
+  json += linkModeName();
+  json += "\"";
 
   json += "}";
 
   return json;
+}
+
+// ---------- Watch link: auto / Bluetooth only / LoRa only (phone app) ----------
+
+int linkMode = 0;                       // 0 auto, 1 Bluetooth only, 2 LoRa only
+
+const char* linkModeName()
+{
+  return linkMode == 1 ? "bt" : linkMode == 2 ? "lora" : "auto";
+}
+
+void loadLinkMode()
+{
+  prefs.begin("strikesense", true);
+  linkMode = prefs.getInt("lmode", 0);
+  prefs.end();
+
+  if(linkMode < 0 || linkMode > 2)
+    linkMode = 0;
+}
+
+// /linkmode?m=auto|bt|lora
+void handleLinkMode()
+{
+  String m = server.arg("m");
+  int v = m == "auto" ? 0 : m == "bt" ? 1 : m == "lora" ? 2 : -1;
+
+  if(v < 0)
+  {
+    server.send(400, "text/plain", "BAD MODE");
+    return;
+  }
+
+  linkMode = v;
+
+  prefs.begin("strikesense", false);
+  prefs.putInt("lmode", v);
+  prefs.end();
+
+  Serial.printf("WATCH LINK: %s\n", linkModeName());
+  server.send(200, "application/json", String("{\"lmode\":\"") + linkModeName() + "\"}");
+}
+
+void addLinkMode(String& json)
+{
+  bool hasLora = false;
+
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  hasLora = loraRadioOk();
+#endif
+
+  json += ",\"lmode\":\"";
+  json += linkModeName();
+  json += "\"";
+  addField(json, "haslora", hasLora);
 }
 
 // ---------- The watch's link, for the phone ----------
@@ -9420,6 +9542,7 @@ void handleData()
   addField(json, "batv", batVolts, 2);
 
   addWatchLink(json);
+  addLinkMode(json);
 
   addVibrationSamples(json);
 
@@ -9589,7 +9712,7 @@ void sendHeartbeat()
   p.ftilt10 = (int16_t)clampFloat(fastTiltDeg * 10.0, -32000, 32000);
   p.allow100 = (uint16_t)clampFloat(pullAllow * 100.0, 0, 65000);
   p.drop = (uint8_t)clampFloat(dropBucket / bucketSize * 100.0, 0, 100);
-  p.flags = (dropWatch ? SS_F_DROPWATCH : 0) | (haveDir ? SS_F_DIR : 0);
+  p.flags = (dropWatch ? SS_F_DROPWATCH : 0) | (haveDir ? SS_F_DIR : 0) | (linkMode == 2 ? SS_F_LORA_ONLY : 0);
   p.knockId = (uint8_t)knockAlertID;
   p.kpeak10 = (uint8_t)clampFloat(knockThreshold > 0 ? energyPeakSinceLora / knockThreshold * 10.0 : 0, 0, 255);
   energyPeakSinceLora = 0;
@@ -9791,6 +9914,9 @@ void loraPoll()
     return;
   }
 
+  if(linkMode == 1)
+    return;
+
   if(strikeNeedsAck && strikeActive && (long)(now - nextStrikeSend) >= 0)
   {
     sendStrike();
@@ -9809,6 +9935,11 @@ void loraPoll()
     lastHeartbeatSent = now;
     sendHeartbeat();
   }
+}
+
+bool loraRadioOk()
+{
+  return loraOk;
 }
 
 // Watch heard in the last 15 s (it reports every 5 s)
@@ -9925,6 +10056,7 @@ void setup()
   server.on("/strike", handleStrike);
   server.on("/strikes", handleStrikes);
   server.on("/wping", handleWatchPing);
+  server.on("/linkmode", handleLinkMode);
   server.on("/settings", handleSettings);
   server.on("/set", handleSet);
   server.on("/savesettings", handleSaveSettings);
@@ -9944,6 +10076,7 @@ void setup()
   lastSampleTime = millis();
 
   Serial.printf("Started after: %s\n", resetReason());
+  loadLinkMode();
   startWatchdog();                      // from here on: stuck 10 s = restart
 }
 

@@ -51,7 +51,6 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
 <!-- ============ LIST ============ -->
 <div class="page on" id="pList">
  <div class="top">
-  <button class="back" onclick="closeAll()">&#8249; Back</button>
   <div class="title">My strikes</div><div class="sp"></div>
   <span class="chip act" onclick="show('pMap')">&#128506; MAP</span>
  </div>
@@ -182,6 +181,7 @@ function show(id)
   if(id == 'pMap') drawMap();
   if(id == 'pCloud') cloudPage();
   if(id == 'pList') drawList();
+  if(APP && APP.pageShown) APP.pageShown(id);      // the bottom tabs follow
 }
 
 // Android back button: one step back; false = close MY STRIKES
@@ -686,6 +686,7 @@ function demo()
   ];
 }
 
-drawList();
+// the Map tab opens the page straight on the map
+if(location.hash == '#pMap') show('pMap'); else drawList();
 </script>
 </body></html>

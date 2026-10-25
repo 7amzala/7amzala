@@ -89,6 +89,7 @@ enum
 // heartbeat flags
 #define SS_F_DROPWATCH  0x01   // drop-back seen, watching for a pull
 #define SS_F_DIR        0x02   // pull direction learned
+#define SS_F_LORA_ONLY  0x08   // phone app: the watch uses LoRa only (leaves Bluetooth)
 
 // ---------- Packets ----------
 

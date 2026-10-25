@@ -552,6 +552,21 @@ static void lost()
   setPhase(BLE_LINK_SEARCHING);
 }
 
+// "LoRa only" chosen in the phone app (the rod says it in its LoRa heartbeat).
+// fresh_ms: how recent that heartbeat must be. Leaving Bluetooth needs a
+// heartbeat right now; staying off Bluetooth needs one within 1 min, so a
+// silent LoRa brings Bluetooth back by itself.
+static bool loraOnly(uint32_t fresh_ms)
+{
+#if WATCH_LORA
+  lora_link_status_t lo = lora_link_get_status();
+  return lo.last_hb_ms != 0 && millis() - lo.last_hb_ms < fresh_ms && (lo.flags & SS_F_LORA_ONLY);
+#else
+  (void)fresh_ms;
+  return false;
+#endif
+}
+
 // fast: 7.5-15 ms; calm: 90-110 ms (the live message comes every 100 ms anyway)
 static void setLinkFast(bool fast)
 {
@@ -679,6 +694,12 @@ void ble_link_poll(void)
     if(link_merge_via() == LINK_LORA && now - scanEndMs < SCAN_PAUSE_LORA_MS)
       return;
 
+    if(loraOnly(60000))
+    {
+      setNote("LoRa only (chosen in the phone app)");
+      return;
+    }
+
     seenCount = 0;
     BLEDevice::getScan()->start(3, false);       // up to 3 s, stops early when found
     BLEDevice::getScan()->clearResults();
@@ -705,6 +726,14 @@ void ble_link_poll(void)
   {
     lost();
     setNote("rod lost - searching again");
+    return;
+  }
+
+  if(loraOnly(3000))
+  {
+    Serial.println("[BLE] LoRa only chosen in the app: leaving Bluetooth");
+    lost();
+    setNote("LoRa only (chosen in the phone app)");
     return;
   }
 
