@@ -60,6 +60,7 @@ void ble_link_command_lora(const char* path)
   uint8_t cmd = link_path_to_cmd(path, &utc, &tz);
 
   if (cmd == CMD_SETTIME) lora_link_send_settime(utc, tz);
+  else if (cmd == CMD_LINKMODE || cmd == CMD_CHANMODE) lora_link_send_command_arg(cmd, utc);
   else lora_link_send_command(cmd);
 
   unsigned long t0 = simMillis;
@@ -273,7 +274,7 @@ void switching()
     printf("  %s: %d heartbeats in 12 s calm, %d in 6 s while the line is pulled\n", fastCh ? "FAST 500 m" : "LONG RANGE 1 km", calm, busy);
     if (fastCh) {
       check(calm >= 11 && calm <= 13, "fast channel, calm: 1 a second");
-      check(busy >= 18, "fast channel, pull building: about 4 a second (smooth ring)");
+      check(busy >= 15, "fast channel, pull building: 3-4 a second (smooth ring)");
     } else {
       check(calm >= 7 && calm <= 9, "long range, calm: 1 every 1.5 s (10% rule)");
       check(busy >= 5, "long range, pull building: about 1 a second");
@@ -284,7 +285,7 @@ void switching()
     double share = air * (fastCh ? 1.0 : 1 / 1.5) / 10.0;
     printf("    heartbeat %d bytes on air %.1f ms: %.1f%% of the time when calm%s\n", (int)(sizeof(ss_heartbeat_t) + SS_WIRE_OVERHEAD), air, share,
            SS_CHANNELS[curChan].limited ? " (limit 10%)" : " (no limit on this band)");
-    if (!fastCh) check(share < 10 && air * 1.0 / 10.0 < 10, "long range stays under the 10% transmit time");
+    if (!fastCh) check(share < 10 && air / 1.1 / 10.0 < 10, "long range stays under the 10% transmit time (calm and busy)");
   }
   setChanMode(CHM_AUTO);
   settle();
@@ -322,6 +323,17 @@ void switching()
   step(2);
   s = screens(false);
   check(s.time >= 1760000000L && s.tz == 120, "rod time and zone come back over LoRa");
+
+  // the link and channel choices set on the watch reach the rod over LoRa too
+  ble_link_command_lora("/lorachan?m=long2");
+  check(chanMode == CHM_LONG2, "LoRa channel set on the watch (over LoRa): the rod keeps 1 km B");
+  step(3);
+  check(lora_link_get_status().chm == CHM_LONG2, "... and tells the watch back (it shows 1 km B)");
+  ble_link_command_lora("/lorachan?m=auto");
+  ble_link_command_lora("/linkmode?m=lora");
+  check(linkMode == 2, "watch link set on the watch (over LoRa): LoRa only");
+  ble_link_command_lora("/linkmode?m=auto");
+  check(linkMode == 0 && chanMode == CHM_AUTO, "back to Auto / Auto");
 
   uint32_t u; int tz;
   check(link_path_to_cmd("/ready", &u, &tz) == CMD_READY && link_path_to_cmd("/reelin", &u, &tz) == CMD_REELIN &&

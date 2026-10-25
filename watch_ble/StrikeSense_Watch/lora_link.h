@@ -75,6 +75,8 @@ typedef struct
   uint8_t  rods;           // other rods the rod hears
   bool     crowd;          // crowd mode
   uint8_t  loss;           // % of the rod's heartbeats missed lately
+  int      lmode;          // the rod's link choice (0 auto, 1 BT only, 2 LoRa only), -1 unknown
+  int      chm;            // the rod's channel choice CHM_xxx, -1 unknown
 } lora_link_status_t;
 
 // Call once in setup()
@@ -95,6 +97,7 @@ uint8_t lora_link_signal_bars(void);
 // Safe to call from the LVGL / UI code.
 void lora_link_send_command(uint8_t cmd);
 void lora_link_send_settime(uint32_t utc, int tz_min);
+void lora_link_send_command_arg(uint8_t cmd, uint32_t arg);   // CMD_LINKMODE, CMD_CHANMODE
 
 // True while a command is still waiting for the rod's confirmation
 bool lora_link_command_pending(void);

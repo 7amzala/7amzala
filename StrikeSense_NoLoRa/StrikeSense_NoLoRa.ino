@@ -16,6 +16,7 @@
 // (defined further down, before the battery code)
 void startWatchdog();
 const char* resetReason();
+void addWatchChanMode(String& json);
 #include <SparkFunLIS3DH.h>
 
 // Sensor: ADXL355 (EVAL-ADXL355-PMDZ, I2C) or LIS3DH, found automatically.
@@ -2088,6 +2089,7 @@ void updateFight();
 bool loraRadioOk();
 void loadLinkMode();
 const char* linkModeName();
+void setLinkMode(int v);
 bool watchConnected();
 int loraWatchBars();
 
@@ -8065,6 +8067,7 @@ function showTimes(d)
   el("upTime").innerText = clock(d.up);
   showWatch(d);
   showLinkMode(d);
+  showChan(d);
   showRod(d);
 
   if(d.bat >= 0)
@@ -8437,6 +8440,61 @@ noiseLoop();
 <button id="lm_lora" onclick="setLinkMode('lora')">LoRa only</button>
 </div>
 <div class="setHelp" id="lmHelp">&ndash;</div>
+
+<div class="setGroup" id="chGroup">LoRa CHANNEL</div>
+<div class="whoSeg" id="chSeg">
+<button id="ch_0" onclick="setChan(0)">Auto</button>
+<button id="ch_1" onclick="setChan(1)">500 m</button>
+<button id="ch_2" onclick="setChan(2)">1 km A</button>
+<button id="ch_3" onclick="setChan(3)">1 km B</button>
+</div>
+<div class="setHelp" id="chHelp">&ndash;</div>
+
+<script>
+// rod 2.4: "lchm" (choice), "lchan" (now), "lqual", "lrods" in /data
+var CH_HELP = [
+  'Starts on 500 m (fast: the ring moves 3-4 times a second), moves to 1 km by itself when the watch is far, back when near.',
+  '500 m, fast. Stay within about 500 m of the rod.',
+  '1 km, about one update a second. Pick A or B so friends nearby use different ones.',
+  '1 km, about one update a second. Pick A or B so friends nearby use different ones.'
+];
+var chWanted = -1, chWantedAt = 0;
+
+function showChan(d)
+{
+  var show = d.lchm !== undefined;
+  el('chGroup').style.display = el('chSeg').style.display = el('chHelp').style.display = show ? '' : 'none';
+
+  if(!show)
+    return;
+
+  var m = chWanted >= 0 && Date.now() - chWantedAt < 3000 ? chWanted : d.lchm;
+
+  for(var k = 0; k < 4; k++)
+    el('ch_' + k).className = k == m ? 'on' : '';
+
+  var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
+  el('chHelp').innerText = CH_HELP[m] + '  Now: ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined ? ' · ' + QUAL[d.lqual] : '') + (d.lrods ? ' (' + d.lrods + ' rods near)' : '');
+}
+
+async function setChan(k)
+{
+  chWanted = k;
+  chWantedAt = Date.now();
+
+  for(var i = 0; i < 4; i++)
+    el('ch_' + i).className = i == k ? 'on' : '';
+
+  try
+  {
+    await fetch('/lorachan?m=' + ['auto', 'fast', 'long1', 'long2'][k]);
+  }
+  catch(e)
+  {
+  }
+}
+</script>
 
 <script>
 // How the watch talks to the rod (rod 2.3+: "lmode", "haslora" in /data)
@@ -9064,6 +9122,7 @@ String watchJson()
   json += ",\"lmode\":\"";
   json += linkModeName();
   json += "\"";
+  addWatchChanMode(json);
 
   json += "}";
 
@@ -9135,6 +9194,8 @@ void forgetPairedDevices()
   Serial.println("Bluetooth: all paired devices forgotten - pairing open");
 }
 
+void addWatchChanMode(String&) {}      // no LoRa on this rod
+
 // ---------- Watch link: auto / Bluetooth only / LoRa only (phone app) ----------
 
 int linkMode = 0;                       // 0 auto, 1 Bluetooth only, 2 LoRa only
@@ -9166,6 +9227,15 @@ void handleLinkMode()
     return;
   }
 
+  setLinkMode(v);
+  server.send(200, "application/json", String("{\"lmode\":\"") + linkModeName() + "\"}");
+}
+
+void setLinkMode(int v)
+{
+  if(v < 0 || v > 2)
+    return;
+
   linkMode = v;
 
   prefs.begin("strikesense", false);
@@ -9173,7 +9243,6 @@ void handleLinkMode()
   prefs.end();
 
   Serial.printf("WATCH LINK: %s\n", linkModeName());
-  server.send(200, "application/json", String("{\"lmode\":\"") + linkModeName() + "\"}");
 }
 
 void addLinkMode(String& json)

@@ -324,6 +324,8 @@ static void handlePacket(const uint8_t* buf, size_t len)
 
     if(v24)
     {
+      status.lmode = p.modes & 3;
+      status.chm = p.modes >> 2;
       status.quality = p.quality;
       status.rods = p.rods;
       status.crowd = (p.flags & SS_F_CROWD) != 0;
@@ -538,6 +540,8 @@ bool lora_link_begin(void)
 {
   memset(&status, 0, sizeof(status));
   status.rod_battery = 255;
+  status.lmode = -1;
+  status.chm = -1;
 
   // Random start, so a restarted watch never repeats the rod's last seen number
   seq = (uint8_t)random(0, 256);
@@ -707,7 +711,7 @@ void lora_link_poll(void)
     fillHeader(&c.h, PKT_COMMAND);
     c.h.seq = cmdSeq;    // repeats keep the same number
     c.cmd = pendingCmd;
-    c.arg = c.cmd == CMD_SETTIME ? pendingArg : 0;
+    c.arg = pendingArg;
     c.tz15 = c.cmd == CMD_SETTIME ? pendingTz15 : 0;
 
     if(!sendRaw(&c, sizeof(c)))
@@ -805,6 +809,15 @@ uint8_t lora_link_signal_bars(void)
 
 void lora_link_send_command(uint8_t cmd)
 {
+  pendingArg = 0;
+  pendingCmd = cmd;
+  newCmd = true;
+}
+
+void lora_link_send_command_arg(uint8_t cmd, uint32_t arg)
+{
+  pendingArg = arg;
+  pendingTz15 = 0;
   pendingCmd = cmd;
   newCmd = true;
 }
@@ -813,7 +826,8 @@ void lora_link_send_settime(uint32_t utc, int tz_min)
 {
   pendingArg = utc;
   pendingTz15 = (int8_t)(tz_min / 15);
-  lora_link_send_command(CMD_SETTIME);
+  pendingCmd = CMD_SETTIME;
+  newCmd = true;
 }
 
 bool lora_link_command_pending(void)
@@ -830,6 +844,7 @@ lora_link_status_t lora_link_get_status(void) { lora_link_status_t s; memset(&s,
 uint8_t lora_link_signal_bars(void) { return 0; }
 void lora_link_send_command(uint8_t) {}
 void lora_link_send_settime(uint32_t, int) {}
+void lora_link_send_command_arg(uint8_t, uint32_t) {}
 bool lora_link_command_pending(void) { return false; }
 void lora_link_set_key(uint16_t, const uint8_t *) {}
 bool lora_link_has_key(uint16_t) { return true; }

@@ -49,6 +49,12 @@
 
 #include "watch_ui.h"
 #include "lvgl.h"
+
+// The screens need 64 KB of LVGL memory (lv_conf.h next to the lvgl library:
+// LV_MEM_SIZE). 48 KB froze the watch on its boot picture.
+#if defined(LV_MEM_SIZE) && LV_MEM_SIZE < (64U * 1024U) && !defined(WATCH_UI_HOST_TEST)
+#error "Copy the new lv_conf.h (watch_ble/lv_conf.h, LV_MEM_SIZE 64 KB) into your Arduino libraries folder, next to the lvgl folder"
+#endif
 #include "ble_link.h"
 #include "buzz.h"
 #include "watch_bat.h"
@@ -189,12 +195,17 @@ static lv_obj_t *sea_val[2];
 static lv_obj_t *sea_cap[2];
 
 // setup: three list cells
-static lv_obj_t *cell[3];
-static lv_obj_t *cell_fill[3];         // fills up while held
-static lv_obj_t *cell_ico[3];
-static lv_obj_t *cell_name[3];
-static lv_obj_t *cell_sub[3];
-static lv_obj_t *cell_arrow[3];
+#define CELLS 5
+static lv_obj_t *cell[CELLS];
+static lv_obj_t *cell_fill[CELLS];     // fills up while held
+static lv_obj_t *cell_ico[CELLS];
+static lv_obj_t *cell_name[CELLS];
+static lv_obj_t *cell_sub[CELLS];
+static lv_obj_t *cell_arrow[CELLS];
+
+// the link / LoRa channel choice just tapped (shown until the rod confirms)
+static int want_link = -1, want_chm = -1;
+static uint32_t want_at = 0;
 
 // pages: left/right: -1 relearn, 0 main, 1 sea state
 //        up/down:    -1 battery, 0 (the left/right page), 1 last strike
@@ -466,6 +477,35 @@ static void button_clicked(lv_event_t *e)
   if(path != NULL && strcmp(path, "#teach") == 0 && !swiped)
   {
     imu_teach_start();              // TEACH MY LOOK (not sent to the rod)
+    buzz_play(BUZZ_TAP);
+    return;
+  }
+
+  // WATCH LINK / LoRa CHANNEL: each tap = the next choice, kept on the rod (the app shows it too)
+  if(path != NULL && (strcmp(path, "#link") == 0 || strcmp(path, "#chan") == 0) && !swiped)
+  {
+    ble_link_status_t s;
+    ble_link_get(&s, false);
+    bool link = path[1] == 'l';
+    static const char *links[3] = { "auto", "bt", "lora" };
+    static const char *chans[4] = { "auto", "fast", "long1", "long2" };
+    char cmd[32];
+
+    if(link)
+    {
+      int now_m = want_link >= 0 && lv_tick_get() - want_at < 3000 ? want_link : s.lmode;
+      want_link = ((now_m < 0 ? 0 : now_m) + 1) % 3;
+      snprintf(cmd, sizeof(cmd), "/linkmode?m=%s", links[want_link]);
+    }
+    else
+    {
+      int now_c = want_chm >= 0 && lv_tick_get() - want_at < 3000 ? want_chm : s.chm;
+      want_chm = ((now_c < 0 ? 0 : now_c) + 1) % 4;
+      snprintf(cmd, sizeof(cmd), "/lorachan?m=%s", chans[want_chm]);
+    }
+
+    want_at = lv_tick_get();
+    ble_link_command(cmd);
     buzz_play(BUZZ_TAP);
     return;
   }
@@ -869,7 +909,7 @@ static void layout(ui_mode_t m)
   }
 
   // setup cells
-  for(int i = 0; i < 3; i++)
+  for(int i = 0; i < CELLS; i++)
     show(cell[i], false);
 
   // battery
@@ -1153,7 +1193,7 @@ static void cell_set(int i, const char *sub, float held, bool busy)
   if(lv_obj_get_style_border_color(cell[i], 0).full != (h ? COL_ORANGE : COL_LINE).full)
     lv_obj_set_style_border_color(cell[i], h ? COL_ORANGE : COL_LINE, 0);
 
-  int w = (int)(held * 312);
+  int w = (int)(held * 290);
   show(cell_fill[i], w > 0);
 
   if(w > 0 && lv_obj_get_style_width(cell_fill[i], 0) != w)
@@ -1180,6 +1220,9 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
 
   for(int i = 0; i < 3; i++)
     show(cell[i], !teach && (i < 2 || imu_present()));
+
+  show(cell[3], !teach && s->lmode >= 0);   // the rod tells its choices (rod 2.3+)
+  show(cell[4], !teach && s->chm >= 0);     // (a rod with LoRa)
 
   if(teach)
   {
@@ -1237,6 +1280,16 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
   cell_set(0, "hold 2 s", hold_btn == cell[0] ? f : 0, s->command_busy);
   cell_set(1, "hold 2 s", hold_btn == cell[1] ? f : 0, false);
   cell_set(2, "tap", 0, false);
+
+  // the choice just tapped until the rod has it, then what the rod says
+  bool fresh = now - want_at < 3000;
+  int lm = fresh && want_link >= 0 ? want_link : s->lmode;
+  int cm = fresh && want_chm >= 0 ? want_chm : s->chm;
+  static const char *link_names[3] = { "Auto  (tap to change)", "Bluetooth only", "LoRa only" };
+  static const char *chan_names[4] = { "Auto: 500 m, then 1 km", "500 m fast", "1 km - A", "1 km - B" };
+
+  cell_set(3, lm >= 0 && lm <= 2 ? link_names[lm] : "-", 0, false);
+  cell_set(4, cm >= 0 && cm <= 3 ? chan_names[cm] : "-", 0, false);
 }
 
 // ---------- STRIKE screen ----------
@@ -2456,16 +2509,16 @@ void watch_ui_create(void)
   hint = label(scr, FONT_MICRO, COL_DIM);
   lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 330);
 
-  // setup page: three list cells, icon - name - small text - arrow
-  const char *cell_names[3] = { "Relearn the sea", "New pull direction", "Teach my look" };
-  const char *cell_icons[3] = { LV_SYMBOL_REFRESH, LV_SYMBOL_UP, LV_SYMBOL_EYE_OPEN };
-  const lv_color_t cell_cols[3] = { COL_ORANGE, COL_ORANGE, COL_CYAN };
+  // setup page: five list cells, icon - name - small text - arrow
+  const char *cell_names[CELLS] = { "Relearn the sea", "New pull direction", "Teach my look", "Watch link", "LoRa channel" };
+  const char *cell_icons[CELLS] = { LV_SYMBOL_REFRESH, LV_SYMBOL_UP, LV_SYMBOL_EYE_OPEN, LV_SYMBOL_BLUETOOTH, LV_SYMBOL_WIFI };
+  const lv_color_t cell_cols[CELLS] = { COL_ORANGE, COL_ORANGE, COL_CYAN, COL_CYAN, COL_CYAN };
 
-  for(int i = 0; i < 3; i++)
+  for(int i = 0; i < CELLS; i++)
   {
     cell[i] = lv_btn_create(scr);
-    lv_obj_set_size(cell[i], 312, 68);
-    lv_obj_align(cell[i], LV_ALIGN_TOP_MID, 0, 112 + i * 80);
+    lv_obj_set_size(cell[i], 290, 56);
+    lv_obj_align(cell[i], LV_ALIGN_TOP_MID, 0, 96 + i * 64);
     lv_obj_set_style_radius(cell[i], 18, 0);
     lv_obj_set_style_bg_color(cell[i], COL_CARD, 0);
     lv_obj_set_style_border_width(cell[i], 1, 0);
@@ -2475,26 +2528,26 @@ void watch_ui_create(void)
     lv_obj_set_style_clip_corner(cell[i], true, 0);
     lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_SCROLLABLE);
 
-    cell_fill[i] = box(cell[i], 1, 68, 0, COL_ORANGE);
+    cell_fill[i] = box(cell[i], 1, 56, 0, COL_ORANGE);
     lv_obj_set_style_bg_opa(cell_fill[i], LV_OPA_30, 0);
     lv_obj_add_flag(cell_fill[i], LV_OBJ_FLAG_HIDDEN);
 
     // the icon in a tinted circle: one label with its own background
     cell_ico[i] = label(cell[i], FONT_SMALL, cell_cols[i]);
     lv_label_set_text(cell_ico[i], cell_icons[i]);
-    lv_obj_set_size(cell_ico[i], 40, 40);
+    lv_obj_set_size(cell_ico[i], 36, 36);
     lv_obj_set_style_radius(cell_ico[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(cell_ico[i], LV_OPA_20, 0);
     lv_obj_set_style_bg_color(cell_ico[i], cell_cols[i], 0);
-    lv_obj_set_style_pad_top(cell_ico[i], 10, 0);
-    lv_obj_align(cell_ico[i], LV_ALIGN_LEFT_MID, 14, 0);
+    lv_obj_set_style_pad_top(cell_ico[i], 8, 0);
+    lv_obj_align(cell_ico[i], LV_ALIGN_LEFT_MID, 12, 0);
 
     cell_name[i] = label(cell[i], FONT_SMALL, COL_TEXT);
     lv_label_set_text(cell_name[i], cell_names[i]);
-    lv_obj_align(cell_name[i], LV_ALIGN_TOP_LEFT, 68, 12);
+    lv_obj_align(cell_name[i], LV_ALIGN_TOP_LEFT, 60, 6);
 
     cell_sub[i] = label(cell[i], FONT_MICRO, COL_DARK);
-    lv_obj_align(cell_sub[i], LV_ALIGN_TOP_LEFT, 68, 38);
+    lv_obj_align(cell_sub[i], LV_ALIGN_TOP_LEFT, 60, 31);
 
     cell_arrow[i] = label(cell[i], FONT_TINY, COL_DARK);
     lv_label_set_text(cell_arrow[i], LV_SYMBOL_RIGHT);
@@ -2504,6 +2557,8 @@ void watch_ui_create(void)
   }
 
   lv_obj_add_event_cb(cell[2], button_clicked, LV_EVENT_CLICKED, (void *)"#teach");
+  lv_obj_add_event_cb(cell[3], button_clicked, LV_EVENT_CLICKED, (void *)"#link");
+  lv_obj_add_event_cb(cell[4], button_clicked, LV_EVENT_CLICKED, (void *)"#chan");
 
   // battery page: two rings (outer = rod, inner = watch), time left in the middle
   const char *bat_names[2] = { "ROD", "WATCH" };

@@ -156,7 +156,9 @@ enum
   CMD_SKIPPULL = 6,   // skip the pull test
   CMD_TEACHDIR = 7,   // new pull direction: one pull test now
   CMD_RELEARN  = 8,   // learn the sea again, stay armed (no pause)
-  CMD_SETTIME  = 9    // the watch's clock to a rod that lost its time (arg, tz15)
+  CMD_SETTIME  = 9,   // the watch's clock to a rod that lost its time (arg, tz15)
+  CMD_LINKMODE = 10,  // arg: 0 auto, 1 Bluetooth only, 2 LoRa only (set on the watch)
+  CMD_CHANMODE = 11   // arg: CHM_xxx (set on the watch)
 };
 
 // heartbeat flags
@@ -207,6 +209,7 @@ typedef struct __attribute__((packed))
   uint8_t  quality;      // Q_xxx
   uint8_t  rods;         // other rods heard on this channel (last 30 s)
   uint8_t  gap10;        // calm heartbeat every gap10 x 100 ms (the watch counts what it missed)
+  uint8_t  modes;        // link choice (bits 0-1: 0 auto, 1 BT only, 2 LoRa only) | channel choice CHM_xxx << 2
 } ss_heartbeat_t;
 
 #define SS_HEARTBEAT_V1_LEN 14   // size before the rod 2.3 fields

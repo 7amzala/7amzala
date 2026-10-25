@@ -39,6 +39,8 @@ typedef struct
   int lora_chan;            // CH_xxx: 0 = 500 m fast, 1/2 = 1 km long range
   int lora_quality;         // Q_xxx: Clear, Good, Busy, Congested
   int lora_rods;            // other rods near (crowd)
+  int lmode;                // the link choice kept on the rod: 0 auto, 1 Bluetooth only, 2 LoRa only, -1 unknown
+  int chm;                  // the LoRa channel choice: CHM_xxx, -1 unknown (rod without LoRa)
   int rssi;                 // dBm, 0 = unknown
   uint32_t seq;             // +1 for every new answer from the rod
   uint32_t age_ms;          // since the last answer

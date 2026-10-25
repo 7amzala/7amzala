@@ -109,6 +109,8 @@ void link_merge(ble_link_status_t *s, const lora_link_status_t *lo, uint32_t now
   s->time = lo->utc ? (long)(lo->utc + lora_age / 1000) : 0;
   s->tz = lo->tz_min;
   s->command_busy = lora_link_command_pending();
+  s->lmode = lo->lmode;
+  s->chm = lo->chm;
 }
 
 link_via_t link_merge_via(void)
@@ -129,6 +131,22 @@ uint8_t link_path_to_cmd(const char *path, uint32_t *utc, int *tz_min)
     { "/relearn",  CMD_RELEARN },
     { "/learn",    CMD_LEARN },
   };
+
+  // the link / channel choice set on the watch: the number in *utc
+  if(strncmp(path, "/linkmode?m=", 12) == 0 || strncmp(path, "/lorachan?m=", 12) == 0)
+  {
+    const char *m = path + 12;
+    bool link = path[1] == 'l' && path[2] == 'i';
+    int v = link ? (strcmp(m, "auto") == 0 ? 0 : strcmp(m, "bt") == 0 ? 1 : strcmp(m, "lora") == 0 ? 2 : -1)
+                 : (strcmp(m, "auto") == 0 ? CHM_AUTO : strcmp(m, "fast") == 0 ? CHM_FAST : strcmp(m, "long1") == 0 ? CHM_LONG1 :
+                    strcmp(m, "long2") == 0 ? CHM_LONG2 : -1);
+
+    if(v < 0)
+      return 0;
+
+    *utc = (uint32_t)v;
+    return link ? CMD_LINKMODE : CMD_CHANMODE;
+  }
 
   if(strncmp(path, "/settime?", 9) == 0)
   {

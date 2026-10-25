@@ -146,6 +146,8 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
   s->seq = scene == 0 ? 0 : sim_ms / 200;
   s->age_ms = 100;
   s->rssi = -64;
+  s->lmode = 0;                // the rod's link choice: Auto
+  s->chm = 0;                  // LoRa channel: Auto
   s->bat = 78;
   s->batleft = 580;
   s->knockthr = 0.004f;
@@ -419,10 +421,10 @@ int main(void)
   swipe(120, 380, 300);  expect(0, 0, "right: main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn"); save("w9_relearn");
   swipe(120, 380, 300);  expect(-1, 0, "right again: stays on relearn");
-  hold(233, 146, 800);   expect(-1, 0, "short press on RELEARN: nothing");
-  hold(233, 146, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
+  hold(233, 124, 800);   expect(-1, 0, "short press on RELEARN: nothing");
+  hold(233, 124, 2300);  expect(0, 0, "hold 2 s: /relearn sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: setup page");
-  hold(233, 226, 2300);  expect(0, 0, "hold NEW PULL DIRECTION 2 s: /teachdir sent, back to main");
+  hold(233, 188, 2300);  expect(0, 0, "hold NEW PULL DIRECTION 2 s: /teachdir sent, back to main");
   swipe(120, 380, 300);  expect(-1, 0, "right: relearn");
   swipe(380, 120, 300);  expect(0, 0, "left: main");
   swipe(380, 120, 300);  expect(1, 0, "left: sea state");
@@ -517,7 +519,7 @@ int main(void)
   // teach my look (relearn page)
   scene = 1; fake_look = 1; run_ms(300);
   swipe(120, 380, 300);                         // right: relearn page
-  press(233, 306);                              // TEACH MY LOOK
+  press(233, 252);                              // TEACH MY LOOK
   SCREEN(teach_started == 1, "TEACH MY LOOK starts teaching");
   fake_look = 0; run_ms(1000);
   SCREEN(brightness == 255 && page == -1, "while teaching: on, even if not looking");
@@ -674,6 +676,27 @@ int main(void)
   sent_n = sent_before_hist;                    // (WATCHING taps, /settime)
   printf("%s: history, %d wrong\n", hfail ? "FAIL" : "PASS", hfail);
 
+  // SETUP: WATCH LINK and LoRa CHANNEL, synced with the app through the rod
+  {
+    int before = sent_n;
+    scene = 1; run_ms(1500);
+    swipe(120, 380, 300); run_ms(400);
+    save("w19_setup");
+    lv_area_t a;
+    lv_obj_get_coords(cell[3], &a);
+    int shown = !lv_obj_has_flag(cell[3], LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(cell[4], LV_OBJ_FLAG_HIDDEN);
+    press((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2); run_ms(300);
+    lv_obj_get_coords(cell[4], &a);
+    press((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2); run_ms(300);
+    save("w20_setup_changed");
+    int good = shown && sent_n == before + 2 && strcmp(sent[before], "/linkmode?m=bt") == 0 && strcmp(sent[before + 1], "/lorachan?m=fast") == 0 &&
+               strcmp(lv_label_get_text(cell_sub[3]), "Bluetooth only") == 0 && strcmp(lv_label_get_text(cell_sub[4]), "500 m fast") == 0;
+    printf("%s: SETUP watch link + LoRa channel: tap -> %s, %s (shows: %s / %s)\n", good ? "PASS" : "FAIL",
+           sent_n > before ? sent[before] : "-", sent_n > before + 1 ? sent[before + 1] : "-",
+           lv_label_get_text(cell_sub[3]), lv_label_get_text(cell_sub[4]));
+    sent_n = before;
+  }
+
   const char *want[] = { "/reelin", "/watching", "/reelin", "/ready", "/skippull", "/relearn", "/teachdir" };
   int ok = sent_n == 7;
   for(int i = 0; i < sent_n; i++) { printf("  tap %d -> %s\n", i + 1, sent[i]); if(i >= 7 || strcmp(sent[i], want[i])) ok = 0; }
@@ -681,11 +704,11 @@ int main(void)
     lv_mem_monitor_t m; lv_mem_monitor(&m);
     printf("LVGL memory at the end: %d%% used; most ever used %d bytes, smallest biggest free block %d\n",
            m.used_pct, mem_peak, mem_low_biggest);
-    // 64-bit PC numbers: the version before the pro theme peaked at 49.4 KB
-    // here and ran on the watch (48 KB on its 32-bit chip); the new look
-    // first needed 14 KB more and froze on the boot logo. Stay at that level.
-    printf("%s: LVGL memory no more than the version that runs on the watch (%d bytes, limit 50000)\n",
-           mem_peak <= 50000 ? "PASS" : "FAIL", mem_peak);
+    // 64-bit PC numbers are bigger than the watch's 32-bit ones: 49.4 KB
+    // here ran on the watch's 48 KB; the pool is 64 KB now (lv_conf.h), so
+    // stay under 60 KB here to keep a margin.
+    printf("%s: LVGL memory fits the watch's 64 KB (%d bytes here, limit 60000)\n",
+           mem_peak <= 60000 ? "PASS" : "FAIL", mem_peak);
   }
   printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", sent_n, ok ? "all buttons send the right request" : "wrong");
   return 0;

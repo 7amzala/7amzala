@@ -227,13 +227,14 @@ unsigned long calmGapMs()
   return SS_CHANNELS[curChan].limited ? 1500 : 1000;
 }
 
-// something happening: fast channel 4 a second (2 in a crowd), long range 1 a second
+// something happening: fast channel 4 a second (2 in a crowd), long range
+// about 1 a second (a heartbeat takes ~0.1 s there: 10% transmit time rule)
 unsigned long busyGapMs()
 {
   if(curChan == CH_FAST)
     return crowd ? 500 : 250;
 
-  return 1000;
+  return 1100;
 }
 
 // ---------- sending: encrypted, after listening ----------

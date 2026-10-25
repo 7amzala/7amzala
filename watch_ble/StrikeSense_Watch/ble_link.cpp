@@ -370,6 +370,11 @@ static void gotWatchData(const std::string &j)
   s.dir = jsonBool(j, "dir");
   s.dropwatch = jsonBool(j, "dropwatch");
 
+  char lm[8] = "";
+  jsonGet(j, "lmode", lm, sizeof(lm));
+  s.lmode = strcmp(lm, "auto") == 0 ? 0 : strcmp(lm, "bt") == 0 ? 1 : strcmp(lm, "lora") == 0 ? 2 : -1;
+  s.chm = (int)jsonNum(j, "lchm", -1);
+
   float e = jsonNum(j, "energy", 0);
 
   portENTER_CRITICAL(&mux);
@@ -922,6 +927,8 @@ void ble_link_forget(void)
 void ble_link_begin(void)
 {
   memset(&shared, 0, sizeof(shared));
+  shared.lmode = -1;
+  shared.chm = -1;
   shared.bat = -1;
   shared.batleft = -1;
   strcpy(shared.state, "");
@@ -1209,6 +1216,8 @@ void ble_link_command(const char *path)
 
     if(cmd == CMD_SETTIME)
       lora_link_send_settime(utc, tz);
+    else if(cmd == CMD_LINKMODE || cmd == CMD_CHANMODE)
+      lora_link_send_command_arg(cmd, utc);
     else if(cmd != 0)
       lora_link_send_command(cmd);
 
