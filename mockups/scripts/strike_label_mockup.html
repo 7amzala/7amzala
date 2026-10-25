@@ -1,0 +1,128 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#d9dee7;font-family:Arial,Helvetica,sans-serif;width:1500px}
+h1{font-size:26px;margin:0 0 4px;color:#0b1428}
+.cap{color:#38465f;font-size:15px;margin-bottom:22px}
+.row{display:flex;gap:34px;align-items:flex-start}
+.col{width:360px}
+.lab{font-weight:800;color:#0b1428;font-size:16px;margin:0 0 10px}
+.lab span{display:inline-block;background:#1e7bff;color:#fff;border-radius:50%;width:26px;height:26px;text-align:center;line-height:26px;margin-right:8px}
+.phone{width:360px;height:760px;border-radius:38px;background:#000;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.scr{width:100%;height:100%;border-radius:30px;overflow:hidden;position:relative;color:#eaf3ff;
+ background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%)}
+.top{padding:16px 16px 8px;display:flex;align-items:center;gap:10px}
+.top .t{font-size:19px;font-weight:900}
+.top .back{font-size:22px;color:#22d3ff}
+.sub{color:#8ea6c8;font-size:12px}
+.card{background:#0b1428;border:1px solid #24324f;border-radius:14px;margin:8px 12px;padding:11px}
+.tabs{position:absolute;bottom:0;left:0;right:0;height:62px;background:#060c1a;border-top:1px solid #1c2a45;display:flex}
+.tabs div{flex:1;text-align:center;font-size:11px;color:#6d84a8;padding-top:10px}
+.tabs div b{display:block;font-size:20px;margin-bottom:2px}
+.tabs .on{color:#22d3ff}
+.ask{background:linear-gradient(90deg,#3b2a00,#2a1c00);border:1px solid #ffba52;color:#ffd38a;border-radius:12px;margin:6px 12px;padding:10px 12px;font-size:13px;font-weight:700}
+.ask b{float:right;background:#ffba52;color:#2a1c00;padding:3px 9px;border-radius:8px}
+.it{display:flex;gap:10px;align-items:center}
+.it .g{width:70px;height:38px;border-radius:7px;background:#060c1a;border:1px solid #1c2a45}
+.it .m{flex:1;font-size:13px;line-height:1.35}
+.it .m .s{color:#8ea6c8;font-size:11px}
+.bd{font-size:11px;font-weight:900;padding:4px 8px;border-radius:8px;white-space:nowrap}
+.fish{background:#0f3a24;color:#3ddc84;border:1px solid #3ddc84}
+.false{background:#3a0f16;color:#ff6b7a;border:1px solid #ff4d5e}
+.sus{background:#3a2c0f;color:#ffba52;border:1px solid #ffba52}
+.none{background:#1a2440;color:#9fb3d6;border:1px dashed #6d84a8}
+.three{display:flex;gap:7px;margin:4px 12px 6px}
+.three div{flex:1;text-align:center;border-radius:14px;padding:12px 2px 10px;font-weight:900;font-size:13px;border:2px solid #24324f;background:#0b1428;color:#9fb3d6}
+.three div i{display:block;font-style:normal;font-size:26px;margin-bottom:3px}
+.three .selF{border-color:#3ddc84;background:#0f3a24;color:#3ddc84}
+.three .selX{border-color:#ff4d5e;background:#3a0f16;color:#ff6b7a}
+.q{font-size:12px;color:#8ea6c8;letter-spacing:.8px;font-weight:800;margin:10px 14px 6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 12px}
+.chips div{padding:8px 10px;border-radius:10px;background:#0b1428;border:1px solid #24324f;font-size:13px;font-weight:700}
+.chips .on{background:#1e7bff;border-color:#22d3ff;color:#fff}
+.kg{display:flex;align-items:center;gap:8px;margin:0 12px}
+.kg .b{width:46px;height:46px;border-radius:12px;background:#0b1428;border:1px solid #24324f;font-size:26px;text-align:center;line-height:42px;color:#22d3ff;font-weight:900}
+.kg .v{flex:1;text-align:center;font-size:30px;font-weight:900}
+.kg .v small{font-size:15px;color:#8ea6c8}
+.note{margin:8px 12px 0;border:1px solid #24324f;background:#060c1a;border-radius:10px;padding:9px;color:#5f7799;font-size:13px}
+.save{margin:10px 12px 0;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border-radius:12px;padding:13px;font-weight:900;font-size:15px}
+.graph{margin:6px 12px;height:96px;border-radius:12px;background:#060c1a;border:1px solid #1c2a45;position:relative;overflow:hidden}
+.info{display:flex;justify-content:space-between;margin:0 14px;font-size:12px;color:#8ea6c8}
+.info b{color:#eaf3ff}
+.note2{width:360px;font-size:13px;color:#38465f;margin-top:12px;line-height:1.5}
+</style></head><body>
+<h1>Strike notes (mockup, Android app)</h1>
+<div class="cap">After fishing, the user marks each strike: <b>Fish</b>, <b>False alarm</b> or <b>Not sure</b>. Two taps for most strikes. It goes to the Google Sheet with the strike, so we can teach the rod what a false alarm looks like.</div>
+<div class="row">
+
+<!-- 1: list -->
+<div class="col">
+<div class="lab"><span>1</span>My strikes: what still needs a note</div>
+<div class="phone"><div class="scr">
+ <div class="top"><div><div class="t">My strikes</div><div class="sub">Spain · Pescador beach · today</div></div></div>
+ <div class="ask">3 strikes need a note <b>START</b></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,30 15,30 20,10 26,22 32,6 40,18 48,14 56,26 70,28"/></svg><div class="m">Run · 2.1 g<div class="s">19:42 · 48 s fight</div></div><div class="bd none">+ NOTE</div></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,30 20,30 24,14 28,30 33,12 37,30 70,30"/></svg><div class="m">Knocks · 0.9 g<div class="s">19:10 · 12 s</div></div><div class="bd none">+ NOTE</div></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,28 10,26 20,29 30,24 40,28 50,25 70,27"/></svg><div class="m">Slack line<div class="s">18:55 · 6 s</div></div><div class="bd none">+ NOTE</div></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,30 12,30 18,8 24,20 30,4 38,16 50,20 70,28"/></svg><div class="m">Run · 3.4 g<div class="s">18:20 · 1 min 30 s</div></div><div class="bd fish">🐟 Bass 1.8 kg</div></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,30 30,30 34,20 38,30 70,30"/></svg><div class="m">Knocks · 0.6 g<div class="s">17:51 · 4 s</div></div><div class="bd false">✕ Wave</div></div>
+ <div class="card it"><svg class="g" viewBox="0 0 70 38"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,30 25,28 30,18 36,26 70,27"/></svg><div class="m">Run · 1.2 g<div class="s">17:30 · 9 s</div></div><div class="bd sus">? Not sure</div></div>
+ <div class="tabs"><div><b>🎣</b>Rod</div><div class="on"><b>📈</b>My strikes</div><div><b>🗺</b>Map</div><div><b>⚙</b>Settings</div></div>
+</div></div>
+<div class="note2">The list shows a coloured badge for each strike. Strikes without a note show <b>+ NOTE</b>. The yellow bar walks through them one by one.</div>
+</div>
+
+<!-- 2: fish -->
+<div class="col">
+<div class="lab"><span>2</span>Tap the strike → "Fish"</div>
+<div class="phone"><div class="scr">
+ <div class="top"><div class="back">‹</div><div><div class="t">Strike 19:42</div><div class="sub">Run · 2.1 g · 48 s fight</div></div></div>
+ <div class="graph"><svg width="100%" height="100%" viewBox="0 0 330 96" preserveAspectRatio="none"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,80 60,80 75,30 90,60 105,15 125,50 150,35 180,62 220,45 260,70 330,76"/><line x1="75" y1="0" x2="75" y2="96" stroke="#ff4d5e" stroke-dasharray="3 3"/></svg></div>
+ <div class="q">WHAT WAS IT?</div>
+ <div class="three"><div class="selF"><i>🐟</i>Fish</div><div><i>✕</i>False alarm</div><div><i>?</i>Not sure</div></div>
+ <div class="q">WHICH FISH?</div>
+ <div class="chips"><div class="on">Sea bass</div><div>Gilthead bream</div><div>White bream</div><div>Mullet</div><div>Sole</div><div>Ray</div><div>Mackerel</div><div>Dogfish</div><div>Other…</div></div>
+ <div class="q">WEIGHT</div>
+ <div class="kg"><div class="b">−</div><div class="v">1.8 <small>kg</small></div><div class="b">+</div></div>
+ <div class="chips" style="margin-top:6px"><div>&lt; 0.5</div><div>1</div><div>2</div><div>3</div><div>5+</div><div>Lost it</div></div>
+ <div class="note">Note (optional)…</div>
+ <div class="save">SAVE ✓</div>
+</div></div>
+<div class="note2">Weight: − / + changes by 0.1 kg, or tap a quick size. <b>Lost it</b> = a fish, but it got off before landing.</div>
+</div>
+
+<!-- 3: false -->
+<div class="col">
+<div class="lab"><span>3</span>"False alarm" → why?</div>
+<div class="phone"><div class="scr">
+ <div class="top"><div class="back">‹</div><div><div class="t">Strike 17:51</div><div class="sub">Knocks · 0.6 g · 4 s</div></div></div>
+ <div class="graph"><svg width="100%" height="100%" viewBox="0 0 330 96" preserveAspectRatio="none"><polyline fill="none" stroke="#22d3ff" stroke-width="2" points="0,80 120,78 135,50 150,80 165,60 180,79 330,80"/></svg></div>
+ <div class="q">WHAT WAS IT?</div>
+ <div class="three"><div><i>🐟</i>Fish</div><div class="selX"><i>✕</i>False alarm</div><div><i>?</i>Not sure</div></div>
+ <div class="q">WHAT CAUSED IT? (optional)</div>
+ <div class="chips"><div class="on">🌊 Wave</div><div>💨 Wind</div><div>🌿 Weed / drift</div><div>🦀 Crab / small bite</div><div>🪨 Snagged</div><div>✋ I touched the rod</div><div>Don't know</div></div>
+ <div class="note">Note (optional)…</div>
+ <div class="save">SAVE ✓</div>
+ <div class="q" style="margin-top:18px">NOT SURE</div>
+ <div class="card" style="font-size:13px;color:#c3d2ea;line-height:1.45">"Not sure" saves straight away, with no more questions. Use it when you didn't see what happened.</div>
+</div></div>
+<div class="note2">The reason is optional, so a false alarm can be saved in two taps. The reasons tell me <b>which</b> false alarm to fix (waves, wind, weed…).</div>
+</div>
+
+<!-- 4: sheet -->
+<div class="col" style="width:330px">
+<div class="lab"><span>4</span>What goes to the Google Sheet</div>
+<div style="background:#fff;border-radius:10px;padding:10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.2)">
+<table style="border-collapse:collapse;width:100%">
+<tr style="background:#e8f0fe;font-weight:700"><td style="padding:5px;border:1px solid #ccd">Time</td><td style="padding:5px;border:1px solid #ccd">Type</td><td style="padding:5px;border:1px solid #ccd">Verdict</td><td style="padding:5px;border:1px solid #ccd">Fish / reason</td><td style="padding:5px;border:1px solid #ccd">kg</td></tr>
+<tr><td style="padding:5px;border:1px solid #ccd">18:20</td><td style="padding:5px;border:1px solid #ccd">Run</td><td style="padding:5px;border:1px solid #ccd;color:#188038;font-weight:700">Fish</td><td style="padding:5px;border:1px solid #ccd">Sea bass</td><td style="padding:5px;border:1px solid #ccd">1.8</td></tr>
+<tr><td style="padding:5px;border:1px solid #ccd">17:51</td><td style="padding:5px;border:1px solid #ccd">Knocks</td><td style="padding:5px;border:1px solid #ccd;color:#c5221f;font-weight:700">False</td><td style="padding:5px;border:1px solid #ccd">Wave</td><td style="padding:5px;border:1px solid #ccd"></td></tr>
+<tr><td style="padding:5px;border:1px solid #ccd">17:30</td><td style="padding:5px;border:1px solid #ccd">Run</td><td style="padding:5px;border:1px solid #ccd;color:#b06000;font-weight:700">Not sure</td><td style="padding:5px;border:1px solid #ccd"></td><td style="padding:5px;border:1px solid #ccd"></td></tr>
+</table>
+<div style="color:#555;margin-top:8px;line-height:1.45">These are new columns next to user, country, city, map link and graph. The rows can be changed later: if you edit a note in the app, the same row updates.</div>
+</div>
+<div class="note2" style="width:330px;margin-top:18px"><b>Why this helps:</b> with 10 testers we will get hundreds of strikes marked Fish or False. I can compare their graphs and change the alarm rules so the false ones (waves, wind) don't sound the alarm.</div>
+</div>
+
+</div></body></html>
