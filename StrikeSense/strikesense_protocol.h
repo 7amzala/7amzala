@@ -45,8 +45,81 @@ enum
   PKT_STRIKE    = 2,   // rod -> watch, repeated until ACK
   PKT_COMMAND   = 3,   // watch -> rod, repeated until ACK
   PKT_ACK       = 4,   // both ways
-  PKT_WATCH_HB  = 5    // watch -> rod, every 5 s
+  PKT_WATCH_HB  = 5,   // watch -> rod, every 5 s
+  PKT_MOVE      = 6    // rod -> watch: "I go to channel X now" (auto channel)
 };
+
+// ---------- rod 2.4: private LoRa ----------
+//
+// Every packet on the air: [wire header, plain] [the packet, encrypted
+// with the rod's own key (AES-128 CTR)] [4-byte signature (AES-CMAC)].
+// The key is made by the rod and given to its watch over the encrypted
+// Bluetooth pairing, so a watch only ever reads its own rod, and nobody
+// can read or fake its messages. Other rods' packets are only counted
+// (crowd mode).
+
+#define SS_MAGIC        0x5A
+#define SS_MAC_LEN      4
+
+typedef struct __attribute__((packed))
+{
+  uint8_t  magic;        // SS_MAGIC
+  uint8_t  from;         // 0 = rod, 1 = watch
+  uint16_t rod;          // the rod's tag (ROD-4F2A -> 0x4F2A)
+  uint32_t ctr;          // message number, never repeats (boot count << 20 | n)
+} ss_wire_t;
+
+#define SS_WIRE_OVERHEAD (sizeof(ss_wire_t) + SS_MAC_LEN)
+
+// ---------- channels (auto: fast first, long range when needed) ----------
+//
+// FAST: 869.85 MHz, 250 kHz, 5 mW (the 869.7-870 MHz band: no transmit
+//       time limit) -> ~500 m, the watch gets news 2-4 times a second
+// LONG: 869.4625 / 869.5875 MHz, 125 kHz, 25 mW (869.4-869.65 MHz band,
+//       10% transmit time) -> ~1 km, news about once a second
+
+enum
+{
+  CH_FAST  = 0,
+  CH_LONG1 = 1,
+  CH_LONG2 = 2,
+  CH_COUNT = 3
+};
+
+typedef struct
+{
+  float mhz;
+  float khz;
+  int8_t dbm;
+  uint8_t sf;
+  uint8_t limited;       // 10% transmit time rule
+} ss_channel_t;
+
+static const ss_channel_t SS_CHANNELS[CH_COUNT] =
+{
+  { 869.850f, 250.0f,  7, 7, 0 },
+  { 869.4625f, 125.0f, 14, 7, 1 },
+  { 869.5875f, 125.0f, 14, 7, 1 }
+};
+
+// the user's choice (app or watch), kept on the rod
+enum
+{
+  CHM_AUTO  = 0,
+  CHM_FAST  = 1,
+  CHM_LONG1 = 2,
+  CHM_LONG2 = 3
+};
+
+// channel quality shown on the watch and in the app
+enum
+{
+  Q_CLEAR = 0,
+  Q_GOOD = 1,
+  Q_BUSY = 2,
+  Q_CONGESTED = 3
+};
+
 
 // ---------- Rod states ----------
 
@@ -90,6 +163,7 @@ enum
 #define SS_F_DROPWATCH  0x01   // drop-back seen, watching for a pull
 #define SS_F_DIR        0x02   // pull direction learned
 #define SS_F_LORA_ONLY  0x08   // phone app: the watch uses LoRa only (leaves Bluetooth)
+#define SS_F_CROWD      0x10   // many rods heard: calm news less often (crowd mode)
 
 // ---------- Packets ----------
 
@@ -127,6 +201,12 @@ typedef struct __attribute__((packed))
   uint16_t ptneed100;    // pull test: how far it must move, x100 degrees
   uint32_t utc;          // rod time, UTC seconds since 1970, 0 = unknown
   int8_t   tz15;         // local time = UTC + tz15 x 15 minutes
+
+  // ---- rod 2.4: channels, crowd ----
+  uint8_t  chan;         // CH_xxx the rod is on
+  uint8_t  quality;      // Q_xxx
+  uint8_t  rods;         // other rods heard on this channel (last 30 s)
+  uint8_t  gap10;        // calm heartbeat every gap10 x 100 ms (the watch counts what it missed)
 } ss_heartbeat_t;
 
 #define SS_HEARTBEAT_V1_LEN 14   // size before the rod 2.3 fields
@@ -138,6 +218,12 @@ typedef struct __attribute__((packed))
   uint16_t strikeId;
   int16_t  peakTilt10;
 } ss_strike_t;
+
+typedef struct __attribute__((packed))
+{
+  ss_header_t h;
+  uint8_t chan;          // CH_xxx: the watch follows
+} ss_move_t;
 
 typedef struct __attribute__((packed))
 {
@@ -155,6 +241,7 @@ typedef struct __attribute__((packed))
   int8_t   rodRssi;      // how strong the watch hears the rod (dBm)
   int8_t   rodSnr;       // dB
   uint8_t  battery;      // watch battery %, 255 = not measured
+  uint8_t  loss;         // % of the rod's heartbeats the watch missed lately (auto channel)
 } ss_watch_hb_t;
 
 typedef struct __attribute__((packed))

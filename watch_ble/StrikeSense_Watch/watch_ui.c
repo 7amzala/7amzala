@@ -974,12 +974,20 @@ static void top_icons(const ble_link_status_t *s)
   for(int i = 0; i < 4; i++)
     set_bg_color(bars[i], i < n ? (lora ? COL_ORANGE : COL_CYAN) : COL_OFF);
 
-  char t[24];
+  char t[40];
 
   if(s->bat < 0)
-    snprintf(t, sizeof(t), lora ? "-- LoRa" : "--");
+    snprintf(t, sizeof(t), "--");
   else
-    snprintf(t, sizeof(t), lora ? "%d%% LoRa" : "%d%%", s->bat);    // orange bars + "LoRa": rod far away
+    snprintf(t, sizeof(t), "%d%%", s->bat);
+
+  // orange bars + "LoRa 500m Clear": rod far away, which channel, how busy
+  if(lora)
+  {
+    size_t n = strlen(t);
+    snprintf(t + n, sizeof(t) - n, " LoRa %s %s", s->lora_chan == 0 ? "500m" : "1km",
+             s->lora_quality == 0 ? "Clear" : s->lora_quality == 1 ? "Good" : s->lora_quality == 2 ? "Busy" : "Crowd");
+  }
 
   set_text(bat_label, t);
   set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : lora ? COL_ORANGE : COL_DIM);

@@ -16,6 +16,10 @@
 
 #include <SPI.h>
 #include <RadioLib.h>
+#include <Preferences.h>
+#include <math.h>
+#include <stddef.h>
+#include "ss_crypto.h"
 
 extern "C" int watch_bat_percent(void);     // watch_bat.cpp, -1 = not measured
 
@@ -81,6 +85,30 @@ static uint32_t lastBeginTry = 0;
 static uint32_t lastWatchHb = 0;
 static int beginTries = 0;
 
+// ---------- private LoRa: our rod's key, message numbers ----------
+
+static ss_aes_t aes;
+static bool keyed = false;
+static uint16_t rodTag = 0;
+static uint32_t txCtr = 0;               // never repeats: boot count << 20 | n (bit 31: from the watch)
+static uint32_t lastRodCtr = 0;          // a copied (replayed) rod packet is ignored
+static volatile bool newKey = false;     // set from the Bluetooth task
+static uint8_t keyIn[16];
+static uint16_t tagIn = 0;
+
+// ---------- channels: follow the rod; search when it is lost ----------
+
+static uint8_t curChan = CH_FAST;
+static bool searching = false;
+static uint32_t searchAt = 0;
+static uint32_t rodGapMs = 1000;         // the rod's calm heartbeat gap
+static uint32_t backoffUntil = 0;
+
+// missed heartbeats (the rod moves to long range when we miss many)
+static uint32_t winStart = 0;
+static int winGot = 0;
+static uint8_t lossPct = 0;
+
 static void IRAM_ATTR onLoraIrq(void)
 {
   loraIrq = true;
@@ -93,17 +121,96 @@ static void fillHeader(ss_header_t* h, uint8_t type)
   h->seq = seq++;
 }
 
-static void sendRaw(const void* data, size_t len)
+// encrypted + signed with our rod's key, after listening (false = try again soon)
+static bool sendRaw(const void* data, size_t len, bool urgent = false)
 {
-  if(radio.startTransmit((const uint8_t*)data, len) == RADIOLIB_ERR_NONE)
+  uint8_t out[96];
+
+  if(!keyed || len + SS_WIRE_OVERHEAD > sizeof(out))
+    return false;
+
+  if(!urgent)
+  {
+    int16_t cad = radio.scanChannel();
+    loraIrq = false;
+
+    if(cad == RADIOLIB_LORA_DETECTED)
+    {
+      backoffUntil = millis() + random(20, 80);
+      radio.startReceive();
+      return false;
+    }
+  }
+
+  ss_wire_t w = { SS_MAGIC, 1, rodTag, txCtr++ };
+  memcpy(out, &w, sizeof(w));
+  memcpy(out + sizeof(w), data, len);
+
+  uint8_t nonce[16] = { 0 };
+  memcpy(nonce, &w, sizeof(w));
+  ss_aes_ctr(&aes, nonce, out + sizeof(w), len);
+
+  uint8_t mac[16];
+  ss_aes_cmac(&aes, out, sizeof(w) + len, mac);
+  memcpy(out + sizeof(w) + len, mac, SS_MAC_LEN);
+
+  if(radio.startTransmit(out, len + SS_WIRE_OVERHEAD) == RADIOLIB_ERR_NONE)
   {
     txBusy = true;
     txStart = millis();
+    return true;
   }
-  else
+
+  radio.startReceive();
+  return false;
+}
+
+static void setChannel(uint8_t ch)
+{
+  if(ch >= CH_COUNT)
+    return;
+
+  const ss_channel_t &c = SS_CHANNELS[ch];
+
+  radio.standby();
+  radio.setFrequency(c.mhz);
+  radio.setBandwidth(c.khz);
+  radio.setSpreadingFactor(c.sf);
+  radio.setOutputPower(c.dbm);
+  radio.startReceive();
+
+  curChan = ch;
+
+  LOCK();
+  status.chan = ch;
+  UNLOCK();
+}
+
+static void loadKey(void)
+{
+  Preferences p;
+  p.begin("pair", false);
+  String k = p.getString("lkey", "");
+  rodTag = (uint16_t)p.getULong("ltag", 0);
+  uint32_t boot = p.getULong("lboot", 0) + 1;
+  p.putULong("lboot", boot);
+  p.end();
+
+  txCtr = 0x80000000u | ((boot & 0x7FF) << 20);
+  keyed = false;
+
+  if(k.length() == 32)
   {
-    radio.startReceive();
+    uint8_t key[16];
+
+    for(int i = 0; i < 16; i++)
+      key[i] = (uint8_t)strtol(k.substring(2 * i, 2 * i + 2).c_str(), nullptr, 16);
+
+    ss_aes_init(&aes, key);
+    keyed = true;
   }
+
+  status.keyed = keyed;
 }
 
 static void queueAck(uint8_t ackType, uint16_t value)
@@ -124,6 +231,42 @@ static void confirmStrike(uint16_t id)
     return;
 
   queueAck(PKT_STRIKE, id);
+}
+
+static void handlePacket(const uint8_t* buf, size_t len);
+
+// anything on the air: only our own rod's packets are opened
+static void handleRaw(const uint8_t* buf, size_t len)
+{
+  if(!keyed || len < SS_WIRE_OVERHEAD + sizeof(ss_header_t) || buf[0] != SS_MAGIC)
+    return;
+
+  ss_wire_t w;
+  memcpy(&w, buf, sizeof(w));
+  size_t n = len - SS_WIRE_OVERHEAD;
+
+  if(w.rod != rodTag || w.from != 0 || n > 64)
+    return;                                     // another rod, or a watch
+
+  uint8_t mac[16];
+  ss_aes_cmac(&aes, buf, sizeof(w) + n, mac);
+
+  if(memcmp(mac, buf + sizeof(w) + n, SS_MAC_LEN) != 0)
+    return;                                     // not our rod's key, or changed on the way
+
+  if(lastRodCtr != 0 && w.ctr <= lastRodCtr && (lastRodCtr - w.ctr) < 0x100000u)
+    return;                                     // a copy of an old packet
+
+  lastRodCtr = w.ctr;
+
+  uint8_t plain[64];
+  memcpy(plain, buf + sizeof(w), n);
+
+  uint8_t nonce[16] = { 0 };
+  memcpy(nonce, &w, sizeof(w));
+  ss_aes_ctr(&aes, nonce, plain, n);
+
+  handlePacket(plain, n);
 }
 
 static void handlePacket(const uint8_t* buf, size_t len)
@@ -150,7 +293,8 @@ static void handlePacket(const uint8_t* buf, size_t len)
     ss_heartbeat_t p;
     memset(&p, 0, sizeof(p));
     memcpy(&p, buf, len < sizeof(p) ? len : sizeof(p));    // an older rod sends a shorter one
-    bool ext = len >= sizeof(ss_heartbeat_t);
+    bool ext = len >= offsetof(ss_heartbeat_t, chan);       // rod 2.3 fields
+    bool v24 = len >= sizeof(ss_heartbeat_t);                // rod 2.4: channel, crowd
 
     LOCK();
     status.rod_state = p.state;
@@ -178,9 +322,32 @@ static void handlePacket(const uint8_t* buf, size_t len)
     status.utc = p.utc;
     status.tz_min = p.tz15 * 15;
 
+    if(v24)
+    {
+      status.quality = p.quality;
+      status.rods = p.rods;
+      status.crowd = (p.flags & SS_F_CROWD) != 0;
+    }
+
     status.last_hb_ms = millis();
     status.hb_count++;
+    status.searching = false;
     UNLOCK();
+
+    if(searching)
+    {
+      winStart = millis();         // count missed heartbeats only from now on
+      winGot = 0;
+    }
+
+    searching = false;
+    winGot++;
+
+    if(v24 && p.gap10 > 0)
+      rodGapMs = p.gap10 * 100UL;
+
+    if(v24 && p.chan != curChan && p.chan < CH_COUNT)
+      setChannel(p.chan);
 
     // A strike we did not confirm yet (its STRIKE packet may be lost)
     if(p.strike != STRIKE_NONE)
@@ -202,6 +369,14 @@ static void handlePacket(const uint8_t* buf, size_t len)
     ackedAnyStrike = false;
     confirmStrike(p->strikeId);
   }
+  else if(h->type == PKT_MOVE && len >= sizeof(ss_move_t))
+  {
+    const ss_move_t* m = (const ss_move_t*)buf;
+    Serial.printf("[LoRa] the rod moves to channel %s\n", lora_link_chan_name(m->chan));
+    setChannel(m->chan);
+    winStart = millis();
+    winGot = 0;
+  }
   else if(h->type == PKT_ACK && len >= sizeof(ss_ack_t))
   {
     const ss_ack_t* a = (const ss_ack_t*)buf;
@@ -216,10 +391,8 @@ static void handlePacket(const uint8_t* buf, size_t len)
 
 static int16_t startRadio(float tcxoVoltage)
 {
-  return radio.begin(
-    SS_FREQ_MHZ, SS_BW_KHZ, SS_SF, SS_CR,
-    SS_SYNC_WORD, SS_POWER_DBM, SS_PREAMBLE, tcxoVoltage
-  );
+  const ss_channel_t &c = SS_CHANNELS[CH_FAST];
+  return radio.begin(c.mhz, c.khz, c.sf, SS_CR, SS_SYNC_WORD, c.dbm, SS_PREAMBLE, tcxoVoltage);
 }
 
 static bool startLink(void)
@@ -254,7 +427,13 @@ static bool startLink(void)
 
   status.radio_ok = true;
 
-  Serial.printf("[LoRa] OK  %.3f MHz  SF%d  %.0f kHz - waiting for the rod\n", SS_FREQ_MHZ, SS_SF, SS_BW_KHZ);
+  curChan = CH_FAST;
+  status.chan = CH_FAST;
+
+  if(keyed)
+    Serial.printf("[LoRa] OK - waiting for our rod (tag %04X), encrypted\n", rodTag);
+  else
+    Serial.println("[LoRa] OK - no rod key yet: pair the watch with its rod over Bluetooth first");
 
   return true;
 }
@@ -363,6 +542,8 @@ bool lora_link_begin(void)
   // Random start, so a restarted watch never repeats the rod's last seen number
   seq = (uint8_t)random(0, 256);
 
+  loadKey();
+
   Serial.println();
   Serial.println("[LoRa] starting SX1262...");
 
@@ -399,11 +580,11 @@ void lora_link_poll(void)
     }
     else
     {
-      uint8_t buf[64];
+      uint8_t buf[96];
       size_t len = radio.getPacketLength();
 
       if(len > 0 && len <= sizeof(buf) && radio.readData(buf, len) == RADIOLIB_ERR_NONE)
-        handlePacket(buf, len);
+        handleRaw(buf, len);
     }
 
     radio.startReceive();
@@ -415,14 +596,86 @@ void lora_link_poll(void)
     radio.startReceive();
   }
 
+  // a new key from the Bluetooth task (just paired / rod changed)
+  if(newKey)
+  {
+    newKey = false;
+    char hex[33];
+
+    for(int i = 0; i < 16; i++)
+      snprintf(hex + 2 * i, 3, "%02x", keyIn[i]);
+
+    Preferences p;
+    p.begin("pair", false);
+    p.putString("lkey", String(hex));
+    p.putULong("ltag", tagIn);
+    p.end();
+
+    rodTag = tagIn;
+    ss_aes_init(&aes, keyIn);
+    keyed = true;
+    lastRodCtr = 0;
+
+    LOCK();
+    status.keyed = true;
+    UNLOCK();
+
+    Serial.printf("[LoRa] got our rod's key (tag %04X)\n", rodTag);
+  }
+
+  uint32_t silent = status.last_hb_ms == 0 ? now : now - status.last_hb_ms;
+  uint32_t lostAfter = rodGapMs * 3 + 1500 > 6000 ? rodGapMs * 3 + 1500 : 6000;
+
   LOCK();
   status.connected =
     status.last_hb_ms != 0 &&
-    now - status.last_hb_ms < CONNECTED_TIMEOUT_MS;
+    silent < (CONNECTED_TIMEOUT_MS > lostAfter ? CONNECTED_TIMEOUT_MS : lostAfter);
   UNLOCK();
+
+  // missed heartbeats over ~15 s (sent to the rod: it changes channel if many)
+  if(winStart == 0)
+    winStart = now;
+
+  if(now - winStart >= 15000)
+  {
+    float expected = (now - winStart) / (float)rodGapMs;
+    float miss = expected > 0 ? 1.0f - winGot / expected : 0;
+    lossPct = (uint8_t)(miss < 0 ? 0 : miss > 1 ? 100 : miss * 100);
+    winStart = now;
+    winGot = 0;
+
+    LOCK();
+    status.loss = lossPct;
+    UNLOCK();
+  }
+
+  // rod not heard: try each channel in turn (it may have moved without us)
+  if(keyed && !txBusy && (status.last_hb_ms == 0 || silent > lostAfter))
+  {
+    uint32_t dwell = rodGapMs * 2 + 500 > 4000 ? rodGapMs * 2 + 500 : 4000;
+
+    if(!searching)
+    {
+      // first wait here a while (the rod may just be quiet), then try the others
+      searching = true;
+      searchAt = now;
+
+      LOCK();
+      status.searching = true;
+      UNLOCK();
+    }
+    else if(now - searchAt >= dwell)
+    {
+      searchAt = now;
+      setChannel((uint8_t)((curChan + 1) % CH_COUNT));
+    }
+  }
 
   if(txBusy)
     return;
+
+  if((int32_t)(now - backoffUntil) < 0)
+    return;                        // someone else is talking: wait our turn
 
   // ---------- What to send next ----------
 
@@ -436,7 +689,7 @@ void lora_link_poll(void)
       ackedAnyStrike = true;
     }
 
-    sendRaw(&queuedAck, sizeof(queuedAck));
+    sendRaw(&queuedAck, sizeof(queuedAck), true);
     return;
   }
 
@@ -457,7 +710,8 @@ void lora_link_poll(void)
     c.arg = c.cmd == CMD_SETTIME ? pendingArg : 0;
     c.tz15 = c.cmd == CMD_SETTIME ? pendingTz15 : 0;
 
-    sendRaw(&c, sizeof(c));
+    if(!sendRaw(&c, sizeof(c)))
+      return;
 
     cmdTries++;
     nextCmdSend = now + SS_RESEND_MS + random(0, 300);
@@ -471,20 +725,34 @@ void lora_link_poll(void)
     return;
   }
 
-  // "I'm here" for the rod's dashboard (only once we hear the rod)
-  if(status.connected && now - lastWatchHb >= SS_WATCH_HB_MS + (uint32_t)random(0, 500))
-  {
-    lastWatchHb = now;
+  // "I'm here, hearing you this well" (only once we hear the rod; less often in a crowd)
+  uint32_t hbEvery = status.crowd ? 15000 : SS_WATCH_HB_MS;
 
+  if(status.connected && !searching && now - lastWatchHb >= hbEvery + (uint32_t)random(0, 500))
+  {
     ss_watch_hb_t w;
     fillHeader(&w.h, PKT_WATCH_HB);
     w.rodRssi = (int8_t)constrain((int)status.last_rssi, -127, 0);
     w.rodSnr = (int8_t)constrain((int)status.last_snr, -30, 30);
     int bat = watch_bat_percent();
     w.battery = bat < 0 ? 255 : (uint8_t)bat;
+    w.loss = lossPct;
 
-    sendRaw(&w, sizeof(w));
+    if(sendRaw(&w, sizeof(w)))
+      lastWatchHb = now;
   }
+}
+
+void lora_link_set_key(uint16_t rod_tag, const uint8_t key[16])
+{
+  memcpy(keyIn, key, 16);
+  tagIn = rod_tag;
+  newKey = true;
+}
+
+bool lora_link_has_key(uint16_t rod_tag)
+{
+  return keyed && rodTag == rod_tag;
 }
 
 lora_link_status_t lora_link_get_status(void)
@@ -563,8 +831,26 @@ uint8_t lora_link_signal_bars(void) { return 0; }
 void lora_link_send_command(uint8_t) {}
 void lora_link_send_settime(uint32_t, int) {}
 bool lora_link_command_pending(void) { return false; }
+void lora_link_set_key(uint16_t, const uint8_t *) {}
+bool lora_link_has_key(uint16_t) { return true; }
 
 #endif
+
+const char* lora_link_chan_name(uint8_t chan)
+{
+  return chan == CH_FAST ? "500 m" : "1 km";
+}
+
+const char* lora_link_quality_name(uint8_t q)
+{
+  switch(q)
+  {
+    case Q_CLEAR: return "Clear";
+    case Q_GOOD:  return "Good";
+    case Q_BUSY:  return "Busy";
+    default:      return "Congested";
+  }
+}
 
 const char* lora_link_strike_name(uint8_t strike_type)
 {

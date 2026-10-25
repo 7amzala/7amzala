@@ -13,6 +13,9 @@ inline unsigned long micros(){ return simMillis * 1000UL; }
 inline void delay(unsigned long){}
 inline long random(long a, long b){ return a + rand() % (b - a); }
 template<class T> inline T constrain(T v, T lo, T hi){ return v < lo ? lo : (v > hi ? hi : v); }
+#include <algorithm>
+using std::min;
+using std::max;
 class String {
 public:
   std::string s;

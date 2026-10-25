@@ -30,9 +30,13 @@ const char* resetReason();
 #endif
 
 #include "strikesense_protocol.h"
+#include "ss_crypto.h"
 
 void loraOnStrike();
 void addLoraFields(String& json);
+void addLoraChannel(String& json);
+void handleLoraChan();
+void handleLoraKey();
 
 // Sensor: ADXL355 (EVAL-ADXL355-PMDZ, I2C) or LIS3DH, found automatically.
 // ADXL355 wiring: pin 1 SCL -> D5, pin 2 SDA -> D4, pin 5 GND, pin 6 3V3,
@@ -5000,6 +5004,7 @@ function setLink(ready, rssi)
 </script>
 <br>
 <span id="watchInfo"><span>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
+<div id="crowdTip" style="display:none;margin:5px auto 0;max-width:330px;color:#ffba52;font-size:11px;font-weight:700"></div>
 <script>
 // How the watch is connected to the rod (rod 2.3+: "wlink" in /data)
 function showWatch(d)
@@ -5020,7 +5025,14 @@ function showWatch(d)
     b[i].style.background = i < d.wbars ? c : '';
 
   var via = document.getElementById('watchVia');
-  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa' : 'not connected';
+  var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
+  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
+
+  // many rods on the channel: Bluetooth gives the fastest alerts
+  var tip = document.getElementById('crowdTip');
+  tip.style.display = lora && d.lqual == 3 ? '' : 'none';
+  tip.textContent = 'Many devices nearby (' + (d.lrods || 0) + ' rods). For the fastest alerts use Bluetooth only (Settings).';
   via.style.color = c;
   document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
   box.className = 'show';
@@ -9807,6 +9819,7 @@ void handleData()
   addField(json, "paired", (long)bondedDevices());
   addField(json, "pairopen", pairWindowOpen());
   addLinkMode(json);
+  addLoraChannel(json);
 
   addVibrationSamples(json);
 
@@ -9888,6 +9901,7 @@ bool strikeNeedsAck = false;
 uint16_t strikeAckId = 0;
 int strikeTries = 0;
 unsigned long nextStrikeSend = 0;
+unsigned long strikeFirstSent = 0;
 
 // ACK waiting to be sent (short delay so the other side is listening)
 bool ackQueued = false;
@@ -9902,7 +9916,44 @@ float watchRssi = 0;            // how strong the rod hears the watch
 float watchSnr = 0;
 int watchHearsRodRssi = 0;      // reported by the watch
 int watchHearsRodSnr = 0;
+int watchLoss = 0;              // % of our heartbeats the watch missed
+unsigned long watchReportAt = 0;
 bool watchReported = false;
+
+// ---------- private LoRa: the rod's key, tag, message numbers ----------
+
+ss_aes_t loraAes;
+uint8_t loraKey[16];
+uint16_t rodTag = 0;            // ROD-4F2A -> 0x4F2A
+uint32_t txCtr = 0;             // never repeats: boot count << 20 | n
+uint32_t lastWatchCtr = 0;      // a copied (replayed) watch packet is ignored
+
+// ---------- channels ----------
+
+int curChan = CH_FAST;
+int chanMode = CHM_AUTO;
+unsigned long chanSince = 0;
+unsigned long strongSince = 0;
+bool moveQueued = false;        // tell the watch, then change channel
+bool moveAfterTx = false;
+int moveTo = CH_FAST;
+unsigned long loraBackoffUntil = 0;
+float dutyTokens = 20000;       // ms of airtime still allowed on a 10% channel
+unsigned long dutyAt = 0;
+
+// ---------- other rods (crowd mode) ----------
+
+struct OtherRod
+{
+  uint16_t tag;
+  unsigned long at;
+};
+
+const int OTHERS_MAX = 40;
+OtherRod others[OTHERS_MAX];
+float otherAirMs = 0;           // their airtime, last ~10 s
+unsigned long otherAirAt = 0;
+bool crowd = false;
 
 void IRAM_ATTR onLoraIrq()
 {
@@ -9932,18 +9983,131 @@ uint8_t rodStateCode()
   }
 }
 
-void loraSend(const void* data, size_t len)
+// SX1262 time on air (explicit header, CRC, coding rate 4/5), ms
+float loraAirtimeMs(size_t bytes)
 {
-  if(radio.startTransmit((const uint8_t*)data, len) == RADIOLIB_ERR_NONE)
+  const ss_channel_t& c = SS_CHANNELS[curChan];
+  float ts = (float)(1 << c.sf) / c.khz;
+  float n = 8.0f * bytes - 4 * c.sf + 28 + 16;
+  int payload = 8 + (int)(ceilf(n / (4.0f * c.sf)) * 5);
+  return (SS_PREAMBLE + 4.25f + payload) * ts;
+}
+
+// The rod's key (made once, kept in flash) and message numbers
+void loraKeyBegin()
+{
+  Preferences p;
+  p.begin("strikesense", false);
+  String k = p.getString("lkey", "");
+
+  if(k.length() != 32)
   {
-    loraTxBusy = true;
-    loraTxStart = millis();
+    char hex[33];
+
+    for(int i = 0; i < 16; i++)
+    {
+      loraKey[i] = (uint8_t)(esp_random() & 0xFF);
+      snprintf(hex + 2 * i, 3, "%02x", loraKey[i]);
+    }
+
+    p.putString("lkey", String(hex));
   }
   else
   {
-    radio.startReceive();
+    for(int i = 0; i < 16; i++)
+      loraKey[i] = (uint8_t)strtol(k.substring(2 * i, 2 * i + 2).c_str(), nullptr, 16);
   }
+
+  uint32_t boot = p.getULong("lboot", 0) + 1;
+  p.putULong("lboot", boot);
+  chanMode = p.getInt("lchm", CHM_AUTO);
+  p.end();
+
+  if(chanMode < CHM_AUTO || chanMode > CHM_LONG2)
+    chanMode = CHM_AUTO;
+
+  txCtr = (boot & 0xFFF) << 20;
+  rodTag = (uint16_t)strtol(rodId.c_str() + 4, nullptr, 16);
+  ss_aes_init(&loraAes, loraKey);
 }
+
+// ---------- other rods: how busy is the channel ----------
+
+void noteOtherRod(uint16_t tag, float airMs)
+{
+  unsigned long now = millis();
+  int free = -1, oldest = 0;
+
+  otherAirMs += airMs;
+
+  for(int i = 0; i < OTHERS_MAX; i++)
+  {
+    if(others[i].at != 0 && others[i].tag == tag)
+    {
+      others[i].at = now;
+      return;
+    }
+
+    if(others[i].at == 0 && free < 0)
+      free = i;
+
+    if(others[i].at < others[oldest].at)
+      oldest = i;
+  }
+
+  others[free >= 0 ? free : oldest] = { tag, now };
+}
+
+int othersCount()
+{
+  int n = 0;
+  unsigned long now = millis();
+
+  for(int i = 0; i < OTHERS_MAX; i++)
+    if(others[i].at != 0 && now - others[i].at < 30000)
+      n++;
+
+  return n;
+}
+
+void forgetOthers()
+{
+  memset(others, 0, sizeof(others));
+  otherAirMs = 0;
+  crowd = false;
+}
+
+uint8_t loraQuality()
+{
+  int n = othersCount();
+  float load = otherAirMs / 10000.0f;
+
+  if(crowd) return Q_CONGESTED;
+  if(n >= 4 || load >= 0.15f) return Q_BUSY;
+  if(n >= 1 || load >= 0.05f) return Q_GOOD;
+
+  return Q_CLEAR;
+}
+
+// calm news: every second, slower when the channel is crowded
+unsigned long calmGapMs()
+{
+  if(crowd)
+    return constrain(500UL * (othersCount() + 1), 2000UL, 8000UL);
+
+  return SS_CHANNELS[curChan].limited ? 1500 : 1000;
+}
+
+// something happening: fast channel 4 a second (2 in a crowd), long range 1 a second
+unsigned long busyGapMs()
+{
+  if(curChan == CH_FAST)
+    return crowd ? 500 : 250;
+
+  return 1000;
+}
+
+// ---------- sending: encrypted, after listening ----------
 
 void fillHeader(ss_header_t& h, uint8_t type)
 {
@@ -9952,9 +10116,63 @@ void fillHeader(ss_header_t& h, uint8_t type)
   h.seq = loraSeq++;
 }
 
-void sendHeartbeat()
+// false = not sent now (channel busy, or the 10% rule): try again soon
+bool loraSend(const void* data, size_t len, bool urgent = false)
+{
+  uint8_t out[96];
+  const ss_channel_t& c = SS_CHANNELS[curChan];
+
+  if(len + SS_WIRE_OVERHEAD > sizeof(out))
+    return false;
+
+  float air = loraAirtimeMs(len + SS_WIRE_OVERHEAD);
+
+  // 10% transmit time on the long range channels (strikes may use the reserve)
+  if(c.limited && dutyTokens < air + (urgent ? 0 : 2000))
+    return false;
+
+  // listen before talk: another LoRa packet on the air? wait a moment
+  int16_t cad = radio.scanChannel();
+  loraIrq = false;
+
+  if(cad == RADIOLIB_LORA_DETECTED)
+  {
+    loraBackoffUntil = millis() + (urgent ? random(5, 25) : random(20, 80));
+    radio.startReceive();
+    return false;
+  }
+
+  ss_wire_t w = { SS_MAGIC, 0, rodTag, txCtr++ };
+  memcpy(out, &w, sizeof(w));
+  memcpy(out + sizeof(w), data, len);
+
+  uint8_t nonce[16] = { 0 };
+  memcpy(nonce, &w, sizeof(w));
+  ss_aes_ctr(&loraAes, nonce, out + sizeof(w), len);
+
+  uint8_t mac[16];
+  ss_aes_cmac(&loraAes, out, sizeof(w) + len, mac);
+  memcpy(out + sizeof(w) + len, mac, SS_MAC_LEN);
+
+  if(radio.startTransmit(out, len + SS_WIRE_OVERHEAD) != RADIOLIB_ERR_NONE)
+  {
+    radio.startReceive();
+    return false;
+  }
+
+  loraTxBusy = true;
+  loraTxStart = millis();
+
+  if(c.limited)
+    dutyTokens -= air;
+
+  return true;
+}
+
+bool sendHeartbeat()
 {
   ss_heartbeat_t p;
+  memset(&p, 0, sizeof(p));
   fillHeader(p.h, PKT_HEARTBEAT);
 
   unsigned long learnLeft = 0;
@@ -9976,10 +10194,9 @@ void sendHeartbeat()
   p.ftilt10 = (int16_t)clampFloat(fastTiltDeg * 10.0, -32000, 32000);
   p.allow100 = (uint16_t)clampFloat(pullAllow * 100.0, 0, 65000);
   p.drop = (uint8_t)clampFloat(dropBucket / bucketSize * 100.0, 0, 100);
-  p.flags = (dropWatch ? SS_F_DROPWATCH : 0) | (haveDir ? SS_F_DIR : 0) | (linkMode == 2 ? SS_F_LORA_ONLY : 0);
+  p.flags = (dropWatch ? SS_F_DROPWATCH : 0) | (haveDir ? SS_F_DIR : 0) | (linkMode == 2 ? SS_F_LORA_ONLY : 0) | (crowd ? SS_F_CROWD : 0);
   p.knockId = (uint8_t)knockAlertID;
   p.kpeak10 = (uint8_t)clampFloat(knockThreshold > 0 ? energyPeakSinceLora / knockThreshold * 10.0 : 0, 0, 255);
-  energyPeakSinceLora = 0;
   p.waveWind = (uint8_t)((waveLevel & 0x0F) | ((windLevel & 0x0F) << 4));
   p.batLeft = batLeftMin < 0 ? 0xFFFF : (uint16_t)clampFloat(batLeftMin, 0, 65000);
   p.ptdeg100 = (uint16_t)clampFloat(totalDeg * 100.0, 0, 65000);
@@ -9987,12 +10204,21 @@ void sendHeartbeat()
   p.utc = (uint32_t)nowEpoch();
   p.tz15 = (int8_t)(clockTzMin / 15);
 
-  lastKnockIdSent = knockAlertID;
+  // rod 2.4: channel, quality, crowd
+  p.chan = (uint8_t)curChan;
+  p.quality = loraQuality();
+  p.rods = (uint8_t)min(othersCount(), 255);
+  p.gap10 = (uint8_t)min(calmGapMs() / 100, 255UL);
 
-  loraSend(&p, sizeof(p));
+  if(!loraSend(&p, sizeof(p)))
+    return false;
+
+  energyPeakSinceLora = 0;
+  lastKnockIdSent = knockAlertID;
+  return true;
 }
 
-// Something happening: the watch gets 2 heartbeats a second, else 1
+// Something happening: the watch gets news faster
 bool loraBusy()
 {
   return strikeActive || rodState == ST_PULLTEST ||
@@ -10000,7 +10226,7 @@ bool loraBusy()
          dropWatch || knockAlertID != lastKnockIdSent || recentKnockCount() > 0;
 }
 
-void sendStrike()
+bool sendStrike()
 {
   ss_strike_t p;
   fillHeader(p.h, PKT_STRIKE);
@@ -10009,7 +10235,7 @@ void sendStrike()
   p.strikeId = strikeAckId;
   p.peakTilt10 = (int16_t)clampFloat(strikePeakTilt * 10.0, -32000, 32000);
 
-  loraSend(&p, sizeof(p));
+  return loraSend(&p, sizeof(p), true);
 }
 
 void queueAck(uint8_t ackType, uint16_t value)
@@ -10032,8 +10258,158 @@ void loraOnStrike()
   strikeNeedsAck = true;
   strikeAckId = (uint16_t)strikeEventID;
   strikeTries = 0;
+  strikeFirstSent = millis();
   nextStrikeSend = millis();
 }
+
+// ---------- channels ----------
+
+void applyChannel(int ch)
+{
+  const ss_channel_t& c = SS_CHANNELS[ch];
+
+  radio.standby();
+  radio.setFrequency(c.mhz);
+  radio.setBandwidth(c.khz);
+  radio.setSpreadingFactor(c.sf);
+  radio.setOutputPower(c.dbm);
+  radio.startReceive();
+
+  curChan = ch;
+  chanSince = millis();
+  strongSince = 0;
+  forgetOthers();                  // other rods there are counted again
+
+  Serial.printf("[LoRa] channel: %s (%.4f MHz)\n", ch == CH_FAST ? "FAST ~500 m" : ch == CH_LONG1 ? "LONG RANGE 1" : "LONG RANGE 2", c.mhz);
+}
+
+// the quieter long range channel (a quick listen on each)
+int quieterLong()
+{
+  int busy[2] = { 0, 0 };
+
+  for(int k = 0; k < 2; k++)
+  {
+    const ss_channel_t& c = SS_CHANNELS[CH_LONG1 + k];
+    radio.standby();
+    radio.setFrequency(c.mhz);
+    radio.setBandwidth(c.khz);
+
+    for(int i = 0; i < 4; i++)
+      if(radio.scanChannel() == RADIOLIB_LORA_DETECTED)
+        busy[k]++;
+  }
+
+  loraIrq = false;
+  applyChannel(curChan);
+  return busy[1] < busy[0] ? CH_LONG2 : CH_LONG1;
+}
+
+// tell the watch first (if it hears us), then change
+void startMove(int ch)
+{
+  if(ch == curChan || moveQueued || moveAfterTx)
+    return;
+
+  if(watchLastSeen != 0 && millis() - watchLastSeen < 6000)
+  {
+    moveTo = ch;
+    moveQueued = true;
+  }
+  else
+  {
+    applyChannel(ch);
+  }
+}
+
+// AUTO: fast first; long range when the watch hears us badly or not at all;
+// back to fast when it hears us strongly for a minute
+void autoChannel(unsigned long now)
+{
+  if(chanMode != CHM_AUTO)
+  {
+    int want = chanMode == CHM_FAST ? CH_FAST : chanMode == CHM_LONG1 ? CH_LONG1 : CH_LONG2;
+
+    if(curChan != want)
+      startMove(want);
+
+    return;
+  }
+
+  bool fresh = watchReportAt != 0 && now - watchReportAt < 12000 && watchReportAt > chanSince;
+  unsigned long heard = max(watchLastSeen, chanSince);
+  unsigned long quiet = now - heard;
+
+  if(curChan == CH_FAST)
+  {
+    bool weak = fresh && (watchHearsRodRssi < -105 || watchHearsRodSnr < -3 || watchLoss > 35);
+
+    if(weak || quiet > 12000)
+    {
+      if(weak)
+        Serial.printf("[LoRa] the watch hears us badly (%d dBm, SNR %d, %d%% missed) -> long range\n", watchHearsRodRssi, watchHearsRodSnr, watchLoss);
+      else
+        Serial.println("[LoRa] the watch is silent for 12 s -> long range");
+
+      startMove(quieterLong());
+    }
+  }
+  else
+  {
+    bool strong = fresh && watchHearsRodRssi > -85 && watchHearsRodSnr > 5 && watchLoss < 10;
+
+    if(!strong)
+      strongSince = 0;
+    else if(strongSince == 0)
+      strongSince = now;
+
+    if((strong && now - strongSince > 60000) || quiet > 30000)
+    {
+      Serial.println(quiet > 30000 ? "[LoRa] the watch is silent for 30 s -> try the fast channel" : "[LoRa] the watch hears us strongly for 1 min -> fast channel");
+      startMove(CH_FAST);
+    }
+  }
+}
+
+// /lorachan?m=auto|fast|long1|long2 (app or watch)
+void setChanMode(int m)
+{
+  chanMode = constrain(m, (int)CHM_AUTO, (int)CHM_LONG2);
+
+  Preferences p;
+  p.begin("strikesense", false);
+  p.putInt("lchm", chanMode);
+  p.end();
+}
+
+void handleLoraChan()
+{
+  String m = server.arg("m");
+  int v = m == "auto" ? CHM_AUTO : m == "fast" ? CHM_FAST : m == "long1" ? CHM_LONG1 : m == "long2" ? CHM_LONG2 : -1;
+
+  if(v < 0)
+  {
+    server.send(400, "text/plain", "BAD CHANNEL");
+    return;
+  }
+
+  setChanMode(v);
+  server.send(200, "text/plain", "OK");
+}
+
+// The watch gets the rod's LoRa key over the encrypted Bluetooth pairing
+void handleLoraKey()
+{
+  char hex[33];
+
+  for(int i = 0; i < 16; i++)
+    snprintf(hex + 2 * i, 3, "%02x", loraKey[i]);
+
+  String json = "{\"id\":\"" + rodId + "\",\"tag\":" + String(rodTag) + ",\"key\":\"" + String(hex) + "\"}";
+  server.send(200, "application/json", json);
+}
+
+// ---------- receiving ----------
 
 void handleCommand(ss_command_t c)
 {
@@ -10061,6 +10437,7 @@ void handleCommand(ss_command_t c)
   }
 }
 
+// a packet from our own watch, already opened
 void handlePacket(const uint8_t* buf, size_t len)
 {
   if(len < sizeof(ss_header_t))
@@ -10075,12 +10452,16 @@ void handlePacket(const uint8_t* buf, size_t len)
   watchRssi = radio.getRSSI();
   watchSnr = radio.getSNR();
 
-  if(h->type == PKT_WATCH_HB && len >= sizeof(ss_watch_hb_t))
+  if(h->type == PKT_WATCH_HB && len >= sizeof(ss_watch_hb_t) - 1)
   {
-    const ss_watch_hb_t* w = (const ss_watch_hb_t*)buf;
+    ss_watch_hb_t w;
+    memset(&w, 0, sizeof(w));
+    memcpy(&w, buf, len < sizeof(w) ? len : sizeof(w));
 
-    watchHearsRodRssi = w->rodRssi;
-    watchHearsRodSnr = w->rodSnr;
+    watchHearsRodRssi = w.rodRssi;
+    watchHearsRodSnr = w.rodSnr;
+    watchLoss = w.loss;
+    watchReportAt = millis();
     watchReported = true;
   }
   else if(h->type == PKT_COMMAND && len >= SS_COMMAND_V1_LEN)
@@ -10102,15 +10483,51 @@ void handlePacket(const uint8_t* buf, size_t len)
   }
 }
 
+// anything on the air: ours (open it) or another rod's (count it)
+void handleRaw(const uint8_t* buf, size_t len)
+{
+  if(len < SS_WIRE_OVERHEAD + sizeof(ss_header_t) || buf[0] != SS_MAGIC)
+    return;
+
+  ss_wire_t w;
+  memcpy(&w, buf, sizeof(w));
+  size_t n = len - SS_WIRE_OVERHEAD;
+
+  uint8_t mac[16];
+  ss_aes_cmac(&loraAes, buf, sizeof(w) + n, mac);
+
+  if(w.rod != rodTag || memcmp(mac, buf + sizeof(w) + n, SS_MAC_LEN) != 0)
+  {
+    noteOtherRod(w.rod, loraAirtimeMs(len));      // not ours: only counted (crowd)
+    return;
+  }
+
+  if(w.from != 1 || (lastWatchCtr != 0 && w.ctr <= lastWatchCtr) || n > 64)
+    return;                                       // not from our watch, or a copy of an old packet
+
+  lastWatchCtr = w.ctr;
+
+  uint8_t plain[64];
+  memcpy(plain, buf + sizeof(w), n);
+
+  uint8_t nonce[16] = { 0 };
+  memcpy(nonce, &w, sizeof(w));
+  ss_aes_ctr(&loraAes, nonce, plain, n);
+
+  handlePacket(plain, n);
+}
+
 void loraBegin()
 {
   SPI.begin(ROD_LORA_SCK, ROD_LORA_MISO, ROD_LORA_MOSI, ROD_LORA_CS);
 
+  loraKeyBegin();
+
+  int ch = chanMode == CHM_LONG1 ? CH_LONG1 : chanMode == CHM_LONG2 ? CH_LONG2 : CH_FAST;
+  const ss_channel_t& c = SS_CHANNELS[ch];
+
   // Wio-SX1262: 1.8V TCXO powered from DIO3
-  int16_t state = radio.begin(
-    SS_FREQ_MHZ, SS_BW_KHZ, SS_SF, SS_CR,
-    SS_SYNC_WORD, SS_POWER_DBM, SS_PREAMBLE, 1.8
-  );
+  int16_t state = radio.begin(c.mhz, c.khz, c.sf, SS_CR, SS_SYNC_WORD, c.dbm, SS_PREAMBLE, 1.8);
 
   if(state != RADIOLIB_ERR_NONE)
   {
@@ -10124,9 +10541,12 @@ void loraBegin()
   radio.setDio1Action(onLoraIrq);
   radio.startReceive();
 
+  curChan = ch;
+  chanSince = millis();
+  dutyAt = millis();
   loraOk = true;
 
-  Serial.printf("[LoRa] OK  %.3f MHz  SF%d  %.0f kHz - talking to the watch\n", SS_FREQ_MHZ, SS_SF, SS_BW_KHZ);
+  Serial.printf("[LoRa] OK  %s  tag %04X  encrypted - talking to the watch\n", rodId.c_str(), rodTag);
 }
 
 void loraPoll()
@@ -10135,6 +10555,31 @@ void loraPoll()
     return;
 
   unsigned long now = millis();
+
+  // the 10% rule: 0.1 ms of airtime earned per ms, up to 20 s saved
+  dutyTokens = min(20000.0f, dutyTokens + (now - dutyAt) * 0.1f);
+  dutyAt = now;
+
+  // other rods' airtime fades over ~10 s; crowd mode on / off
+  if(now - otherAirAt >= 100)
+  {
+    otherAirMs *= powf(0.99f, (now - otherAirAt) / 100.0f);
+    otherAirAt = now;
+
+    int n = othersCount();
+    float load = otherAirMs / 10000.0f;
+
+    if(!crowd && (n >= 6 || load >= 0.25f))
+    {
+      crowd = true;
+      Serial.printf("[LoRa] crowd mode ON (%d rods near)\n", n);
+    }
+    else if(crowd && n <= 3 && load < 0.15f)
+    {
+      crowd = false;
+      Serial.println("[LoRa] crowd mode off");
+    }
+  }
 
   // ---------- Radio finished sending or received something ----------
 
@@ -10146,14 +10591,20 @@ void loraPoll()
     {
       radio.finishTransmit();
       loraTxBusy = false;
+
+      if(moveAfterTx)
+      {
+        moveAfterTx = false;
+        applyChannel(moveTo);
+      }
     }
     else
     {
-      uint8_t buf[64];
+      uint8_t buf[96];
       size_t len = radio.getPacketLength();
 
       if(len > 0 && len <= sizeof(buf) && radio.readData(buf, len) == RADIOLIB_ERR_NONE)
-        handlePacket(buf, len);
+        handleRaw(buf, len);
     }
 
     radio.startReceive();
@@ -10173,32 +10624,58 @@ void loraPoll()
 
   if(ackQueued && (long)(now - ackDueAt) >= 0)
   {
-    ackQueued = false;
-    loraSend(&queuedAck, sizeof(queuedAck));
+    if(loraSend(&queuedAck, sizeof(queuedAck), true))
+      ackQueued = false;
+
     return;
   }
 
   if(linkMode == 1)
+    return;                        // Bluetooth only: the rod's LoRa stays quiet
+
+  if((long)(now - loraBackoffUntil) < 0)
+    return;                        // someone else is talking: wait our turn
+
+  if(moveQueued)
+  {
+    ss_move_t m;
+    fillHeader(m.h, PKT_MOVE);
+    m.chan = (uint8_t)moveTo;
+
+    if(loraSend(&m, sizeof(m), true))
+    {
+      moveQueued = false;
+      moveAfterTx = true;
+    }
+
     return;
+  }
 
   if(strikeNeedsAck && strikeActive && (long)(now - nextStrikeSend) >= 0)
   {
-    sendStrike();
+    if(!sendStrike())
+      return;
 
     strikeTries++;
-    nextStrikeSend = now + SS_RESEND_MS + random(0, 300);
 
-    if(strikeTries >= SS_MAX_TRIES)
+    // the first 2 s every 0.3 s, then every second
+    nextStrikeSend = now + (now - strikeFirstSent < 2000 ? 300 : SS_RESEND_MS) + random(0, 100);
+
+    if(strikeTries >= SS_MAX_TRIES + 6)
       strikeNeedsAck = false;
 
     return;
   }
 
-  if(now - lastHeartbeatSent >= (unsigned long)(loraBusy() ? SS_HEARTBEAT_FAST_MS : SS_HEARTBEAT_MS))
+  if(now - lastHeartbeatSent >= (loraBusy() ? busyGapMs() : calmGapMs()))
   {
-    lastHeartbeatSent = now;
-    sendHeartbeat();
+    if(sendHeartbeat())
+      lastHeartbeatSent = now;
+
+    return;
   }
+
+  autoChannel(now);
 }
 
 bool loraRadioOk()
@@ -10241,6 +10718,16 @@ void addLoraFields(String& json)
   addField(json, "wseen", watchLastSeen == 0 ? -1L : (long)((millis() - watchLastSeen) / 1000));
 }
 
+// the app's watch line: channel, quality, rods near
+void addLoraChannel(String& json)
+{
+  addField(json, "lchan", (long)curChan);
+  addField(json, "lchm", (long)chanMode);
+  addField(json, "lqual", (long)loraQuality());
+  addField(json, "lrods", (long)othersCount());
+  addField(json, "crowd", crowd);
+}
+
 #else
 
 void loraOnStrike() {}
@@ -10252,6 +10739,8 @@ void addLoraFields(String& json)
   addField(json, "lora", false);
   addField(json, "watch", false);
 }
+
+void addLoraChannel(String&) {}
 
 #endif
 
@@ -10266,7 +10755,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.3 (LoRa + Bluetooth: watch switches by itself) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.4 (private LoRa: auto channel, crowd mode) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);
@@ -10322,6 +10811,10 @@ void setup()
   server.on("/wping", handleWatchPing);
   server.on("/forget", handleForget);
   server.on("/linkmode", handleLinkMode);
+#if ENABLE_LORA
+  server.on("/lorachan", handleLoraChan);
+  server.on("/lorakey", handleLoraKey);
+#endif
   server.on("/settings", handleSettings);
   server.on("/set", handleSet);
   server.on("/savesettings", handleSaveSettings);

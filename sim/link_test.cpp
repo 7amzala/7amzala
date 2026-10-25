@@ -6,12 +6,14 @@
 // fishing session, then the Bluetooth <-> LoRa switching.
 //
 //   W=../watch_ble/StrikeSense_Watch
-//   g++ -O2 -std=c++17 -Imock -Imock_lora -I$W -o link_test link_test.cpp $W/lora_link.cpp $W/link_merge.c && ./link_test
+//   g++ -O2 -std=c++17 -Imock -Imock_lora -I$W -o link_test link_test.cpp $W/lora_link.cpp $W/link_merge.c $W/ss_crypto.c && ./link_test
 
 #define SIM_NO_MAIN
 #define ENABLE_LORA 1
 #include "scenarios.cpp"
 #include "lora_link.h"
+#include "ss_crypto.h"
+#include <algorithm>
 #include "link_merge.h"
 
 SPIClass SPI;
@@ -94,6 +96,7 @@ void session(float loss)
   step(16);
   show("after learning:");
   check(rodState == ST_PAUSED, "rod paused for the cast after learning");
+  for (int i = 0; i < 80 && lora_link_get_status().rod_state != ROD_PAUSED; i++) step(0.1);
   check(lora_link_get_status().rod_state == ROD_PAUSED, "watch knows the rod is paused");
 
   // pull test only the very first time (then the direction is kept)
@@ -155,7 +158,9 @@ void session(float loss)
   check(!lora_link_get_status().connected, "watch notices the link is lost");
   check(!watchConnected(), "rod dashboard: watch NOT CONNECTED");
   simLoraLoss = loss;
-  step(3);
+  unsigned long back = simMillis;
+  while (!lora_link_get_status().connected && simMillis - back < 40000) step(0.1);
+  printf("  link back after %.1f s (the rod may have changed channel: the watch searches)\n", (simMillis - back) / 1000.0);
   check(lora_link_get_status().connected, "watch reconnects by itself");
 
   printf("  air: %lu packets, %lu lost\n", simLoraSent, simLoraLost);
@@ -256,19 +261,33 @@ void switching()
   s = screens(false);
   check(s.energy_peak == 0, "peak taken once (graph shows one spike)");
 
-  // heartbeat rate: 1 a second calm, 2 a second when something happens
+  // heartbeat rate per channel: calm / something happening
+  for (int ch = 0; ch < 2; ch++) {
+    setChanMode(ch == 0 ? CHM_FAST : CHM_LONG1);
+    settle();
+    for (int i = 0; i < 100 && lora_link_get_status().chan != curChan; i++) step(0.2);
+    int calm = heartbeatsIn(12);
+    events.push_back({ (float)(simMillis / 1000.0 + 0.1), 1, pullAllow * 1.6f, 2.0, 8 });   // slow building pull
+    int busy = heartbeatsIn(6);
+    bool fastCh = curChan == CH_FAST;
+    printf("  %s: %d heartbeats in 12 s calm, %d in 6 s while the line is pulled\n", fastCh ? "FAST 500 m" : "LONG RANGE 1 km", calm, busy);
+    if (fastCh) {
+      check(calm >= 11 && calm <= 13, "fast channel, calm: 1 a second");
+      check(busy >= 18, "fast channel, pull building: about 4 a second (smooth ring)");
+    } else {
+      check(calm >= 7 && calm <= 9, "long range, calm: 1 every 1.5 s (10% rule)");
+      check(busy >= 5, "long range, pull building: about 1 a second");
+    }
+    // airtime used on this channel
+    ss_heartbeat_t hb; (void)hb;
+    double air = SX1262::airtimeMs(sizeof(ss_heartbeat_t) + SS_WIRE_OVERHEAD, SS_CHANNELS[curChan].sf, SS_CHANNELS[curChan].khz);
+    double share = air * (fastCh ? 1.0 : 1 / 1.5) / 10.0;
+    printf("    heartbeat %d bytes on air %.1f ms: %.1f%% of the time when calm%s\n", (int)(sizeof(ss_heartbeat_t) + SS_WIRE_OVERHEAD), air, share,
+           SS_CHANNELS[curChan].limited ? " (limit 10%)" : " (no limit on this band)");
+    if (!fastCh) check(share < 10 && air * 1.0 / 10.0 < 10, "long range stays under the 10% transmit time");
+  }
+  setChanMode(CHM_AUTO);
   settle();
-  int calm = heartbeatsIn(10);
-  events.push_back({ (float)(simMillis / 1000.0 + 0.1), 1, pullAllow * 1.6f, 2.0, 8 });   // slow building pull
-  int busy = heartbeatsIn(6);
-  printf("  heartbeats: %d in 10 s calm, %d in 6 s while the line is pulled\n", calm, busy);
-  check(calm >= 9 && calm <= 11, "calm: about 1 heartbeat a second");
-  check(busy >= 10, "pull building: about 2 a second (ring moves faster)");
-
-  double air = airtimeMs(sizeof(ss_heartbeat_t), SS_SF, SS_BW_KHZ, SS_CR, SS_PREAMBLE);
-  printf("  heartbeat %d bytes = %.1f ms on air: %.1f%% (calm) / %.1f%% (busy) of the 10%% allowed\n",
-         (int)sizeof(ss_heartbeat_t), air, air / 10.0, air * 2 / 10.0);
-  check(air * 2 / 1000.0 < 0.09, "2 a second stays under the 10% legal transmit time");
 
   // a strike far away: on the watch over LoRa
   settle();
@@ -313,6 +332,7 @@ void switching()
   step(2.5);
   check((lora_link_get_status().flags & SS_F_LORA_ONLY) != 0, "LoRa only chosen: the heartbeat tells the watch (it leaves Bluetooth)");
   linkMode = 1;
+  step(0.5);                              // a heartbeat already on the air still arrives
   uint32_t hb0 = lora_link_get_status().hb_count;
   unsigned long sent0 = simLoraSent;
   step(6);
@@ -332,8 +352,190 @@ void switching()
   s = screens(false);
   check(s.via == LINK_NONE && s.phase != BLE_LINK_CONNECTED, "both links gone: 'looking for the rod'");
   simLoraLoss = 0;
-  step(3);
+  unsigned long back2 = simMillis;
+  while (screens(false).via != LINK_LORA && simMillis - back2 < 40000) step(0.1);
+  printf("  LoRa back after %.1f s\n", (simMillis - back2) / 1000.0);
   check(screens(false).via == LINK_LORA, "LoRa back by itself");
+}
+
+// ---------- private LoRa, auto channel, crowd ----------
+
+SX1262* watchRadio()
+{
+  for (SX1262* r : SX1262::all()) if (r != &radio && r->cb != nullptr && r->x == SX1262::all()[0]->x + 0 && r != nullptr) {}
+  for (SX1262* r : SX1262::all()) if (r != &radio) return r;
+  return nullptr;
+}
+
+// another fisherman's rod: its own key, its own tag, a heartbeat now and then
+struct FakeRod
+{
+  SX1262* r;
+  ss_aes_t aes;
+  uint16_t tag;
+  uint32_t ctr = 1;
+  unsigned long next = 0;
+  int gap;
+
+  FakeRod(uint16_t t, float x, int ch, int g) : tag(t), gap(g)
+  {
+    r = new SX1262(new Module(0, 0, 0));
+    r->x = x;
+    const ss_channel_t& c = SS_CHANNELS[ch];
+    r->setFrequency(c.mhz); r->setBandwidth(c.khz); r->setSpreadingFactor(c.sf); r->setOutputPower(c.dbm);
+    uint8_t key[16];
+    for (int i = 0; i < 16; i++) key[i] = (uint8_t)(t * 7 + i * 13);
+    ss_aes_init(&aes, key);
+    next = simMillis + rand() % g;
+  }
+
+  void tick()
+  {
+    if (simMillis < next || r->txing) return;
+    next = simMillis + gap + rand() % 200;
+    if (r->scanChannel() == RADIOLIB_LORA_DETECTED) { next = simMillis + 30 + rand() % 50; return; }
+    uint8_t out[64];
+    ss_wire_t w = { SS_MAGIC, 0, tag, ctr++ };
+    memcpy(out, &w, sizeof(w));
+    for (size_t i = sizeof(w); i < sizeof(ss_heartbeat_t) + SS_WIRE_OVERHEAD; i++) out[i] = (uint8_t)rand();
+    r->startTransmit(out, sizeof(ss_heartbeat_t) + SS_WIRE_OVERHEAD);
+  }
+};
+
+std::vector<FakeRod*> fakes;
+
+void stepAll(double secs)
+{
+  double end = simMillis / 1000.0 + secs;
+  while (simMillis / 1000.0 < end) {
+    for (FakeRod* f : fakes) f->tick();
+    step(0.001);
+  }
+}
+
+void privateLora()
+{
+  printf("\n===== PRIVATE LORA: OTHER RODS, COPIED AND CHANGED PACKETS =====\n");
+  simLoraLoss = 0;
+  setChanMode(CHM_AUTO);
+  settle();
+  SX1262* wr = watchRadio();
+
+  // a friend's rod right next to us, same channel
+  FakeRod* f = new FakeRod(0x91C7, 5, curChan, 900);
+  fakes.push_back(f);
+  lora_link_status_t before = lora_link_get_status();
+  stepAll(8);
+  lora_link_status_t after = lora_link_get_status();
+  check(othersCount() == 1, "the rod counts the friend's rod (1 rod near)");
+  check(after.rod_state == before.rod_state && after.connected, "the watch ignores the friend's rod (still shows ours only)");
+
+  // someone copies one of our rod's packets and sends it again later
+  std::vector<uint8_t> copy;
+  for (int i = 0; i < 3000 && copy.empty(); i++) { step(0.001); if (radio.txing && radio.txData.size() > 40) copy = radio.txData; }
+  stepAll(2);
+  linkMode = 1;                     // our rod quiet now: only the copy could reach the watch
+  stepAll(1);
+  uint32_t hb = lora_link_get_status().hb_count;
+  f->r->startTransmit(copy.data(), copy.size());
+  for (int i = 0; i < 200; i++) step(0.001);
+  check(lora_link_get_status().hb_count == hb, "a copied (replayed) packet of our rod is ignored");
+
+  // a changed packet (one byte different)
+  std::vector<uint8_t> bad = copy;
+  ((ss_wire_t*)bad.data())->ctr += 5000;
+  bad[20] ^= 0x40;
+  hb = lora_link_get_status().hb_count;
+  f->r->startTransmit(bad.data(), bad.size());
+  for (int i = 0; i < 200; i++) step(0.001);
+  check(lora_link_get_status().hb_count == hb, "a changed packet is refused (signature wrong)");
+  linkMode = 0;
+
+  fakes.clear();
+  delete f;
+  SX1262::all().erase(std::remove(SX1262::all().begin(), SX1262::all().end(), f->r), SX1262::all().end());
+  (void)wr;
+}
+
+void autoChannelTest()
+{
+  printf("\n===== AUTO CHANNEL: 500 m FAST, 1 km LONG RANGE =====\n");
+  simLoraLoss = 0;
+  setChanMode(CHM_AUTO);
+  SX1262* wr = watchRadio();
+  wr->x = 50;
+  for (int i = 0; i < 200 && curChan != CH_FAST; i++) stepAll(1);
+  settle();
+  check(curChan == CH_FAST && lora_link_get_status().chan == CH_FAST, "near (50 m): fast channel");
+
+  // walk to 800 m: too far for the fast channel
+  wr->x = 800;
+  unsigned long t0 = simMillis;
+  while ((curChan == CH_FAST || !lora_link_get_status().connected || lora_link_get_status().chan != curChan) && simMillis - t0 < 60000) step(0.2);
+  printf("  at 800 m: rod on %s after %.1f s, watch %s\n", curChan == CH_FAST ? "FAST" : "LONG RANGE", (simMillis - t0) / 1000.0,
+         lora_link_get_status().connected ? "connected" : "lost");
+  check(curChan != CH_FAST && lora_link_get_status().chan == curChan && lora_link_get_status().connected, "far (800 m): both on long range, connected");
+
+  // a strike far away
+  unsigned long before = strikeEventID;
+  events.push_back({ (float)(simMillis / 1000.0 + 0.5), 1, 3.0, 2, 20 });
+  unsigned long ts = simMillis;
+  while (strikeEventID == before && simMillis - ts < 20000) step(0.05);
+  unsigned long at = simMillis;
+  while (lora_link_get_status().strike_id != (uint16_t)strikeEventID && simMillis - at < 10000) step(0.01);
+  printf("  strike at 800 m: on the wrist after %.2f s\n", (simMillis - at) / 1000.0);
+  check(simMillis - at < 1000, "strike at 800 m arrives within 1 s");
+  settle();
+
+  // back near: fast again after a strong minute
+  wr->x = 30;
+  t0 = simMillis;
+  while (curChan != CH_FAST && simMillis - t0 < 150000) step(0.5);
+  for (int i = 0; i < 100 && lora_link_get_status().chan != CH_FAST; i++) step(0.1);
+  printf("  back at 30 m: fast channel after %.0f s\n", (simMillis - t0) / 1000.0);
+  check(curChan == CH_FAST && lora_link_get_status().chan == CH_FAST, "back near: fast channel again (after a strong minute)");
+}
+
+void crowdTest()
+{
+  printf("\n===== CROWD: 12 OTHER RODS ON OUR CHANNEL =====\n");
+  simLoraLoss = 0;
+  setChanMode(CHM_FAST);
+  SX1262* wr = watchRadio();
+  wr->x = 30;
+  settle();
+  for (int i = 0; i < 12; i++) fakes.push_back(new FakeRod(0x1000 + i, 10 + i * 3, CH_FAST, 1000));
+  stepAll(15);
+  printf("  rod hears %d rods, crowd mode %s, quality %d, calm news every %lu ms\n", othersCount(), crowd ? "ON" : "off", loraQuality(), calmGapMs());
+  check(crowd && loraQuality() == Q_CONGESTED, "12 rods near: crowd mode ON, quality Congested");
+  check(calmGapMs() >= 4000, "calm news less often (every few seconds)");
+  stepAll(3);
+  check(lora_link_get_status().crowd && lora_link_get_status().quality == Q_CONGESTED, "the watch shows Congested (crowd)");
+
+  int ok = 0, tries = 5;
+  double worst = 0;
+  for (int k = 0; k < tries; k++) {
+    unsigned long before = strikeEventID;
+    events.push_back({ (float)(simMillis / 1000.0 + 0.3), 1, 3.0, 2, 6 });
+    unsigned long ts = simMillis;
+    while (strikeEventID == before && simMillis - ts < 20000) stepAll(0.01);
+    unsigned long at = simMillis;
+    while (lora_link_get_status().strike_id != (uint16_t)strikeEventID && simMillis - at < 10000) stepAll(0.002);
+    double d = (simMillis - at) / 1000.0;
+    worst = d > worst ? d : worst;
+    if (d < 1.5) ok++;
+    cmdWatching();
+    stepAll(12);
+    events.clear();
+  }
+  printf("  %d of %d strikes on the wrist within 1.5 s, slowest %.2f s; collisions so far %lu\n", ok, tries, worst, simLoraCollided);
+  check(ok == tries, "crowd: every strike arrives within 1.5 s");
+
+  for (FakeRod* f : fakes) { SX1262::all().erase(std::remove(SX1262::all().begin(), SX1262::all().end(), f->r), SX1262::all().end()); delete f; }
+  fakes.clear();
+  stepAll(35);
+  check(!crowd && loraQuality() == Q_CLEAR, "the others leave: crowd mode off, Clear");
+  setChanMode(CHM_AUTO);
 }
 
 int main()
@@ -346,12 +548,16 @@ int main()
 
   setup();
   lora_link_begin();
+  lora_link_set_key(rodTag, loraKey);     // what the watch gets over the Bluetooth pairing (/lorakey)
   step(17);          // rod's own start-up learning
   handleSkipPull();
 
   session(0.0);
   session(0.3);
   switching();
+  privateLora();
+  autoChannelTest();
+  crowdTest();
 
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;

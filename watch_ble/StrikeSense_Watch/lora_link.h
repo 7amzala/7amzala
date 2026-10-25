@@ -66,6 +66,15 @@ typedef struct
   float    ptneed;
   uint32_t utc;            // rod time, 0 = unknown
   int      tz_min;
+
+  // ---------- rod 2.4: private LoRa, channels, crowd ----------
+  bool     keyed;          // has our rod's key (paired over Bluetooth)
+  uint8_t  chan;           // CH_xxx the watch listens on
+  bool     searching;      // rod not heard: trying the channels
+  uint8_t  quality;        // Q_xxx (from the rod)
+  uint8_t  rods;           // other rods the rod hears
+  bool     crowd;          // crowd mode
+  uint8_t  loss;           // % of the rod's heartbeats missed lately
 } lora_link_status_t;
 
 // Call once in setup()
@@ -91,6 +100,14 @@ void lora_link_send_settime(uint32_t utc, int tz_min);
 bool lora_link_command_pending(void);
 
 const char* lora_link_strike_name(uint8_t strike_type);
+
+// Our rod's LoRa key (from the rod over the encrypted Bluetooth: /lorakey).
+// Kept in flash; without it the watch's LoRa stays quiet.
+void lora_link_set_key(uint16_t rod_tag, const uint8_t key[16]);
+bool lora_link_has_key(uint16_t rod_tag);       // already this rod's key?
+
+const char* lora_link_chan_name(uint8_t chan);   // "500 m" / "1 km"
+const char* lora_link_quality_name(uint8_t q);   // Clear / Good / Busy / Congested
 
 #ifdef __cplusplus
 }

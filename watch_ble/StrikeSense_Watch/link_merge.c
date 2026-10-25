@@ -33,6 +33,9 @@ void link_merge(ble_link_status_t *s, const lora_link_status_t *lo, uint32_t now
 
   s->lora_ok = lo->radio_ok;
   s->lora_bars = lora_link_signal_bars();
+  s->lora_chan = lo->chan;
+  s->lora_quality = lo->quality;
+  s->lora_rods = lo->rods;
 
   // the knock number: LoRa only sends its low byte, so count on from the last full one
   if(lo->hb_count > 0)

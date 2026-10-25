@@ -4822,6 +4822,7 @@ function setLink(ready, rssi)
 </script>
 <br>
 <span id="watchInfo"><span>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
+<div id="crowdTip" style="display:none;margin:5px auto 0;max-width:330px;color:#ffba52;font-size:11px;font-weight:700"></div>
 <script>
 // How the watch is connected to the rod (rod 2.3+: "wlink" in /data)
 function showWatch(d)
@@ -4842,7 +4843,14 @@ function showWatch(d)
     b[i].style.background = i < d.wbars ? c : '';
 
   var via = document.getElementById('watchVia');
-  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa' : 'not connected';
+  var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
+  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
+
+  // many rods on the channel: Bluetooth gives the fastest alerts
+  var tip = document.getElementById('crowdTip');
+  tip.style.display = lora && d.lqual == 3 ? '' : 'none';
+  tip.textContent = 'Many devices nearby (' + (d.lrods || 0) + ' rods). For the fastest alerts use Bluetooth only (Settings).';
   via.style.color = c;
   document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
   box.className = 'show';

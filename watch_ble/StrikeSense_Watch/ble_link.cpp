@@ -62,6 +62,7 @@ static int cmdTries = 0;
 static char cmdSending[32] = "";
 
 static long lastId = -1;              // "/laststrike" in flight
+static long keyId = -1;               // "/lorakey" in flight (our rod's LoRa key)
 static uint32_t lastAskedAt = 0;
 static volatile bool wantLast = false;
 static ble_last_strike_t lastStrike;   // guarded by mux
@@ -454,6 +455,28 @@ static void gotLastStrike(const std::string &j)
 
 static void answer(long id, int code, const std::string &body)
 {
+  // our rod's LoRa key (only over the encrypted pairing): {"id":"ROD-4F2A","tag":20266,"key":"..32 hex.."}
+  if(id == keyId)
+  {
+    keyId = -1;
+    char hex[40] = "";
+
+    if(code == 200 && jsonGet(body, "key", hex, sizeof(hex)) && strlen(hex) == 32)
+    {
+      uint8_t key[16];
+
+      for(int i = 0; i < 16; i++)
+      {
+        char b[3] = { hex[2 * i], hex[2 * i + 1], 0 };
+        key[i] = (uint8_t)strtol(b, nullptr, 16);
+      }
+
+      lora_link_set_key((uint16_t)jsonNum(body, "tag", 0), key);
+    }
+
+    return;
+  }
+
   if(id == lastId)
   {
     lastId = -1;
@@ -794,6 +817,15 @@ static void connectToRodAt(BLEAddress addr)
   char path[24];
   snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
   send(newId(), path);
+
+  // our rod's LoRa key, if we don't have it yet (a rod without LoRa answers 404)
+  uint16_t tag = pairedId.length() > 4 ? (uint16_t)strtol(pairedId.c_str() + 4, nullptr, 16) : 0;
+
+  if(tag != 0 && !lora_link_has_key(tag))
+  {
+    keyId = newId();
+    send(keyId, "/lorakey");
+  }
 
   if(pairState == PAIR_WORKING)
   {
