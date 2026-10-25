@@ -543,6 +543,78 @@ int main()
   }
 
 
+  // ---- strike log in flash: strikes kept with no phone near, and after power off ----
+  printf("\n=== STRIKE LOG (flash) ===\n");
+  {
+    const size_t NO = std::string::npos;
+    Answer b;
+    srv->mockDisconnect(PHONE);               // the phone is far away
+    step(1);
+    uint32_t seq0 = logSeq;
+    for (int i = 0; i < 3; i++) {
+      strikeActive = false; rodState = ST_MONITORING;
+      startStrike(i == 1 ? "SHARP STRIKE" : "SLOW PULL");
+      step(12);
+      cmdWatching();
+      step(40);                               // the fight ends, the rod saves it
+    }
+    printf("        log: %d slots, newest %u, %d files written\n", logSlots, (unsigned)logSeq, mockFs().writes);
+    check(logReady && logSeq == seq0 + 3, "3 strikes with the phone away: numbered 1, 2, 3 more");
+
+    // the phone comes back and collects them
+    srv->mockConnect(PHONE, 247, false);
+    seen[PHONE] = 0; inbox[PHONE].clear();
+    check(ask(700400, "/log?after=" + std::to_string(seq0), b) && b.code == 200, "/log answered");
+    printf("        /log = %.300s\n", b.body.c_str());
+    int n = 0; for (size_t p = b.body.find("\"seq\":"); p != NO; p = b.body.find("\"seq\":", p + 1)) n++;
+    check(n == 3 && b.body.find("SHARP STRIKE") != NO && b.body.find("\"graph\":true") != NO, "/log: the 3 missed strikes, with type, fight and graph");
+    check(b.body.find("\"utc\":0,") == NO, "each has its real time (the rod knew the time)");
+    std::string q = std::to_string(seq0 + 2);
+    check(ask(700401, "/logstrike?seq=" + q, b) && b.body.find("\"have\":true") != NO && b.body.find("SHARP STRIKE") != NO &&
+          b.body.find("\"k\":[") != NO && b.body.find("\"zk\":[]") == NO, "/logstrike: that strike's graph + zoom");
+
+    // the rod is switched off and on again: the strikes are still there
+    logReady = false; logSeq = 0; slistCount = 0;
+    logBegin();
+    check(logSeq == seq0 + 3, "after power off: the rod still knows its strike numbers");
+    check(ask(700402, "/log?after=" + std::to_string(seq0), b) && b.body.find("SHARP STRIKE") != NO && b.body.find("\"ago\":-1") != NO,
+          "after power off: the strikes are still there (time from before)");
+    check(ask(700403, "/logstrike?seq=" + q, b) && b.body.find("\"have\":true") != NO, "after power off: the graph too");
+
+    // many strikes in a row (rough sea): none lost, the oldest replaced when full
+    int writesBefore = mockFs().writes;
+    for (int i = 0; i < 14; i++) { strikeActive = false; rodState = ST_MONITORING; startStrike("SLOW PULL"); step(0.5); }
+    cmdWatching();
+    step(60);
+    check(ask(700404, "/log?after=" + std::to_string(seq0 + 3), b), "/log after a burst");
+    int burst = 0; for (size_t p = b.body.find("\"seq\":"); p != NO; p = b.body.find("\"seq\":", p + 1)) burst++;
+    printf("        burst of 14: %d files written, first 8 listed: %d\n", mockFs().writes - writesBefore, burst);
+    check(mockFs().writes - writesBefore == 14 && burst == 8, "14 strikes in 7 s: all 14 saved, each written once (8 per answer)");
+    check(ask(700405, "/log?after=" + std::to_string(seq0 + 11), b) && b.body.find("\"seq\":" + std::to_string(seq0 + 17)) != NO,
+          "the rest come with the next question");
+
+    check(ask(700406, "/log?after=0", b) && b.body.find("\"seq\":1,") != NO, "asking from 0: starts at the oldest kept");
+
+    // a small storage (10 strikes): the oldest are replaced, the newest 10 all there
+    mockFs().total = 60000;
+    logReady = false; slistCount = 0;
+    logBegin();
+    check(logSlots == 10, "small storage: room for 10");
+    for (int i = 0; i < 13; i++) { strikeActive = false; rodState = ST_MONITORING; startStrike("SLOW PULL"); step(0.5); }
+    cmdWatching();
+    step(60);
+    uint32_t newest = logSeq;
+    ask(700407, "/log?after=0", b);
+    std::string first = "\"seq\":" + std::to_string(newest - 9) + ",";
+    check(b.body.find(first) != NO && b.body.find("\"seq\":" + std::to_string(newest - 10) + ",") == NO,
+          "full: starts at the oldest kept (the 10 newest), older ones replaced");
+    ask(700408, "/log?after=" + std::to_string(newest - 2), b);
+    check(b.body.find("\"seq\":" + std::to_string(newest) + ",") != NO, "the newest is there");
+    mockFs().total = 1536 * 1024;
+    logReady = false; slistCount = 0;
+    logBegin();
+  }
+
   // ---- safety nets (if the real Bluetooth stack behaves differently) ----
   printf("\n=== SAFETY NETS ===\n");
   {

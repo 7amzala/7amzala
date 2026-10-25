@@ -269,7 +269,7 @@ function drawList()
     const p = placeOf(s) ? placeOf(s) + (country == 'All' && s.country ? ', ' + s.country : '') : countryOf(s);
     return `<div class="item" onclick="openStrike('${s.uid}')"><span class="tag" style="background:${c}22;color:${c};border-color:${c}">${esc(s.type)}</span>
       <div class="txt"><div style="font-size:13px;font-weight:700">${s.peak !== undefined ? s.peak.toFixed(1) + '&deg;' : ''} &middot; ${s.done ? mmss(s.fight) : 'fighting&hellip;'}${s.graph ? ' &nbsp;&#128200;' : ''}</div>
-      <div class="meta">${when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}</div></div>
+      <div class="meta">${s.notime ? 'time unknown' : when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}${s.later ? ' &middot; <span title="saved on the rod while the phone was away">saved on rod</span>' : ''}</div></div>
       ${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
   }).join('') : '<div class="empty">No strikes for this choice.</div>';
 }

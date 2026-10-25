@@ -262,7 +262,7 @@ public:
   }
 
 private:
-  static const int MAX_ROUTES = 32;
+  static const int MAX_ROUTES = 40;
   static const int MAX_ARGS = 6;
   static const int REQ_QUEUE = 6;           // per line
   static const int REQ_MAX = 200;

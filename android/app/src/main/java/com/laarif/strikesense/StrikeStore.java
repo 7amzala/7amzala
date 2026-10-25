@@ -46,6 +46,7 @@ final class StrikeStore
 
     private Location lastFix;
     private long lastFixAsked = 0;
+    private volatile boolean nearRod = false;  // connected to the rod now (the phone is within ~30 m of it)
     private long lastCloudTry = 0;
     private volatile String cloudNote = "";
 
@@ -115,8 +116,14 @@ final class StrikeStore
                     put(s, "wind", sea.optInt("wind", -1));
                 }
 
-                addPlace(s, start);
+                addPlace(s, start, false);
                 list.put(s);
+                changed = true;
+            }
+
+            if(r.optLong("seq") > 0 && !s.has("rseq"))
+            {
+                put(s, "rseq", r.optLong("seq"));     // its number in the rod's strike log
                 changed = true;
             }
 
@@ -137,6 +144,134 @@ final class StrikeStore
 
         if(changed)
             save();
+    }
+
+    // The rod's strike log (/log): every strike it saved, also those made while
+    // the phone was away or off. Returns the highest log number in it.
+    synchronized long fromLog(JSONObject log, long now, String rodId)
+    {
+        JSONArray l = log.optJSONArray("list");
+        long top = 0;
+
+        if(l == null)
+            return 0;
+
+        boolean changed = false;
+        String rod = rodId == null ? "" : rodId;
+
+        for(int i = 0; i < l.length(); i++)
+        {
+            JSONObject r = l.optJSONObject(i);
+
+            if(r == null)
+                continue;
+
+            long seq = r.optLong("seq");
+            long utc = r.optLong("utc");
+            long ago = r.optLong("ago", -1);
+            String type = r.optString("type", "STRIKE");
+            top = Math.max(top, seq);
+
+            // its time: the rod's clock, else "so long ago" (same power-on)
+            long start = utc > 0 ? utc * 1000 : ago >= 0 ? now - ago * 1000 : 0;
+
+            JSONObject s = bySeq(rod, seq);
+
+            if(s == null && start > 0)
+                s = near(rod, type, start);      // got live before (older app or rod)
+
+            if(s == null)
+            {
+                boolean noTime = start == 0;
+
+                if(noTime)
+                    start = now;                 // the rod did not know the time: when it came
+
+                s = new JSONObject();
+                put(s, "uid", Long.toString(start / 1000) + "-" + Math.abs(type.hashCode() % 1000));
+                put(s, "time", start);
+                put(s, "type", type);
+                put(s, "local", new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.UK).format(new java.util.Date(start)));
+                put(s, "rod", rod);
+                put(s, "graph", false);
+                put(s, "synced", false);
+                put(s, "later", true);           // saved on the rod while the phone was away
+
+                if(noTime)
+                    put(s, "notime", true);
+
+                addPlace(s, start, true);
+                list.put(s);
+                changed = true;
+            }
+
+            if(!s.has("rseq"))
+                put(s, "rseq", seq);
+
+            if(!s.optBoolean("done") || s.optInt("fight", -1) != r.optInt("fight"))
+            {
+                put(s, "fight", r.optInt("fight"));
+                put(s, "peak", r.optDouble("peak"));
+                put(s, "knock", r.optDouble("knock"));
+                put(s, "knocks", r.optInt("knocks"));
+                put(s, "done", true);
+                put(s, "synced", false);
+                changed = true;
+            }
+
+            if(!r.optBoolean("graph") && !s.optBoolean("graph") && !s.optBoolean("nograph"))
+            {
+                put(s, "nograph", true);         // the rod had no graph for it
+                changed = true;
+            }
+        }
+
+        if(changed)
+        {
+            sortByTime();
+            save();
+        }
+
+        return top;
+    }
+
+    // How far the app got in this rod's strike log
+    long logSeq(String rodId)
+    {
+        return prefs().getLong("logseq_" + (rodId == null ? "" : rodId), 0);
+    }
+
+    void setLogSeq(String rodId, long seq)
+    {
+        prefs().edit().putLong("logseq_" + (rodId == null ? "" : rodId), seq).apply();
+    }
+
+    private JSONObject bySeq(String rod, long seq)
+    {
+        for(int i = list.length() - 1; i >= 0; i--)
+        {
+            JSONObject s = list.optJSONObject(i);
+
+            if(s != null && s.optLong("rseq") == seq && s.optString("rod").equals(rod))
+                return s;
+        }
+
+        return null;
+    }
+
+    // the same strike already here without a log number: same rod and type, within 8 s
+    private JSONObject near(String rod, String type, long start)
+    {
+        for(int i = list.length() - 1; i >= 0; i--)
+        {
+            JSONObject s = list.optJSONObject(i);
+
+            if(s != null && !s.has("rseq") && s.optString("type").equals(type) && s.optString("rod").equals(rod)
+               && Math.abs(s.optLong("time") - start) < 8000)
+                return s;
+        }
+
+        return null;
     }
 
     // The same strike seen again: same rod number and type, start within 8 s
@@ -166,11 +301,12 @@ final class StrikeStore
     // it had (the rod's /laststrike "count"); null = none
     synchronized JSONObject needsGraph()
     {
-        for(int i = list.length() - 1; i >= 0 && i >= list.length() - 5; i--)     // the rod keeps the last 5
+        for(int i = list.length() - 1; i >= 0 && i >= list.length() - 40; i--)
         {
             JSONObject s = list.optJSONObject(i);
 
-            if(s != null && s.optBoolean("done") && !s.optBoolean("graph") && !s.optBoolean("nograph") && s.has("rodid"))
+            if(s != null && s.optBoolean("done") && !s.optBoolean("graph") && !s.optBoolean("nograph")
+               && (s.has("rodid") || s.has("rseq")))
                 return s;
         }
 
@@ -293,10 +429,39 @@ final class StrikeStore
         }
     }
 
+    // Connected to the rod or not (RodService, every second or so)
+    void setNearRod(boolean near)
+    {
+        nearRod = near;
+
+        // near the rod with a fresh GPS fix: that is where the rod is
+        Location l = near ? lastFix : null;
+
+        if(l != null && System.currentTimeMillis() - l.getTime() < 120000)
+            saveRodSpot(l);
+    }
+
+    // Where the rod stands: the phone's place while it was connected to it. The
+    // rod does not move while you fish, so strikes saved while you were away
+    // (car, cafe) get this place, not where the phone is when they arrive.
+    private void saveRodSpot(Location l)
+    {
+        prefs().edit()
+            .putLong("spotlat", Math.round(l.getLatitude() * 1e6))       // micro-degrees
+            .putLong("spotlon", Math.round(l.getLongitude() * 1e6))
+            .putLong("spotat", l.getTime())
+            .apply();
+    }
+
     private synchronized void gotFix(Location l)
     {
         if(lastFix == null || l.getTime() >= lastFix.getTime())
             lastFix = l;
+
+        if(!nearRod)
+            return;                     // away from the rod: not where the strikes were
+
+        saveRodSpot(l);
 
         // strikes of the last hour still without a place
         boolean changed = false;
@@ -316,8 +481,24 @@ final class StrikeStore
             save();
     }
 
-    private void addPlace(JSONObject s, long when)
+    // later = saved on the rod while the phone was away: the rod's place
+    private void addPlace(JSONObject s, long when, boolean later)
     {
+        if(later)
+        {
+            SharedPreferences p = prefs();
+            long at = p.getLong("spotat", 0);
+
+            // the rod's place from the same fishing trip (within 12 h)
+            if(at != 0 && Math.abs(at - when) < 12 * 3600000L)
+            {
+                put(s, "lat", Math.round(p.getLong("spotlat", 0) / 10.0) / 1e5);
+                put(s, "lon", Math.round(p.getLong("spotlon", 0) / 10.0) / 1e5);
+            }
+
+            return;
+        }
+
         Location l = bestFix();
 
         // a fix from within 30 min of the strike: the fisherman has not moved far

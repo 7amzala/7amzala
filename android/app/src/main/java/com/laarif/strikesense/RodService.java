@@ -19,6 +19,7 @@ import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 // Watches the rod over Bluetooth in the background (also with the screen
@@ -78,6 +79,9 @@ public class RodService extends Service
     private JSONObject lastData;            // waves / wind for the strikes saved
     private long lastStrikesAt = 0;
     private long lastGraphTry = 0;
+    private long lastLogAt = 0;
+    private boolean logMore = false;          // the rod has more saved strikes to give
+    private boolean rodHasLog = true;         // false: an older rod (no /log)
     private long seenStrikeId = Long.MIN_VALUE;
     private boolean strikesDirty = true;
     private HandlerThread cloudThread;
@@ -227,6 +231,8 @@ public class RodService extends Service
             return;
         }
 
+        StrikeStore.get(this).setNearRod(link.ready());
+
         if(link.ready())
         {
             lostSince = 0;
@@ -240,6 +246,8 @@ public class RodService extends Service
 
         if(lostSince == 0)
             lostSince = now;
+
+        rodHasLog = true;                         // ask again after reconnecting (the rod may have been updated)
 
         StrikeStore.get(this).refreshFix();
 
@@ -349,42 +357,103 @@ public class RodService extends Service
             }
         }
 
-        // the graphs of finished fights, each by its number (the rod keeps the
-        // last 5). Never during a strike: the rod's Bluetooth is for the alarm then.
-        JSONObject s = store.needsGraph();
         boolean strikeNow = lastData != null && lastData.optBoolean("strike");
+
+        // strikes saved on the rod (also while the phone was away or off):
+        // collect what's new. Never during a strike: the Bluetooth is for the alarm then.
+        if(rodHasLog && !strikeNow && now - lastLogAt >= (logMore ? 1000 : 10000))
+        {
+            lastLogAt = now;
+            String rod = RodLink.get(this).rodId();
+            long after = store.logSeq(rod);
+            RodLink.Response r = link.request("/log?after=" + after, 4000);
+
+            if(r != null && r.code == 404)
+            {
+                rodHasLog = false;                // older rod sketch
+            }
+            else if(r != null && r.code == 200)
+            {
+                try
+                {
+                    JSONObject j = new JSONObject(new String(r.body, "UTF-8"));
+                    JSONArray l = j.optJSONArray("list");
+
+                    // the rod's numbers start again (new rod, flash erased): from the start
+                    if(j.optLong("last") < after)
+                    {
+                        after = 0;
+                        store.setLogSeq(rod, 0);
+                    }
+
+                    long top = store.fromLog(j, System.currentTimeMillis(), rod);
+                    logMore = l != null && l.length() >= 8;
+
+                    if(top > after)
+                        store.setLogSeq(rod, top);
+                }
+                catch(Exception e)
+                {
+                }
+            }
+        }
+
+        // the graphs of finished fights: from the rod's log by number, or the
+        // rod's last 5 (older rod). Never during a strike.
+        JSONObject s = store.needsGraph();
 
         if(s != null && !strikeNow && now - lastGraphTry > 1500)
         {
             lastGraphTry = now;
-            long id = s.optLong("rodid");
-            RodLink.Response r = link.request("/laststrike?n=" + id, 8000);
 
-            try
+            if(rodHasLog && s.has("rseq"))
             {
-                JSONObject g = r != null && r.code == 200 ? new JSONObject(new String(r.body, "UTF-8")) : null;
+                RodLink.Response r = link.request("/logstrike?seq=" + s.optLong("rseq"), 8000);
 
-                if(g != null && g.has("id"))
+                try
                 {
-                    // rod 2.5+: the strike asked for, or "have":false when it's gone
-                    if(g.optBoolean("have") && !g.optBoolean("recording") && g.optLong("id") == id)
+                    JSONObject g = r != null && r.code == 200 ? new JSONObject(new String(r.body, "UTF-8")) : null;
+
+                    if(g != null && g.optBoolean("have"))
                         store.setGraph(s.optString("uid"), g);
-                    else if(!g.optBoolean("have"))
-                        store.noGraph(s.optString("uid"));
+                    else if(g != null && (g.has("seq") || System.currentTimeMillis() - s.optLong("time") > 15 * 60000))
+                        store.noGraph(s.optString("uid"));      // saved without a graph, or long gone
                 }
-                else if(g != null && g.optBoolean("have") && !g.optBoolean("recording"))
+                catch(Exception e)
                 {
-                    // older rod: only its newest strike
-                    long count = g.optLong("count");
-
-                    if(count == id)
-                        store.setGraph(s.optString("uid"), g);
-                    else if(count > id)
-                        store.noGraph(s.optString("uid"));
                 }
             }
-            catch(Exception e)
+            else if(s.has("rodid"))
             {
+                long id = s.optLong("rodid");
+                RodLink.Response r = link.request("/laststrike?n=" + id, 8000);
+
+                try
+                {
+                    JSONObject g = r != null && r.code == 200 ? new JSONObject(new String(r.body, "UTF-8")) : null;
+
+                    if(g != null && g.has("id"))
+                    {
+                        // rod 2.5+: the strike asked for, or "have":false when it's gone
+                        if(g.optBoolean("have") && !g.optBoolean("recording") && g.optLong("id") == id)
+                            store.setGraph(s.optString("uid"), g);
+                        else if(!g.optBoolean("have"))
+                            store.noGraph(s.optString("uid"));
+                    }
+                    else if(g != null && g.optBoolean("have") && !g.optBoolean("recording"))
+                    {
+                        // older rod: only its newest strike
+                        long count = g.optLong("count");
+
+                        if(count == id)
+                            store.setGraph(s.optString("uid"), g);
+                        else if(count > id)
+                            store.noGraph(s.optString("uid"));
+                    }
+                }
+                catch(Exception e)
+                {
+                }
             }
         }
     }

@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 11
-        versionName "2.9 (smooth Bluetooth, 5 strike graphs)"
+        versionCode 12
+        versionName "3.0 (strikes saved on the rod)"
     }
 
     // Alarm sounds are read straight from the app (RodService): not compressed
