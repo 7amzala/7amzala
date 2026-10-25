@@ -44,68 +44,11 @@ String rodId = "ROD-0000";
 uint32_t rodPin = 0;
 const unsigned long PAIR_WINDOW_MS = 180000;     // new phone / watch: first 3 min after switching on
 
-int bondedDevices()
-{
-#if defined(CONFIG_BLUEDROID_ENABLED)
-  return esp_ble_get_bond_device_num();
-#else
-  return 0;
-#endif
-}
-
-// pairing is open while nothing is paired yet, or just after switching on
-bool pairWindowOpen()
-{
-  return bondedDevices() == 0 || millis() < PAIR_WINDOW_MS;
-}
-
-// ID from the chip (Bluetooth address), PIN made once at random
-void privacyBegin()
-{
-  uint8_t mac[6] = { 0 };
-  esp_read_mac(mac, ESP_MAC_BT);
-
-  char id[12];
-  snprintf(id, sizeof(id), "ROD-%02X%02X", mac[4], mac[5]);
-  rodId = id;
-
-  Preferences p;
-  p.begin("strikesense", false);
-  rodPin = p.getULong("pin", 0);
-
-  if(rodPin < 100000 || rodPin > 999999)
-  {
-    rodPin = 100000 + esp_random() % 900000;
-    p.putULong("pin", rodPin);
-  }
-
-  p.end();
-
-  Serial.println();
-  Serial.printf("==== %s   PIN %06lu   (write both on the rod box) ====\n", rodId.c_str(), (unsigned long)rodPin);
-}
-
-void forgetPairedDevices()
-{
-#if defined(CONFIG_BLUEDROID_ENABLED)
-  int n = esp_ble_get_bond_device_num();
-
-  if(n > 0)
-  {
-    esp_ble_bond_dev_t* list = (esp_ble_bond_dev_t*)malloc(sizeof(esp_ble_bond_dev_t) * n);
-
-    if(list && esp_ble_get_bond_device_list(&n, list) == ESP_OK)
-    {
-      for(int i = 0; i < n; i++)
-        esp_ble_remove_bond_device(list[i].bd_addr);
-    }
-
-    free(list);
-  }
-#endif
-
-  Serial.println("Bluetooth: all paired devices forgotten - pairing open");
-}
+// (defined further down, with the other Bluetooth pages)
+int bondedDevices();
+bool pairWindowOpen();
+void privacyBegin();
+void forgetPairedDevices();
 
 #if defined(CONFIG_BLUEDROID_ENABLED)
 // A new phone or watch asks to pair: only while pairing is open, with the PIN
@@ -9388,6 +9331,71 @@ String watchJson()
   json += "}";
 
   return json;
+}
+
+// ---------- Private Bluetooth: rod ID, PIN, paired devices ----------
+
+int bondedDevices()
+{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  return esp_ble_get_bond_device_num();
+#else
+  return 0;
+#endif
+}
+
+// pairing is open while nothing is paired yet, or just after switching on
+bool pairWindowOpen()
+{
+  return bondedDevices() == 0 || millis() < PAIR_WINDOW_MS;
+}
+
+// ID from the chip (Bluetooth address), PIN made once at random
+void privacyBegin()
+{
+  uint8_t mac[6] = { 0 };
+  esp_read_mac(mac, ESP_MAC_BT);
+
+  char id[12];
+  snprintf(id, sizeof(id), "ROD-%02X%02X", mac[4], mac[5]);
+  rodId = id;
+
+  Preferences p;
+  p.begin("strikesense", false);
+  rodPin = p.getULong("pin", 0);
+
+  if(rodPin < 100000 || rodPin > 999999)
+  {
+    rodPin = 100000 + esp_random() % 900000;
+    p.putULong("pin", rodPin);
+  }
+
+  p.end();
+
+  Serial.println();
+  Serial.printf("==== %s   PIN %06lu   (write both on the rod box) ====\n", rodId.c_str(), (unsigned long)rodPin);
+}
+
+void forgetPairedDevices()
+{
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  int n = esp_ble_get_bond_device_num();
+
+  if(n > 0)
+  {
+    esp_ble_bond_dev_t* list = (esp_ble_bond_dev_t*)malloc(sizeof(esp_ble_bond_dev_t) * n);
+
+    if(list && esp_ble_get_bond_device_list(&n, list) == ESP_OK)
+    {
+      for(int i = 0; i < n; i++)
+        esp_ble_remove_bond_device(list[i].bd_addr);
+    }
+
+    free(list);
+  }
+#endif
+
+  Serial.println("Bluetooth: all paired devices forgotten - pairing open");
 }
 
 // ---------- Watch link: auto / Bluetooth only / LoRa only (phone app) ----------

@@ -25,6 +25,32 @@ String rodId = "ROD-0000";
 uint32_t rodPin = 0;
 const unsigned long PAIR_WINDOW_MS = 180000;     // new phone / watch: first 3 min after switching on
 
+// (defined further down, with the other Bluetooth pages)
+int bondedDevices();
+bool pairWindowOpen();
+void privacyBegin();
+void forgetPairedDevices();
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+// A new phone or watch asks to pair: only while pairing is open, with the PIN
+class PairCallbacks : public BLESecurityCallbacks
+{
+  uint32_t onPassKeyRequest() override { return rodPin; }
+  void onPassKeyNotify(uint32_t) override {}
+  bool onSecurityRequest() override { return pairWindowOpen(); }
+  bool onConfirmPIN(uint32_t) override { return pairWindowOpen(); }
+
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t d) override
+  {
+    Serial.printf("Bluetooth: pairing %s\n", d.success ? "OK (encrypted)" : "refused or wrong PIN");
+  }
+};
+#endif
+
+'''
+
+PRIVACY_FUNCS = r'''// ---------- Private Bluetooth: rod ID, PIN, paired devices ----------
+
 int bondedDevices()
 {
 #if defined(CONFIG_BLUEDROID_ENABLED)
@@ -88,22 +114,6 @@ void forgetPairedDevices()
   Serial.println("Bluetooth: all paired devices forgotten - pairing open");
 }
 
-#if defined(CONFIG_BLUEDROID_ENABLED)
-// A new phone or watch asks to pair: only while pairing is open, with the PIN
-class PairCallbacks : public BLESecurityCallbacks
-{
-  uint32_t onPassKeyRequest() override { return rodPin; }
-  void onPassKeyNotify(uint32_t) override {}
-  bool onSecurityRequest() override { return pairWindowOpen(); }
-  bool onConfirmPIN(uint32_t) override { return pairWindowOpen(); }
-
-  void onAuthenticationComplete(esp_ble_auth_cmpl_t d) override
-  {
-    Serial.printf("Bluetooth: pairing %s\n", d.success ? "OK (encrypted)" : "refused or wrong PIN");
-  }
-};
-#endif
-
 '''
 
 
@@ -131,6 +141,12 @@ def patch(path):
 // BLUETOOTH LINK TO THE PHONE APP
 """, PRIVACY + """// =====================================================
 // BLUETOOTH LINK TO THE PHONE APP
+""")
+
+    # the functions go further down: an Arduino IDE rule (its automatic
+    # declarations go before the first function, before the rod's types)
+    rep("""// ---------- Watch link: auto / Bluetooth only / LoRa only (phone app) ----------
+""", PRIVACY_FUNCS + """// ---------- Watch link: auto / Bluetooth only / LoRa only (phone app) ----------
 """)
 
     # ---- begin(): name = rod ID, PIN, encryption needed to use the rod ----
