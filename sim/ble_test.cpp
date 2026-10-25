@@ -17,8 +17,14 @@
 BLEServer* srv;
 BLECharacteristic* rxc;
 BLECharacteristic* txc;
-size_t seen = 0;                    // notifications already read
-std::string inbox;
+// conn ids: the phone and the watch, each its own Bluetooth connection
+const int PHONE = 0, WATCH = 1;
+size_t seen[2] = {0, 0};            // pieces already read, per connection
+std::string inbox[2];
+int wrongLine = 0;                  // an answer that reached the other device
+
+// requests 500000-599999 are the watch's, the rest the phone's
+int lineOf(int id) { return id >= 500000 && id < 600000 ? WATCH : PHONE; }
 
 struct Answer { int code; std::string body; };
 std::map<int, Answer> answers;
@@ -44,13 +50,25 @@ void step(double secs)
   }
 }
 
-// Same as RodLink.received() in the app
+void readInbox(int c);
+
+// Same as RodLink.received() in the app (one per device)
 void readNotifications()
 {
-  for (; seen < txc->notified.size(); seen++) {
-    biggestPiece = std::max(biggestPiece, txc->notified[seen].size());
-    inbox += txc->notified[seen];
+  for (int c = 0; c < 2; c++) {
+    std::vector<std::string>& got = mockLinks()[c].pieces;
+    if (seen[c] > got.size()) seen[c] = 0;           // a new connection
+    for (; seen[c] < got.size(); seen[c]++) {
+      biggestPiece = std::max(biggestPiece, got[seen[c]].size());
+      inbox[c] += got[seen[c]];
+    }
+    readInbox(c);
   }
+}
+
+void readInbox(int c)
+{
+  std::string& inbox = ::inbox[c];
 
   while (true) {
     size_t start = inbox.find('#');
@@ -62,6 +80,7 @@ void readNotifications()
     if (sscanf(inbox.c_str() + start + 1, "%d %d %d", &id, &code, &len) != 3) { inbox.erase(0, nl + 1); continue; }
     if (inbox.size() - (nl + 1) < (size_t)len) { inbox.erase(0, start); return; }
 
+    if (lineOf(id) != c) wrongLine++;
     answers[id] = { code, inbox.substr(nl + 1, len) };
     inbox.erase(0, nl + 1 + len);
   }
@@ -72,9 +91,12 @@ void write(int id, const std::string& path)
 {
   std::string line = std::to_string(id) + "|" + path + "\n";
 
+  esp_ble_gatts_cb_param_t p;
+  p.write.conn_id = lineOf(id);
+
   for (size_t i = 0; i < line.size(); i += 20) {
     rxc->value = line.substr(i, 20);
-    rxc->cb->onWrite(rxc);
+    rxc->cb->onWrite(rxc, &p);
   }
 }
 
@@ -104,7 +126,7 @@ int main()
   printf("\n=== BLUETOOTH LINK ===\n");
   check(BLEDevice::adv().started == 1, "rod advertises after start-up");
 
-  srv->cb->onConnect(srv);
+  srv->mockConnect(PHONE, 183, false);              // phone: MTU 183 = pieces up to 180
   step(1);
   check(BLEDevice::adv().started == 2, "phone connected: rod keeps advertising so the watch can join");
 
@@ -152,18 +174,18 @@ int main()
   write(20, "/");
   step(0.2);
   int advBeforeLeave = BLEDevice::adv().started;
-  srv->cb->onDisconnect(srv);
+  srv->mockDisconnect(PHONE);
   step(0.2);
   check(BLEDevice::adv().started == advBeforeLeave + 1, "after a disconnect the rod advertises again");
 
-  size_t before = txc->notified.size();
+  size_t before = mockLinks()[PHONE].pieces.size() + mockLinks()[WATCH].pieces.size();
   step(1);
-  check(txc->notified.size() == before, "nothing is sent while nobody is connected");
+  check(mockLinks()[PHONE].pieces.size() + mockLinks()[WATCH].pieces.size() == before, "nothing is sent while nobody is connected");
 
   // phone comes back (a new connection: the app starts with an empty buffer)
-  inbox.clear();
-  seen = txc->notified.size();
-  srv->cb->onConnect(srv);
+  inbox[PHONE].clear();
+  srv->mockConnect(PHONE, 247, false);
+  seen[PHONE] = 0;
   step(0.2);
   check(ask(21, "/mtu?v=244", a) && ask(22, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "reconnect: /data works again");
 
@@ -174,13 +196,13 @@ int main()
   // ---------- the watch joins as a second device ----------
   printf("\n=== PHONE + WATCH ===\n");
   int advBefore = BLEDevice::adv().started;
-  srv->cb->onConnect(srv);                      // watch connects
+  srv->mockConnect(WATCH, 247, true);           // watch connects, on a calm (slow) link
   step(0.1);
   check(BLEDevice::adv().started == advBefore, "phone + watch connected: full, the rod stops advertising");
 
   check(ask(500001, "/mtu?v=200", a) && a.code == 200, "watch says its MTU");
   check(ask(25, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "phone /data still complete with both connected");
-  printf("        biggest piece now %zu bytes (smallest MTU wins)\n", biggestPiece);
+  printf("        biggest piece now %zu bytes (each device its own MTU)\n", biggestPiece);
 
   ok = ask(500002, "/watch", a);
   check(ok && a.code == 200 && a.body.front() == '{' && a.body.back() == '}', "/watch: complete JSON");
@@ -202,9 +224,9 @@ int main()
   // the live message: 10 a second, for everyone, between answers
   {
     std::string all;
-    size_t from = txc->notified.size();
+    size_t from = mockLinks()[WATCH].pieces.size();
     step(2);
-    for (size_t i = from; i < txc->notified.size(); i++) all += txc->notified[i];
+    for (size_t i = from; i < mockLinks()[WATCH].pieces.size(); i++) all += mockLinks()[WATCH].pieces[i];
     int lives = 0;
     std::string body;
     for (size_t p = all.find("#live 200 "); p != std::string::npos; p = all.find("#live 200 ", p + 1)) {
@@ -226,7 +248,7 @@ int main()
   check(ask(49, "/skippull", a) && rodState == ST_MONITORING, "skip it: back to watching");
 
   // the phone leaves: the watch keeps working
-  srv->cb->onDisconnect(srv);
+  srv->mockDisconnect(PHONE);
   step(0.2);
   check(ask(500004, "/watch", a) && a.code == 200, "phone gone: watch still answered");
   check(ask(500005, "/watching", a) && a.body == "OK", "watch button (I'M WATCHING) works");
@@ -275,18 +297,17 @@ int main()
   {
     // the phone app's LAST STRIKE view: /strike, the app waits 6 s -
     // with the watch also connected, on its calm (slow) link
-    srv->cb->onConnect(srv);                  // the watch
-    Answer w; ask(500019, "/mtu?v=244", w);
-    BLECharacteristic::slowLink() = 1;
-    BLECharacteristic::drops() = 0;
-    txc->drained = simMillis;
+    srv->mockConnect(PHONE, 247, false);      // the phone comes back
+    seen[PHONE] = 0; inbox[PHONE].clear();
+    Answer w; ask(700019, "/mtu?v=244", w);
+    int dropsBefore = mockLinks()[PHONE].drops + mockLinks()[WATCH].drops;
     Answer b; unsigned long t0 = simMillis;
-    bool got = ask(500020, "/strike", b, 6);
-    printf("        /strike = %zu bytes in %.1f s (code %d)\n", b.body.size(), (simMillis - t0) / 1000.0, b.code);
-    printf("        pieces dropped on the way: %d\n", BLECharacteristic::drops());
-    check(got && b.code == 200 && b.body.find("\"e\":[") != std::string::npos && b.body.back() == '}' && BLECharacteristic::drops() == 0,
+    bool got = ask(700020, "/strike", b, 6);
+    int dropped = mockLinks()[PHONE].drops + mockLinks()[WATCH].drops - dropsBefore;
+    printf("        /strike = %zu bytes in %.2f s (code %d)\n", b.body.size(), (simMillis - t0) / 1000.0, b.code);
+    printf("        pieces dropped on the way: %d\n", dropped);
+    check(got && b.code == 200 && b.body.find("\"e\":[") != std::string::npos && b.body.back() == '}' && dropped == 0,
           "/strike (phone LAST STRIKE) arrives whole within 6 s, also with the watch on its slow link");
-    BLECharacteristic::slowLink() = 0;
   }
 
   // ---- for the phone app: how the watch is connected, the last strikes ----
@@ -406,6 +427,115 @@ int main()
     printf("        watchdog: on=%d, %ld check-ins, longest gap %lu ms (limit %u)\n", wdtMock().on, wdtMock().resets, wdtMock().longest, (unsigned)wdtMock().timeout);
     check(wdtMock().on && wdtMock().timeout == 10000 && wdtMock().longest < 2000, "watchdog on (10 s), the rod checks in far more often");
     check(ask(600201, "/data", b) && b.body.find("\"rst\":\"power\"") != std::string::npos, "/data says why the rod started (rst)");
+  }
+
+
+  // ---- smooth with phone + watch: a strike while the dashboard graph runs ----
+  printf("\n=== PHONE + WATCH DURING A STRIKE (smoothness) ===\n");
+  {
+    Answer b;
+    readNotifications();
+    int dropsBefore = mockLinks()[PHONE].drops + mockLinks()[WATCH].drops;
+    size_t watchFrom = mockLinks()[WATCH].pieces.size();
+    size_t phoneFrom = mockLinks()[PHONE].pieces.size();
+
+    // the dashboard: /data, next one 100 ms after the answer (like pollLoop);
+    // the watch: a ping every 2 s; a strike after 1 s; the watch taps after 3 s
+    strikeActive = false;
+    rodState = ST_MONITORING;
+    int phoneAnswers = 0, nextId = 800000;
+    unsigned long worstData = 0, tapAt = 0, tapTook = 0;
+    unsigned long start = simMillis, askedAt = 0, nextAsk = simMillis;
+    int asking = -1;
+    bool struck = false, tapped = false;
+
+    while (simMillis - start < 6000) {
+      if (asking < 0 && simMillis >= nextAsk) {
+        asking = nextId++;
+        askedAt = simMillis;
+        write(asking, "/data");
+      }
+      if (!struck && simMillis - start >= 1000) { struck = true; startStrike("SHARP STRIKE"); }
+      if (!tapped && simMillis - start >= 3000) { tapped = true; tapAt = simMillis; write(500900, "/watching"); }
+      if ((simMillis - start) % 2000 == 0) write(500901 + (int)((simMillis - start) / 2000), "/wping?r=-60");
+
+      step(0.001);
+      readNotifications();
+
+      if (asking >= 0 && answers.count(asking)) {
+        worstData = std::max(worstData, simMillis - askedAt);
+        phoneAnswers++;
+        asking = -1;
+        nextAsk = simMillis + 100;
+      }
+      if (tapped && tapTook == 0 && answers.count(500900)) tapTook = simMillis - tapAt;
+    }
+
+    // the watch's live messages: how often, and the longest gap
+    std::string all;
+    std::vector<size_t> at;
+    for (size_t i = watchFrom; i < mockLinks()[WATCH].pieces.size(); i++) all += mockLinks()[WATCH].pieces[i];
+    int lives = 0;
+    for (size_t q = all.find("#live 200 "); q != std::string::npos; q = all.find("#live 200 ", q + 1)) lives++;
+    size_t phoneBytes = 0;
+    for (size_t i = phoneFrom; i < mockLinks()[PHONE].pieces.size(); i++) phoneBytes += mockLinks()[PHONE].pieces[i].size();
+    int dropped = mockLinks()[PHONE].drops + mockLinks()[WATCH].drops - dropsBefore;
+
+    printf("        phone: %d /data answers in 6 s (slowest %lu ms), %zu bytes\n", phoneAnswers, worstData, phoneBytes);
+    printf("        watch: %d live messages in 6 s, tap answered in %lu ms, pieces lost %d\n", lives, tapTook, dropped);
+    check(phoneAnswers >= 40, "phone live graph: 7+ updates a second while the watch is connected");
+    check(worstData < 150, "phone: every /data answer within 150 ms");
+    check(lives >= 54, "watch: the live message 9+ times a second, also during the strike");
+    check(tapTook > 0 && tapTook < 250, "watch tap (I'M WATCHING) answered within 250 ms");
+    check(dropped == 0, "no piece lost on either link");
+    check(wrongLine == 0, "every answer only reached the device that asked");
+    cmdWatching();
+    step(12);
+  }
+
+  // ---- the watch leaves: the phone gets the whole Bluetooth to itself ----
+  {
+    Answer b;
+    unsigned long t0 = simMillis;
+    bool ok2 = ask(800900, "/", b, 30);
+    unsigned long both = simMillis - t0;
+    srv->mockDisconnect(WATCH);
+    step(0.2);
+    t0 = simMillis;
+    ok2 = ask(800901, "/", b, 30) && ok2;
+    unsigned long alone = simMillis - t0;
+    printf("        whole page to the phone: %.2f s with the watch, %.2f s alone\n", both / 1000.0, alone / 1000.0);
+    check(ok2 && both < alone * 1.3 + 100, "phone full speed with the watch connected too (own line)");
+    srv->mockConnect(WATCH, 247, true);
+    seen[WATCH] = 0; inbox[WATCH].clear();
+  }
+
+
+  // ---- safety nets (if the real Bluetooth stack behaves differently) ----
+  printf("\n=== SAFETY NETS ===\n");
+  {
+    Answer b;
+    mockAlwaysFull() = true;                   // the stack always says "full"
+    unsigned long t0 = simMillis;
+    bool ok1 = ask(800950, "/data", b, 5) && b.body.back() == '}';
+    bool ok2 = ask(500950, "/watch", b, 5) && b.body.back() == '}';
+    printf("        stack always 'full': answers after %lu ms\n", simMillis - t0);
+    check(ok1 && ok2 && simMillis - t0 < 1500, "stack stuck on 'full': the rod stops believing it, answers still come");
+    t0 = simMillis;
+    ok1 = ask(800951, "/data", b, 5);
+    check(ok1 && simMillis - t0 < 100, "...and then at full speed again");
+    mockAlwaysFull() = false;
+
+    mockSendRefused() = true;                  // sending to one device never works
+    step(0.1);
+    mockSendRefused() = false;
+    size_t p0 = mockLinks()[PHONE].pieces.size(), w0 = mockLinks()[WATCH].pieces.size();
+    step(0.5);
+    printf("        after refusal: phone +%zu pieces, watch +%zu, drops %d/%d\n", mockLinks()[PHONE].pieces.size() - p0, mockLinks()[WATCH].pieces.size() - w0, mockLinks()[PHONE].drops, mockLinks()[WATCH].drops);
+    ok1 = ask(800952, "/data", b, 5) && b.body.back() == '}';
+    ok2 = ask(500952, "/watch", b, 5) && b.body.back() == '}';
+    printf("        direct send refused: phone %d, watch %d\n", ok1, ok2);
+    check(ok1 && ok2, "direct send refused: the rod sends to all (the old way), phone and watch still answered");
   }
 
   printf("\n%d checks, %d failed\n", checks, failed);
