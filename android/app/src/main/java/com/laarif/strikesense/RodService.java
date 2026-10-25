@@ -341,7 +341,7 @@ public class RodService extends Service
 
                 try
                 {
-                    store.fromRod(new JSONObject(new String(r.body, "UTF-8")), System.currentTimeMillis(), lastData);
+                    store.fromRod(new JSONObject(new String(r.body, "UTF-8")), System.currentTimeMillis(), lastData, RodLink.get(this).rodId());
                 }
                 catch(Exception e)
                 {

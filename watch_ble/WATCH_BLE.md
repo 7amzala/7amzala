@@ -68,6 +68,26 @@ The small text under the title says what is happening:
 Watch Serial (115200) lists every named device it sees (`[BLE]   saw ...`)
 and marks the rod with `<- THE ROD`.
 
+## First start: pair the watch with YOUR rod (private, encrypted)
+
+Every rod has its own ID and PIN (the rod prints them on its Serial
+Monitor at start: `==== ROD-4F2A   PIN 482913 ====`, write both on the box).
+
+1. Switch the rod on (for 3 minutes it shows its ID; a brand-new rod until
+   its first pairing).
+2. The watch shows **PAIR YOUR ROD** with the rods nearby: tap your ID, type
+   the PIN, tick.
+3. "Paired": the watch restarts and from then on talks **only to that rod**,
+   encrypted (Bluetooth and LoRa). Other rods nearby are ignored.
+
+The phone app pairs the same way (its own pairing page). In the app:
+Settings > MY ROD > **Forget my devices** makes the rod forget the phone and
+the watch (new phone, lost watch); then pair again with the PIN.
+
+**lv_conf.h:** copy the new one (LVGL memory 64 KB) next to the `lvgl`
+folder in your Arduino libraries, or the watch sketch stops with a message
+telling you to.
+
 ## LoRa backup (optional): far from the rods
 
 With an **SX1262 LoRa Node (HF, 868 MHz)** wired to the watch and the
@@ -99,10 +119,20 @@ No module wired? The watch works as before over Bluetooth ("LoRa module
 not found" under "Looking for the rod"). To switch LoRa off completely set
 `WATCH_LORA 0` in `lora_link.h`.
 
-Radio: 869.525 MHz, SF7, **250 kHz**, 14 dBm (rod and watch must match:
-same `strikesense_protocol.h` in both sketch folders). A rod heartbeat is
-~39 ms on air: 1 a second when calm (~4%), 2 a second while something
-happens (~8%), inside the 10% allowed in this band.
+Private: every LoRa message is encrypted and signed with your rod's own
+key (the watch gets it during pairing), so 5 or 40 rods on a beach never
+mix. Channels (Auto, or chosen in the app / on the watch's SETUP page):
+
+| Channel | Range | News on the watch | Rule |
+|---|---|---|---|
+| 500 m fast (869.85 MHz, 250 kHz, 5 mW) | ~500 m | 1 a second calm, 3-4 when something happens | no time limit |
+| 1 km A / B (869.4625 / 869.5875 MHz, 125 kHz, 25 mW) | ~1 km | about 1 a second | 10% transmit time |
+
+Auto starts on 500 m, moves to 1 km when the watch hears the rod badly or
+not at all, and back after a strong minute. Many rods heard: crowd mode
+(calm news less often, strikes still first). The watch shows e.g.
+`78% LoRa 500m Clear`; the app: `Watch LoRa · 500 m · Clear`.
+Rod and watch must have the same `strikesense_protocol.h` and `ss_crypto.c/.h`.
 
 ## Wrist vibration (optional): Pimoroni Haptic Bzzz
 

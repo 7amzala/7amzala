@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>StrikeSense account</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%) fixed;padding:22px 18px;-webkit-tap-highlight-color:transparent}
+.logo{width:76px;height:76px;border-radius:50%;margin:10px auto 12px;display:block;box-shadow:0 0 18px rgba(30,150,255,.55)}
+h1{font-size:24px;margin:0 0 4px;text-align:center}
+h1 b{color:#22d3ff}
+.sub{color:#8ea6c8;font-size:14px;text-align:center;margin-bottom:20px;line-height:1.45}
+.tabs{display:flex;background:#0b1428;border:1px solid #24324f;border-radius:12px;padding:3px;margin-bottom:14px}
+.tabs div{flex:1;text-align:center;padding:10px;border-radius:9px;font-weight:800;font-size:14px;color:#8ea6c8;cursor:pointer}
+.tabs .on{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a}
+.lbl{font-size:12px;color:#8ea6c8;letter-spacing:.8px;font-weight:800;margin:10px 0 6px}
+input[type=text],input[type=password]{width:100%;font-size:17px;padding:13px;border-radius:12px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff}
+.agree{display:flex;gap:10px;align-items:flex-start;margin:14px 0 4px;font-size:13px;color:#c3d2ea;line-height:1.45}
+.agree input{width:22px;height:22px;margin-top:1px;flex:0 0 auto}
+.btn{display:block;width:100%;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border:0;border-radius:12px;padding:15px;font-weight:900;font-size:16px;margin-top:16px;cursor:pointer}
+.btn:disabled{opacity:.4}
+.later{display:block;text-align:center;color:#8ea6c8;font-size:13px;margin-top:16px;text-decoration:underline;cursor:pointer}
+.msg{text-align:center;margin-top:14px;font-size:14px;line-height:1.5;min-height:22px}
+.small{color:#5f7799;font-size:12px;text-align:center;margin-top:18px;line-height:1.5}
+</style>
+</head>
+<body>
+<img class="logo" src="/logo.webp" alt="">
+<h1>Laarif <b>StrikeSense</b></h1>
+<div class="sub">Your strikes and fishing spots are saved online with your name, so we can make the detection better.</div>
+
+<div class="tabs"><div id="tReg" class="on" onclick="mode(true)">REGISTER</div><div id="tLog" onclick="mode(false)">LOG IN</div></div>
+
+<div class="lbl">USERNAME</div>
+<input type="text" id="user" maxlength="20" autocomplete="username" autocapitalize="none" placeholder="e.g. karim_asilah">
+<div class="lbl">PASSWORD</div>
+<input type="password" id="pass" maxlength="40" autocomplete="current-password" placeholder="at least 6 characters">
+
+<label class="agree" id="agreeRow"><input type="checkbox" id="agree"><span>I share my strikes and fishing spots (from the phone's GPS) to improve StrikeSense.</span></label>
+
+<button class="btn" id="go" onclick="go()">REGISTER</button>
+<div class="msg" id="msg"></div>
+<a class="later" onclick="later()">Not now (keep the strikes on this phone)</a>
+<div class="small">Username: 3-20 letters, numbers, _ . -<br>The password is never stored: only a scrambled check value.</div>
+
+<script>
+const APP = window.StrikeApp || null;
+let reg = true, busy = false;
+
+function mode(r)
+{
+  reg = r;
+  document.getElementById('tReg').className = r ? 'on' : '';
+  document.getElementById('tLog').className = r ? '' : 'on';
+  document.getElementById('agreeRow').style.display = r ? '' : 'none';
+  document.getElementById('go').textContent = r ? 'REGISTER' : 'LOG IN';
+  document.getElementById('pass').autocomplete = r ? 'new-password' : 'current-password';
+  say('');
+}
+
+function say(t, c)
+{
+  const m = document.getElementById('msg');
+  m.innerHTML = t;
+  m.style.color = c || '#8ea6c8';
+}
+
+function go()
+{
+  if(busy) return;
+  const u = document.getElementById('user').value.trim();
+  const p = document.getElementById('pass').value;
+
+  if(!/^[A-Za-z0-9_.-]{3,20}$/.test(u)) return say('Username: 3-20 letters, numbers, _ . -', '#ffba52');
+  if(p.length < 6) return say('Password: at least 6 characters', '#ffba52');
+  if(reg && !document.getElementById('agree').checked) return say('Please tick the box to share your strikes', '#ffba52');
+
+  busy = true;
+  document.getElementById('go').disabled = true;
+  say(reg ? 'Registering&hellip;' : 'Logging in&hellip;');
+
+  if(!APP) { setTimeout(() => done('ok'), 600); return; }
+  APP.accountStart(reg, u, p);
+  wait();
+}
+
+function wait()
+{
+  const r = APP.accountResult();
+  if(r == 'working' || r == '') { setTimeout(wait, 400); return; }
+  done(r);
+}
+
+function done(r)
+{
+  busy = false;
+  document.getElementById('go').disabled = false;
+
+  if(r == 'ok')
+  {
+    say('&#10003; Welcome, ' + document.getElementById('user').value.trim() + '!', '#3ddc84');
+    setTimeout(() => { if(APP) APP.accountDone(false); }, 900);
+  }
+  else
+  {
+    say(r.replace(/^error:/, ''), '#ff4d5e');
+  }
+}
+
+function later()
+{
+  if(APP) APP.accountDone(true);
+}
+
+mode(true);
+</script>
+</body></html>

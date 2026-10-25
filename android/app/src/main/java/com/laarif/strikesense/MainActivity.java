@@ -47,7 +47,10 @@ public class MainActivity extends Activity
     static final String DASHBOARD_URL = "http://" + HOST + "/";
     private static final String HELP_URL = "file:///android_asset/offline.html";
     private static final String PAIR_URL = DASHBOARD_URL + "app/pair.html";
+    private static final String ACCOUNT_URL = DASHBOARD_URL + "app/account.html";
     private boolean onPairPage = false;
+    private boolean onAccountPage = false;
+    private volatile String accountResult = "";
 
     private static final int REQ_PERMISSIONS = 1;
     private static final int REQ_BLUETOOTH_ON = 2;
@@ -246,6 +249,28 @@ public class MainActivity extends Activity
             RodLink link = RodLink.get(MainActivity.this);
             boolean watchOnly = RodService.isWatchOnly(MainActivity.this);
 
+            // first start: register / log in (the strikes go online with the username)
+            if(needsAccount())
+            {
+                if(!onAccountPage)
+                {
+                    onAccountPage = true;
+                    onDashboard = false;
+                    onPairPage = false;
+                    web.loadUrl(ACCOUNT_URL);
+                }
+
+                handler.postDelayed(this, 1000);
+                return;
+            }
+
+            if(onAccountPage)
+            {
+                onAccountPage = false;
+                onDashboard = false;
+                web.loadUrl(HELP_URL);
+            }
+
             if(!onDashboard)
             {
                 if(link.ready() || (watchOnly && link.paired()))     // Watch only: the dashboard, so the phone can come back
@@ -283,6 +308,16 @@ public class MainActivity extends Activity
             handler.postDelayed(this, 1000);
         }
     };
+
+    private boolean accountAsked = false;          // Settings > SIGN IN: show the page again
+
+    private boolean needsAccount()
+    {
+        if(accountAsked)
+            return true;
+
+        return !StrikeStore.get(this).signedIn() && !getSharedPreferences("app", MODE_PRIVATE).getBoolean("accountLater", false);
+    }
 
     private static String helpStatus(RodLink.State s)
     {
@@ -610,15 +645,9 @@ public class MainActivity extends Activity
         }
 
         @JavascriptInterface
-        public String cloudUrl()
+        public String username()
         {
-            return StrikeStore.get(MainActivity.this).cloudUrl();
-        }
-
-        @JavascriptInterface
-        public void setCloudUrl(String url)
-        {
-            StrikeStore.get(MainActivity.this).setCloudUrl(url);
+            return StrikeStore.get(MainActivity.this).username();
         }
 
         // send now / get everything back from the sheet: the page is told when done
@@ -759,6 +788,79 @@ public class MainActivity extends Activity
                     MainActivity.this.openStrikes();
                 }
             });
+        }
+
+        // ---------- REGISTER / LOG IN page ----------
+
+        // register = true: new account; false: log in. The page asks accountResult().
+        @JavascriptInterface
+        public void accountStart(final boolean register, final String user, final String password)
+        {
+            accountResult = "working";
+
+            new Thread(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    StrikeStore st = StrikeStore.get(MainActivity.this);
+                    String err = st.account(register, user == null ? "" : user, password == null ? "" : password);
+
+                    if(err.isEmpty())
+                    {
+                        if(!register)
+                            st.restore();          // a new phone: this tester's strikes come back
+                        st.syncNow(true);
+                    }
+
+                    accountResult = err.isEmpty() ? "ok" : "error:" + err;
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public String accountResult()
+        {
+            return accountResult;
+        }
+
+        // the page says OK (or "later"): go on to the rod
+        @JavascriptInterface
+        public void accountDone(boolean later)
+        {
+            if(later)
+                getSharedPreferences("app", MODE_PRIVATE).edit().putBoolean("accountLater", true).apply();
+
+            accountAsked = false;
+        }
+
+        // Settings > ACCOUNT > SIGN IN
+        @JavascriptInterface
+        public void openAccount()
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    accountResult = "";
+                    accountAsked = true;
+                    showTab(TAB_ROD);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public String accountName()
+        {
+            return StrikeStore.get(MainActivity.this).username();
+        }
+
+        @JavascriptInterface
+        public void logOut()
+        {
+            StrikeStore.get(MainActivity.this).logOut();
+            openAccount();
         }
 
         // ---------- PAIR YOUR ROD page ----------

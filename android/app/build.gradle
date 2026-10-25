@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 9
-        versionName "2.7 (my strikes, watch only)"
+        versionCode 10
+        versionName "2.8 (private pairing, account)"
     }
 
     // Alarm sounds are read straight from the app (RodService): not compressed

@@ -54,7 +54,7 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
   <div class="title">My strikes</div><div class="sp"></div>
   <span class="chip act" onclick="show('pMap')">&#128506; MAP</span>
  </div>
- <div class="meta" id="cloudLine" onclick="show('pCloud')" style="margin:-4px 0 9px;cursor:pointer">&#9729; &hellip;</div>
+ <div class="meta" id="cloudLine" style="margin:-4px 0 9px">&#9729; &hellip;</div>
  <div class="chips" id="countryChips"></div>
  <div class="chips" id="placeChips"></div>
  <div id="recs" class="rec"></div>
@@ -105,38 +105,6 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
  <button class="btn red" onclick="deleteStrike()">Delete this strike</button>
 </div>
 
-<!-- ============ ONLINE STORAGE ============ -->
-<div class="page" id="pCloud">
- <div class="top">
-  <button class="back" onclick="show('pList')">&#8249; Back</button>
-  <div class="title">Saved online</div>
- </div>
- <div class="card">
-  <div class="lbl">NOW</div>
-  <div id="cloudNow" style="margin:6px 0 8px;font-weight:700"></div>
-  <button class="btn" onclick="syncNow(false)">Send now</button>
-  <button class="btn ghost" onclick="syncNow(true)">Load from the sheet</button>
-  <div class="meta" id="syncMsg"></div>
- </div>
- <div class="card">
-  <div class="lbl">YOUR GOOGLE SHEET LINK</div>
-  <input type="text" id="cloudUrl" placeholder="https://script.google.com/macros/s/.../exec">
-  <button class="btn" onclick="saveUrl()">Save link</button>
- </div>
- <div class="card">
-  <div class="lbl">SET UP ONCE (5 MIN, ON A COMPUTER IS EASIEST)</div>
-  <ol>
-   <li>Open <b>sheets.new</b> (a new Google Sheet in your account). Name it <i>StrikeSense</i>.</li>
-   <li>Menu <b>Extensions &rarr; Apps Script</b>. Delete what is there, paste the code below, press <b>Save</b>.</li>
-   <li><b>Deploy &rarr; New deployment</b> &rarr; type <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. Press <b>Deploy</b> and allow it.</li>
-   <li>Copy the <b>Web app URL</b> (ends with /exec), paste it above, press <b>Save link</b>.</li>
-  </ol>
-  <div class="meta" style="margin-bottom:6px">Only this app knows the link. Your strikes stay in your own Google account.</div>
-  <button class="btn ghost" onclick="copyCode()">Copy the code</button>
-  <pre id="code"></pre>
- </div>
-</div>
-
 <script src="leaflet.js"></script>
 <script>
 // ---------- data ----------
@@ -179,7 +147,6 @@ function show(id)
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id == id));
   window.scrollTo(0, 0);
   if(id == 'pMap') drawMap();
-  if(id == 'pCloud') cloudPage();
   if(id == 'pList') drawList();
   if(APP && APP.pageShown) APP.pageShown(id);      // the bottom tabs follow
 }
@@ -310,10 +277,10 @@ function drawList()
 function cloudLine()
 {
   const waiting = all.filter(s => !s.synced && s.done).length;
-  const url = APP ? APP.cloudUrl() : '';
-  $('cloudLine').innerHTML = !url ? '&#9729; saved on this phone &middot; <u>save online too</u>'
-    : waiting ? `&#9729; ${waiting} waiting to go online &middot; <u>details</u>`
-    : `&#9729; all ${all.length} saved online`;
+  const user = APP ? APP.username() : 'test';
+  $('cloudLine').innerHTML = !user ? '&#9729; saved on this phone'
+    : waiting ? `&#9729; ${esc(user)} &middot; ${waiting} waiting to go online`
+    : `&#9729; ${esc(user)} &middot; all ${all.length} saved online`;
 }
 
 // ---------- map ----------
@@ -581,89 +548,6 @@ function deleteStrike()
   if(APP) APP.delete(cur.uid); else all = all.filter(s => s.uid != cur.uid);
   show('pList');
 }
-
-// ---------- online ----------
-function cloudPage()
-{
-  $('cloudUrl').value = APP ? APP.cloudUrl() : '';
-  $('cloudNow').textContent = APP ? APP.cloudNote() || 'not checked yet' : 'test page';
-  $('code').textContent = SHEET_CODE;
-}
-
-function saveUrl()
-{
-  const u = $('cloudUrl').value.trim();
-  if(u && !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u))
-  {
-    $('syncMsg').textContent = 'That does not look like a Web app link (https://script.google.com/macros/s/…/exec).';
-    return;
-  }
-  if(APP) APP.setCloudUrl(u);
-  $('syncMsg').textContent = u ? 'Link saved. Sending…' : 'Link removed.';
-  if(u) syncNow(false);
-}
-
-function syncNow(restore)
-{
-  $('syncMsg').textContent = restore ? 'Loading from the sheet…' : 'Sending…';
-  if(APP) APP.sync(restore); else synced('test page');
-}
-
-// called by the app when a send / load finished
-function synced(note)
-{
-  $('syncMsg').textContent = note;
-  $('cloudNow').textContent = APP ? APP.cloudNote() : note;
-  load(); cloudLine();
-}
-
-function copyCode()
-{
-  const t = SHEET_CODE;
-  if(navigator.clipboard) navigator.clipboard.writeText(t).then(() => $('syncMsg').textContent = 'Code copied.');
-  else { const r = document.createRange(); r.selectNode($('code')); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
-}
-
-const SHEET_CODE = `// StrikeSense: your strikes in this Google Sheet (paste in Extensions > Apps Script)
-const COLS = ['uid','time','date','type','peak','fight','knock','knocks','country','place','lat','lon','wave','wind','graph'];
-
-function doPost(e) {
-  const req = JSON.parse(e.postData.contents);
-  const sh = sheet_();
-  if (req.action == 'add') {
-    const uids = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 1).getValues().map(r => String(r[0]));
-    (req.strikes || []).forEach(s => {
-      const row = COLS.map(c => c == 'date' ? new Date(s.time) : c == 'graph' ? (s.graphdata ? JSON.stringify(s.graphdata) : '') : (s[c] === undefined ? '' : s[c]));
-      const at = uids.indexOf(String(s.uid));
-      if (at >= 0) sh.getRange(at + 2, 1, 1, COLS.length).setValues([row]);
-      else { sh.appendRow(row); uids.push(String(s.uid)); }
-    });
-    return out_({ ok: true });
-  }
-  if (req.action == 'list') {
-    const rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, COLS.length).getValues() : [];
-    return out_({ ok: true, strikes: rows.map(r => {
-      const s = {};
-      COLS.forEach((c, i) => { if (c != 'date' && r[i] !== '') s[c] = r[i]; });
-      if (s.graph) { try { s.graphdata = JSON.parse(s.graph); } catch (x) {} }
-      delete s.graph; s.uid = String(s.uid); s.done = true;
-      return s;
-    }) });
-  }
-  return out_({ ok: false, error: 'unknown action' });
-}
-
-function sheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName('Strikes') || ss.insertSheet('Strikes');
-  if (sh.getLastRow() == 0) sh.appendRow(COLS);
-  return sh;
-}
-
-function out_(o) {
-  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
-}
-`;
 
 // ---------- test data (only in a normal browser, not in the app) ----------
 function demo()

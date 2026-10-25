@@ -78,7 +78,7 @@ final class StrikeStore
 
     // The rod's /strikes answer. now = phone time when it arrived;
     // sea = the last /data (waves, wind), may be null.
-    synchronized void fromRod(JSONObject rod, long now, JSONObject sea)
+    synchronized void fromRod(JSONObject rod, long now, JSONObject sea, String rodId)
     {
         JSONArray l = rod.optJSONArray("list");
 
@@ -104,6 +104,8 @@ final class StrikeStore
                 put(s, "uid", Long.toString(start / 1000) + "-" + Math.abs(type.hashCode() % 1000));
                 put(s, "time", start);
                 put(s, "type", type);
+                put(s, "local", new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.UK).format(new java.util.Date(start)));
+                put(s, "rod", rodId == null ? "" : rodId);
                 put(s, "graph", false);
                 put(s, "synced", false);
 
@@ -364,17 +366,65 @@ final class StrikeStore
         }
     }
 
-    // ---------- Google Sheet ----------
+    // ---------- Google Sheet (the StrikeSense strikes database) ----------
+
+    // Laarif StrikeSense's own sheet (Apps Script web app): every tester's
+    // strikes go there with their username
+    static final String SHEET_URL =
+        "https://script.google.com/macros/s/AKfycbzmwI0EyzP_Ww1tlzg0AoIL9A5s7YJ1tBa-XYN0XnLZmgtOyzLPTBrNbJfula53ofsV/exec";
 
     String cloudUrl()
     {
-        return prefs().getString("cloudUrl", "");
+        return SHEET_URL;
     }
 
-    void setCloudUrl(String url)
+    // ---------- account: username + password (the sheet keeps only a check value) ----------
+
+    String username()
     {
-        prefs().edit().putString("cloudUrl", url == null ? "" : url.trim()).apply();
-        lastCloudTry = 0;
+        return prefs().getString("user", "");
+    }
+
+    private String token()
+    {
+        return prefs().getString("token", "");
+    }
+
+    boolean signedIn()
+    {
+        return !username().isEmpty() && !token().isEmpty();
+    }
+
+    // register (true) or log in (false); returns "" when OK, else the reason
+    // (network: never on the main thread)
+    String account(boolean register, String user, String password)
+    {
+        try
+        {
+            JSONObject body = new JSONObject();
+            body.put("action", register ? "register" : "login");
+            body.put("username", user.trim());
+            body.put("password", password);
+
+            JSONObject answer = new JSONObject(http(SHEET_URL, body.toString()));
+
+            if(!answer.optBoolean("ok"))
+                return answer.optString("error", "Not possible right now");
+
+            prefs().edit().putString("user", answer.optString("username", user.trim()))
+                          .putString("token", answer.optString("token", "")).apply();
+            lastCloudTry = 0;
+            return "";
+        }
+        catch(Exception e)
+        {
+            return "No internet. Try again when the phone is online.";
+        }
+    }
+
+    void logOut()
+    {
+        prefs().edit().remove("user").remove("token").apply();
     }
 
     String cloudNote()
@@ -426,9 +476,9 @@ final class StrikeStore
 
         String url = cloudUrl();
 
-        if(url.isEmpty())
+        if(!signedIn())
         {
-            cloudNote = "saved on this phone (Google Sheet not set up)";
+            cloudNote = "saved on this phone (sign in to save online)";
             return;
         }
 
@@ -442,6 +492,8 @@ final class StrikeStore
         {
             JSONObject body = new JSONObject();
             body.put("action", "add");
+            body.put("username", username());
+            body.put("token", token());
             body.put("strikes", todo);
 
             JSONObject answer = new JSONObject(http(url, body.toString()));
@@ -475,13 +527,15 @@ final class StrikeStore
     {
         String url = cloudUrl();
 
-        if(url.isEmpty())
+        if(!signedIn())
             return -1;
 
         try
         {
             JSONObject body = new JSONObject();
             body.put("action", "list");
+            body.put("username", username());
+            body.put("token", token());
             JSONObject answer = new JSONObject(http(url, body.toString()));
             JSONArray rows = answer.getJSONArray("strikes");
             int added = 0;

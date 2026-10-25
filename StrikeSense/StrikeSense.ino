@@ -8070,6 +8070,7 @@ async function settingsCall(url)
 function openSettings()
 {
   el("drawer").classList.add("open");
+  showAccount();
   settingsCall("/settings");
   presetCall("/presets");
   showSoundChoices();
@@ -8778,6 +8779,47 @@ async function setLinkMode(m)
 <div class="setGroup" id="rodGroup">MY ROD</div>
 <div class="setHelp" id="rodInfo">&ndash;</div>
 <button class="soundButton appOnly" id="forgetBtn" onclick="forgetRod()">FORGET MY DEVICES</button>
+
+<div id="accBox" style="display:none">
+<div class="setGroup">ACCOUNT</div>
+<div class="setHelp" id="accInfo">&ndash;</div>
+<button class="soundButton" id="accBtn" onclick="accountBtn()">SIGN IN</button>
+</div>
+
+<script>
+// the phone app's account (not on the rod)
+function showAccount()
+{
+  if(!window.StrikeApp || !StrikeApp.accountName)
+    return;
+
+  var name = StrikeApp.accountName();
+  el('accBox').style.display = '';
+  el('accInfo').innerHTML = name ? '<b style="font-size:15px;color:#eaf3ff">' + name + '</b><br>strikes and fishing spots saved online automatically'
+                                 : 'Not signed in: strikes stay on this phone.';
+  el('accBtn').innerText = name ? 'LOG OUT' : 'SIGN IN';
+}
+
+function accountBtn()
+{
+  if(!window.StrikeApp)
+    return;
+
+  if(StrikeApp.accountName())
+  {
+    if(confirm('Log out? Strikes already saved stay online. New strikes stay on this phone until you sign in again.'))
+    {
+      closeSettings();
+      StrikeApp.logOut();
+    }
+  }
+  else
+  {
+    closeSettings();
+    StrikeApp.openAccount();
+  }
+}
+</script>
 
 <script>
 // rod 2.3+: "rodid", "paired", "pairopen" in /data
