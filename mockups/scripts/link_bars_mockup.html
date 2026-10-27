@@ -1,0 +1,99 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#d9dee7;font-family:Arial,Helvetica,sans-serif;width:1560px}
+h1{font-size:26px;margin:0 0 4px;color:#0b1428}
+.cap{color:#38465f;font-size:15px;margin-bottom:22px}
+.row{display:flex;gap:30px;align-items:flex-start}
+.lab{font-weight:800;color:#0b1428;font-size:16px;margin:0 0 10px}
+.lab span{display:inline-block;background:#1e7bff;color:#fff;border-radius:50%;width:26px;height:26px;text-align:center;line-height:26px;margin-right:8px}
+.note{font-size:13px;color:#38465f;margin-top:10px;line-height:1.5;width:300px}
+/* watch */
+.watch{width:300px;height:300px;border-radius:50%;background:#000;border:10px solid #2a2f38;position:relative;color:#eaf3ff;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.wtop{position:absolute;top:26px;left:0;right:0;text-align:center;font-size:15px;color:#9fb3d6;display:flex;justify-content:center;align-items:flex-end;gap:10px}
+.bars{display:inline-flex;align-items:flex-end;gap:3px;height:16px}
+.bars i{display:block;width:5px;border-radius:2px;background:#2b3448}
+.bars i:nth-child(1){height:5px}.bars i:nth-child(2){height:8px}.bars i:nth-child(3){height:12px}.bars i:nth-child(4){height:16px}
+.blue i.on{background:#22a8ff}
+.yel i.on{background:#ffc928}
+.grey i.on{background:#5f6b80}
+.pill{position:absolute;top:58px;left:50%;transform:translateX(-50%);border:1px solid #3ddc84;color:#3ddc84;border-radius:14px;padding:4px 14px;font-weight:800;font-size:14px;background:#0d2a1a}
+.ring{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);width:150px;height:150px;border-radius:50%;border:12px solid #1c2a45;border-top-color:#22d3ff;border-right-color:#22d3ff}
+.big{position:absolute;left:0;right:0;top:46%;text-align:center;font-size:30px;font-weight:900}
+.small{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;color:#8ea6c8}
+.old{position:absolute;top:26px;left:0;right:0;text-align:center;font-size:13px;color:#ffba52}
+/* phone pill */
+.phone{width:330px;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%);border-radius:26px;padding:16px;border:8px solid #000;color:#eaf3ff}
+.prow{display:flex;align-items:center;gap:10px;background:#0b1428;border:1px solid #24324f;border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.prow .t{flex:1;font-size:15px;font-weight:800}
+.prow .s{font-size:12px;color:#8ea6c8;font-weight:400;margin-top:2px}
+.dot{width:12px;height:12px;border-radius:50%}
+.pbars{display:inline-flex;align-items:flex-end;gap:3px;height:20px}
+.pbars i{display:block;width:6px;border-radius:2px;background:#2b3448}
+.pbars i:nth-child(1){height:6px}.pbars i:nth-child(2){height:10px}.pbars i:nth-child(3){height:15px}.pbars i:nth-child(4){height:20px}
+.pblue i.on{background:#22a8ff}.pyel i.on{background:#ffc928}
+.tag{font-size:11px;font-weight:900;padding:3px 7px;border-radius:7px}
+.tb{background:#0d2340;color:#22a8ff;border:1px solid #22a8ff}
+.ty{background:#3a2c0f;color:#ffc928;border:1px solid #ffc928}
+.tn{background:#2a1218;color:#ff6b7a;border:1px solid #ff4d5e}
+.legend{margin-top:22px;background:#fff;border-radius:12px;padding:14px 18px;width:1000px;font-size:14px;color:#0b1428;line-height:1.7}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:6px}
+</style></head><body>
+<h1>Watch link bars (mockup)</h1>
+<div class="cap">Same colours on the watch and in the app: <b style="color:#1e8fe0">blue = Bluetooth</b>, <b style="color:#c99a00">yellow = LoRa</b>, grey = not connected. 1&ndash;4 bars = signal strength. No words on the watch.</div>
+<div class="row">
+
+<div>
+<div class="lab"><span>1</span>Watch now (words)</div>
+<div class="watch">
+  <div class="old">85%  LoRa 500m Clear</div>
+  <div class="pill">ARMED</div>
+  <div class="ring"></div>
+  <div class="big">0.4&deg;</div>
+  <div class="small">calm</div>
+</div>
+<div class="note">Today: text at the top. Long and hard to read on a small round screen.</div>
+</div>
+
+<div>
+<div class="lab"><span>2</span>Watch on Bluetooth</div>
+<div class="watch">
+  <div class="wtop">85%<span class="bars blue"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></div>
+  <div class="pill">ARMED</div>
+  <div class="ring"></div>
+  <div class="big">0.4&deg;</div>
+  <div class="small">calm</div>
+</div>
+<div class="note"><b>Blue bars</b> next to the battery: on Bluetooth, 4 = very close.</div>
+</div>
+
+<div>
+<div class="lab"><span>3</span>Watch on LoRa</div>
+<div class="watch">
+  <div class="wtop">85%<span class="bars yel"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div>
+  <div class="pill">ARMED</div>
+  <div class="ring"></div>
+  <div class="big">0.4&deg;</div>
+  <div class="small">calm</div>
+</div>
+<div class="note"><b>Yellow bars</b>: on LoRa, 3 of 4. The channel (500 m / 1 km) stays in SETUP only.</div>
+</div>
+
+<div>
+<div class="lab"><span>4</span>App: the watch line</div>
+<div class="phone">
+  <div style="font-size:12px;color:#8ea6c8;font-weight:800;letter-spacing:.8px;margin:2px 4px 8px">WATCH</div>
+  <div class="prow"><div class="dot" style="background:#22a8ff"></div><div class="t">Watch connected<div class="s">via Bluetooth</div></div><span class="pbars pblue"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></div>
+  <div class="prow"><div class="dot" style="background:#ffc928"></div><div class="t">Watch connected<div class="s">via LoRa &middot; 500 m</div></div><span class="pbars pyel"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div>
+  <div class="prow"><div class="dot" style="background:#5f6b80"></div><div class="t">Watch not connected<div class="s">no answer for 10 s</div></div><span class="pbars"><i></i><i></i><i></i><i></i></span></div>
+</div>
+<div class="note">Three examples. The app shows <b>one</b> line: the watch's link now. LoRa shows yellow bars and "connected", not "not connected".</div>
+</div>
+
+</div>
+<div class="legend">
+<b>Colours:</b> <span class="sw" style="background:#22a8ff"></span>Bluetooth &nbsp;&nbsp; <span class="sw" style="background:#ffc928"></span>LoRa &nbsp;&nbsp; <span class="sw" style="background:#5f6b80"></span>not connected<br>
+<b>Changing Watch link or LoRa channel in the app:</b> applies at once on the rod and the watch (no restart). The bars change colour within a few seconds.
+</div>
+</body></html>
