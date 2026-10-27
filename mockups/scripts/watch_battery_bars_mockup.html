@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:26px;background:#d9dee7;font-family:Arial,Helvetica,sans-serif;width:1580px}
+h1{font-size:25px;margin:0 0 4px;color:#0b1428}
+.cap{color:#38465f;font-size:15px;margin-bottom:18px;line-height:1.5}
+.row{display:flex;gap:22px;align-items:flex-start;margin-bottom:22px}
+.c{width:290px}
+.lab{font-weight:800;color:#0b1428;font-size:15px;margin:0 0 8px}
+.lab span{display:inline-block;color:#fff;border-radius:8px;padding:2px 8px;margin-right:6px;font-size:13px}
+.wa{background:#6b7a93}.wb{background:#1e7bff}.wc{background:#0f9d58}
+.watch{width:290px;height:290px;border-radius:50%;overflow:hidden;border:8px solid #2a2f38;box-shadow:0 6px 18px rgba(0,0,0,.35);background:#000}
+.watch img{width:274px;height:274px;display:block}
+.zoom{width:290px;height:70px;margin-top:10px;border-radius:12px;overflow:hidden;border:2px solid #2a2f38;background:#000;position:relative}
+.zoom img{position:absolute;width:932px;left:-320px;top:-62px}
+.note{font-size:13px;color:#38465f;margin-top:8px;line-height:1.5}
+.sec{font-size:18px;font-weight:900;color:#0b1428;margin:6px 0 10px}
+.legend{background:#fff;border-radius:12px;padding:12px 16px;font-size:14px;color:#0b1428;line-height:1.8;width:1200px}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:6px}
+</style></head><body>
+<h1>Watch top line: link bars + batteries (mockup, made from the real watch screen)</h1>
+<div class="cap">The top stays as it is: <b>"last strike 33 s ago"</b> first. The line under it changes: <b>bars</b> (<b style="color:#1e8fe0">blue</b> Bluetooth, <b style="color:#c99a00">yellow</b> LoRa, grey none) and the battery. Below each watch: the top line enlarged.</div>
+
+<div class="sec">Today</div>
+<div class="row">
+ <div class="c"><div class="lab"><span class="wa">NOW</span>On LoRa: words</div>
+  <div class="watch"><img src="opt_today.png"></div>
+  <div class="zoom"><img src="opt_today.png"></div>
+  <div class="note">"78%" is the <b>rod's</b> battery. The watch's own battery is only on the battery page (swipe up).</div></div>
+</div>
+
+<div class="sec">Option A &mdash; rod battery only (watch battery stays on the battery page)</div>
+<div class="row">
+ <div class="c"><div class="lab"><span class="wb">A</span>Bluetooth</div>
+  <div class="watch"><img src="opt_a_bt.png"></div><div class="zoom"><img src="opt_a_bt.png"></div>
+  <div class="note">Blue bars + rod battery.</div></div>
+ <div class="c"><div class="lab"><span class="wb">A</span>LoRa</div>
+  <div class="watch"><img src="opt_a_lo.png"></div><div class="zoom"><img src="opt_a_lo.png"></div>
+  <div class="note">Yellow bars + rod battery. No words.</div></div>
+</div>
+
+<div class="sec">Option B &mdash; rod battery AND watch battery, with small icons (no words)</div>
+<div class="row">
+ <div class="c"><div class="lab"><span class="wc">B</span>Bluetooth</div>
+  <div class="watch"><img src="opt_b_bt.png"></div><div class="zoom"><img src="opt_b_bt.png"></div>
+  <div class="note">Blue bars, <b>rod icon 78%</b> (rod battery), <b>watch icon 92%</b> (watch battery).</div></div>
+ <div class="c"><div class="lab"><span class="wc">B</span>LoRa</div>
+  <div class="watch"><img src="opt_b_lo.png"></div><div class="zoom"><img src="opt_b_lo.png"></div>
+  <div class="note">Same, bars yellow.</div></div>
+ <div class="c"><div class="lab"><span class="wc">B</span>Rod not connected</div>
+  <div class="watch"><img src="opt_b_no.png"></div><div class="zoom"><img src="opt_b_no.png"></div>
+  <div class="note">Grey bars, rod battery "--" (unknown), the watch battery still shown.</div></div>
+</div>
+
+<div class="legend"><b>Colours:</b> <span class="sw" style="background:#22a8ff"></span>Bluetooth &nbsp; <span class="sw" style="background:#ffc928"></span>LoRa &nbsp; <span class="sw" style="background:#464e5c"></span>not connected &nbsp;&nbsp; <b>Bars</b> = signal (1&ndash;4). The app shows the same colours on its watch line.<br>
+<b>Changing Watch link or LoRa channel in the app</b> applies at once on the rod and the watch &mdash; no restart.</div>
+</body></html>
