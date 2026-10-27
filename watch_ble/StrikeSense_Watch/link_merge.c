@@ -106,6 +106,8 @@ void link_merge(ble_link_status_t *s, const lora_link_status_t *lo, uint32_t now
   s->batleft = lo->bat_left;
   s->dir = (lo->flags & SS_F_DIR) != 0;
   s->dropwatch = (lo->flags & SS_F_DROPWATCH) != 0;
+  s->land = lo->land;
+  s->landsec = lo->land_sec;
   s->time = lo->utc ? (long)(lo->utc + lora_age / 1000) : 0;
   s->tz = lo->tz_min;
   s->command_busy = lora_link_command_pending();
@@ -130,6 +132,8 @@ uint8_t link_path_to_cmd(const char *path, uint32_t *utc, int *tz_min)
     { "/teachdir", CMD_TEACHDIR },
     { "/relearn",  CMD_RELEARN },
     { "/learn",    CMD_LEARN },
+    { "/fishout",  CMD_FISHOUT },
+    { "/lostfish", CMD_LOSTFISH },
   };
 
   // the link / channel choice set on the watch: the number in *utc

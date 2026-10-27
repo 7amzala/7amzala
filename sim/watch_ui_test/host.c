@@ -237,6 +237,24 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
       s->tilt = t < 2 ? 1.0f + 0.9f * sinf(2 * 3.14159f * 2 * t) : 0.7f - 0.02f * (t - 2);   // creeping back very slowly
       break;
 
+    case 13:                                    // reeled in after a strike: the fight timer runs
+      strcpy(s->state, "paused");
+      s->land = 1;
+      s->landsec = 157 + (long)t;
+      break;
+
+    case 14:                                    // FISH OUT tapped
+      strcpy(s->state, "paused");
+      s->land = 2;
+      s->landsec = 252;
+      break;
+
+    case 15:                                    // LOST IT
+      strcpy(s->state, "paused");
+      s->land = 3;
+      s->landsec = 48;
+      break;
+
     case 6:                                     // pull test
       strcpy(s->state, "pulltest");
       s->dir = false;
@@ -761,5 +779,35 @@ int main(void)
            mem_peak <= 60000 ? "PASS" : "FAIL", mem_peak);
   }
   printf("%s: %d commands sent, %s\n", ok ? "PASS" : "FAIL", n, ok ? "all buttons send the right request" : "wrong");
+
+  // ---- FIGHT: REEL IN after a strike, then FISH OUT (tap) or LOST IT (hold 2 s) ----
+  {
+    page = 0; vpage = 0;
+    scene = 13; scene_start = sim_ms; run_ms(1000); save("w22_fight");
+    int b = sent_n;
+    press(233, 268);                                     // tap: FISH OUT
+    int tap_ok = sent_n == b + 1 && strcmp(sent[b], "/fishout") == 0;
+
+    touch_x = 233; touch_y = 268; touch_down = 1;        // hold 1 s: still a fight, the ring fills
+    run_ms(1000);
+    save("w22b_holding");
+    run_ms(1300);                                        // 2.3 s: LOST IT
+    save("w22c_lost_hold");
+    touch_down = 0; run_ms(200);
+    int hold_ok = sent_n == b + 2 && strcmp(sent[b + 1], "/lostfish") == 0;
+
+    press(233, 268);                                     // a quick tap again: FISH OUT, not lost
+    int again_ok = sent_n == b + 3 && strcmp(sent[b + 2], "/fishout") == 0;
+
+    scene = 14; scene_start = sim_ms; run_ms(1000); save("w23_fishout");
+    press(233, 268);                                     // READY
+    int ready_ok = sent_n == b + 4 && strcmp(sent[b + 3], "/ready") == 0;
+    scene = 15; scene_start = sim_ms; run_ms(1000); save("w24_lost");
+    scene = 5; scene_start = sim_ms; run_ms(1000); save("w25_reeled_no_fight");
+
+    printf("%s: FIGHT: tap -> /fishout (%s), hold 2 s -> /lostfish (%s), tap again -> /fishout (%s), then READY (%s)\n",
+           tap_ok && hold_ok && again_ok && ready_ok ? "PASS" : "FAIL",
+           tap_ok ? "yes" : "no", hold_ok ? "yes" : "no", again_ok ? "yes" : "no", ready_ok ? "yes" : "no");
+  }
   return 0;
 }

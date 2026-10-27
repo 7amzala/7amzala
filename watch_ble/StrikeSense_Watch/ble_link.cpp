@@ -393,6 +393,8 @@ static void gotWatchData(const std::string &j)
   s.batleft = (long)jsonNum(j, "batleft", -1);
   s.dir = jsonBool(j, "dir");
   s.dropwatch = jsonBool(j, "dropwatch");
+  s.land = (int)jsonNum(j, "land", 0);
+  s.landsec = (long)jsonNum(j, "landsec", 0);
 
   char lm[8] = "";
   jsonGet(j, "lmode", lm, sizeof(lm));

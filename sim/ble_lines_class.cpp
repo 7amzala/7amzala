@@ -169,12 +169,11 @@ public:
   {
 #if BLE_LINES
     // sending to all after failures: a minute later, the direct way again
-    // (never while a message to all is on its way: it must end whole)
-    if(broadcast && nowMs - broadcastSince > 60000 && sharedIdle())
-    {
-      broadcast = false;
-      Serial.println("Bluetooth: own line for each device again");
-    }
+    // (at the first moment no message to all is on its way: it must end
+    // whole - see handleClient; checking only here, every 2 s, could land
+    // in the middle of a message every time)
+    if(broadcast && nowMs - broadcastSince > 60000)
+      directDue = true;
 
     int real = (int)srv->getConnectedCount();
 
@@ -273,6 +272,17 @@ public:
     {
       checkedAt = nowMs;
       checkLines(nowMs);
+    }
+
+    if(directDue && sharedIdle())
+    {
+      directDue = false;
+
+      if(broadcast)
+      {
+        broadcast = false;
+        Serial.println("Bluetooth: own line for each device again");
+      }
     }
 
     // a line just opened, or closed: start it clean (here, not in the Bluetooth task)
@@ -460,6 +470,7 @@ private:
   int sharedOwner = -1;           // sending to all: the line whose message is on its way
   volatile bool lineHealed = false; // a device wrote without a line: it got one
   unsigned long broadcastSince = 0; // when sending to all started (after failures)
+  bool directDue = false;               // a minute is over: own lines again when nothing is half sent
   unsigned long checkedAt = 0;      // the last look at which connections really exist
   uint16_t gattsIf = 0xFFFF;
 
@@ -751,6 +762,7 @@ private:
     {
       broadcast = true;
       broadcastSince = millis();
+      directDue = false;
       sendFails = 0;
       Serial.println("Bluetooth: sending to all devices for a minute");
     }

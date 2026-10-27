@@ -148,9 +148,25 @@ void session(float loss)
   step(1);
   check(rodState == ST_PAUSED, "rod paused");
 
+  // the fight: REEL IN after the strike started the timer; FISH OUT from the watch stops it
+  check(landState == 1, "fight timer runs after REEL IN (a strike just before)");
+  unsigned long seen0 = simMillis;
+  while (lora_link_get_status().land != 1 && simMillis - seen0 < 15000) step(0.1);
+  check(lora_link_get_status().land == 1, "watch shows the FIGHT timer over LoRa");
+  step(4);
+  check(command(CMD_FISHOUT, "FISHOUT"), "FISH OUT confirmed");
+  check(landState == 2, "rod: fish out, timer stopped");
+  check(slist[slistCount - 1].result == 1 && slist[slistCount - 1].land >= 4, "the strike keeps its fight time and FISH OUT");
+  printf("  fight time kept with the strike: %d s\n", (int)slist[slistCount - 1].land);
+  seen0 = simMillis;
+  while (lora_link_get_status().land != 2 && simMillis - seen0 < 15000) step(0.1);
+  check(lora_link_get_status().land == 2 && lora_link_get_status().land_sec == (uint16_t)slist[slistCount - 1].land,
+        "watch shows FISH OUT and the same fight time");
+
   check(command(CMD_RESUME, "RESUME"), "ADJUST -> READY (resume) confirmed");
   for (int i = 0; i < 30 && rodState != ST_MONITORING; i++) step(0.5);
   check(rodState == ST_MONITORING, "rod armed again without pull test");
+  check(landState == 0, "casting again ends the fight screen");
 
   // Link loss
   simLoraLoss = 1.0;

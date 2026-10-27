@@ -10,6 +10,7 @@ on:
       - "StrikeSense_NoLoRa/**"
       - "watch_ble/**"
       - "sim/**"
+      - "docs/google_sheet/**"
       - ".github/workflows/firmware.yml"
   workflow_dispatch:
 
@@ -35,6 +36,9 @@ jobs:
           echo "=== the same with the NimBLE library (newer ESP32 cores on the S3) ==="
           g++ -O2 -std=c++17 -DMOCK_NIMBLE -Imock_ble -Imock -o ble_test_nimble ble_test.cpp
           ./ble_test_nimble
+
+      - name: Google Sheet script test - the catch and its photos (PC, fake sheet + Drive)
+        run: node sim/sheet_test/run.js
 
       - uses: arduino/setup-arduino-cli@v2
 

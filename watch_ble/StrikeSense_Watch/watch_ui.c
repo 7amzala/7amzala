@@ -370,6 +370,10 @@ static void screen_dark(void)
 }
 
 static const char *btn1_path = "";
+
+// FIGHT screen: tap FISH OUT, hold it 2 s = LOST IT
+#define LOST_HOLD_MS 2000
+static uint32_t fish_press_at = 0;    // when the button went down
 static lv_obj_t *hold_btn = NULL;     // the hold-2-s cell being held
 
 static long last_knock_id = -1;
@@ -482,6 +486,21 @@ static void button_clicked(lv_event_t *e)
 {
   const char *path = (const char *)lv_event_get_user_data(e);
 
+  // FISH OUT: a tap; held 2 s: the fish got off
+  if(path != NULL && strcmp(path, "#fish") == 0)
+  {
+    bool lost = fish_press_at != 0 && lv_tick_get() - fish_press_at >= LOST_HOLD_MS;
+    fish_press_at = 0;
+
+    if(!swiped)
+    {
+      ble_link_command(lost ? "/lostfish" : "/fishout");
+      buzz_play(BUZZ_TAP);
+    }
+
+    return;
+  }
+
   if(path != NULL && strcmp(path, "#teach") == 0 && !swiped)
   {
     imu_teach_start();              // TEACH MY LOOK (not sent to the rod)
@@ -532,6 +551,12 @@ static void button_clicked(lv_event_t *e)
     if(mode == MODE_STRIKE)
       strike_quiet = strike_seen;     // answered: stop the strike buzz
   }
+}
+
+static void button_pressed(lv_event_t *e)
+{
+  (void)e;
+  fish_press_at = lv_tick_get();
 }
 
 static lv_obj_t *button(lv_obj_t **text)
@@ -824,6 +849,19 @@ static void place(lv_obj_t *o, const lv_font_t *f, int y)
 {
   lv_obj_set_style_text_font(o, f, 0);
   lv_obj_align(o, LV_ALIGN_TOP_MID, 0, y);
+}
+
+// place(), only when the font changes (no redraw every frame)
+static void place_once(lv_obj_t *o, const lv_font_t *f, int y)
+{
+  if(lv_obj_get_style_text_font(o, 0) != f)
+    place(o, f, y);
+}
+
+static void set_outline(lv_obj_t *o, lv_color_t c)
+{
+  if(lv_obj_get_style_outline_color(o, 0).full != c.full)
+    lv_obj_set_style_outline_color(o, c, 0);
 }
 
 static void layout(ui_mode_t m)
@@ -2279,6 +2317,58 @@ static void ui_timer(lv_timer_t *t)
   if(strcmp(s.state, "paused") == 0)
   {
     layout(MODE_REELED);
+
+    // after a strike, REEL IN starts the fight timer: FISH OUT (tap) or LOST IT (hold 2 s)
+    if(s.land != 0)
+    {
+      long sec = s.landsec + (s.land == 1 ? (long)(s.age_ms / 1000) : 0);
+      snprintf(a, sizeof(a), "%ld:%02ld", sec / 60, sec % 60);
+      place_once(title, FONT_HUGE, 96);
+      place_once(subtitle, FONT_TINY, 160);
+      set_text(title, a);
+
+      if(s.land == 1)
+      {
+        bool down = fish_press_at != 0 && lv_obj_has_state(btn1, LV_STATE_PRESSED);
+        uint32_t held = down ? now - fish_press_at : 0;
+        bool lost = held >= LOST_HOLD_MS;
+        bool holding = held > 300;
+
+        ring_set(holding ? (int)(lost ? 100 : held * 100 / LOST_HOLD_MS) : 0, COL_RED);
+        pill_set(lost ? "LOST IT" : "FIGHT", lost ? COL_RED : COL_ORANGE, true);
+        set_text_color(title, COL_TEXT);
+        set_text(subtitle, holding ? (lost ? "let go: lost it" : "keep holding: lost it") : "hold 2 s if it got off");
+        set_text_color(subtitle, holding ? COL_RED : COL_DIM);
+
+        set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : lost ? LV_SYMBOL_CLOSE : LV_SYMBOL_OK, "#fish", 268, 112, 112,
+                   lost ? COL_RED : COL_GREEN, lv_color_hex(0x05210f));
+        set_outline(btn1, COL_GREEN);
+        set_text(btn1_cap, lost ? "LOST IT" : "FISH OUT");
+        set_text_color(btn1_cap, lost ? COL_RED : COL_GREEN);
+      }
+      else
+      {
+        bool fish = s.land == 2;
+
+        ring_set(100, fish ? COL_GREEN : COL_RED);
+        pill_set(fish ? "FISH OUT" : "LOST IT", fish ? COL_GREEN : COL_RED, false);
+        set_text_color(title, fish ? COL_GREEN : COL_TEXT);
+        set_text(subtitle, fish ? "fight time - photos in the app" : "fight time");
+        set_text_color(subtitle, COL_DIM);
+
+        set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : LV_SYMBOL_PLAY, "/ready", 268, 112, 112, COL_CYAN, lv_color_hex(0x04121a));
+        set_outline(btn1, COL_CYAN);
+        set_text(btn1_cap, "READY");
+        set_text_color(btn1_cap, COL_CYAN);
+      }
+
+      return;
+    }
+
+    place_once(title, FONT_MID, 110);
+    place_once(subtitle, FONT_SMALL, 148);
+    set_outline(btn1, COL_CYAN);
+    set_text_color(btn1_cap, COL_CYAN);
     ring_set(0, COL_CYAN);
 
     pill_set("REELED IN", COL_DIM, false);
@@ -2785,6 +2875,7 @@ void watch_ui_create(void)
 
   // big round button (READY / SKIP) and its name under it
   btn1 = button(&btn1_label);
+  lv_obj_add_event_cb(btn1, button_pressed, LV_EVENT_PRESSED, NULL);
   btn1_cap = label(scr, FONT_TINY, COL_DIM);
 
   // ---------- STRIKE screen ----------

@@ -42,6 +42,19 @@ canvas{display:block;width:100%;touch-action:none}
 input[type=text]{width:100%;padding:10px;border-radius:10px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff;font-size:13px}
 ol{padding-left:20px;line-height:1.5;font-size:13px;color:#c3d2ea}
 pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px solid #1d2a44;border-radius:10px;padding:8px;font-size:10.5px;color:#a9bbd6;max-height:180px;overflow:auto}
+.photos{display:flex;gap:8px}
+.slot{flex:1;height:132px;border-radius:13px;border:2px dashed #3a5182;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12.5px;color:#b9c6df;text-align:center;gap:4px;position:relative;overflow:hidden;cursor:pointer;background:#0b1428 center/cover no-repeat}
+.slot.done{border:2px solid #3ddc84}
+.slot .ic{font-size:30px}
+.slot .ok{position:absolute;top:4px;right:7px;color:#3ddc84;font-size:16px;font-weight:900;text-shadow:0 0 4px #000}
+.slot.done span{background:rgba(0,0,0,.55);border-radius:6px;padding:1px 5px}
+.fields{display:flex;gap:8px}
+.fields label{flex:1;background:#060c1a;border:1px solid #24324f;border-radius:11px;padding:7px 10px}
+.fields small{display:block;font-size:11px;color:#8ea6c8;margin-bottom:2px}
+.fields input{width:100%;background:none;border:0;color:#eaf3ff;font-size:20px;font-weight:800;outline:none;padding:0}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:#0b1428;border-top:1px solid #24324f;border-radius:16px 16px 0 0;padding:14px 14px 22px;display:none;z-index:2000}
+.sheet.on{display:block}
+.save{width:100%;padding:15px;font-size:17px;margin:12px 0 0}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#0b1428;color:#eaf3ff;border:1px solid #24324f}
 .leaflet-container a.leaflet-popup-close-button{color:#8ea6c8}
 </style>
@@ -84,6 +97,7 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
  <div class="card">
   <div class="meta" id="sWhere"></div>
   <div class="stats" id="sStats"></div>
+  <div id="sCatch" style="margin-top:8px"></div>
  </div>
  <div class="card" style="padding:8px">
   <div class="zoombar">
@@ -103,6 +117,39 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
   <div class="meta" id="storyText" style="margin-top:5px"></div>
  </div>
  <button class="btn red" onclick="deleteStrike()">Delete this strike</button>
+</div>
+
+<!-- ============ CATCH: fish, weight, length, 3 photos ============ -->
+<div class="page" id="pCatch">
+ <div class="top">
+  <button class="back" onclick="catchBack()">&#8249; Back</button>
+  <div class="title" id="cTitle">Fish out! &#127881;</div><div class="sp"></div>
+ </div>
+ <div class="meta" id="cMeta" style="margin:-4px 0 10px"></div>
+ <div class="lbl" style="margin-bottom:7px">PHOTOS (tap: camera or gallery)</div>
+ <div class="photos">
+  <div class="slot" id="slot_hook" onclick="askPhoto('hook')"></div>
+  <div class="slot" id="slot_weight" onclick="askPhoto('weight')"></div>
+  <div class="slot" id="slot_length" onclick="askPhoto('length')"></div>
+ </div>
+ <div class="meta" id="cPhotoNote" style="margin-top:6px"></div>
+ <div class="lbl" style="margin:14px 0 7px">NUMBERS (optional)</div>
+ <div class="fields">
+  <label><small>Weight (kg)</small><input id="cKg" type="number" inputmode="decimal" step="0.1" min="0" placeholder="&ndash;"></label>
+  <label><small>Length (cm)</small><input id="cCm" type="number" inputmode="decimal" step="1" min="0" placeholder="&ndash;"></label>
+ </div>
+ <div class="lbl" style="margin:14px 0 7px">FISH</div>
+ <div class="chips" id="cFish"></div>
+ <input type="text" id="cOther" placeholder="Other fish: type its name" style="display:none;margin-bottom:6px">
+ <button class="btn save" onclick="saveCatch()">SAVE &#10004;</button>
+ <div class="meta" style="text-align:center;margin-top:8px">Later is fine: it waits in My strikes as <b style="color:#ffc928">+ PHOTOS</b></div>
+</div>
+
+<div class="sheet" id="photoSheet">
+ <div class="lbl" id="sheetTitle" style="margin-bottom:10px"></div>
+ <button class="btn save" onclick="photoFrom(true)">&#128247; Camera</button>
+ <button class="btn ghost save" onclick="photoFrom(false)">&#128444; Gallery</button>
+ <button class="btn ghost save" onclick="$('photoSheet').classList.remove('on')">Cancel</button>
 </div>
 
 <script src="leaflet.js"></script>
@@ -156,6 +203,8 @@ function appBack()
 {
   const on = document.querySelector('.page.on').id;
   if(on == 'pList') return false;
+  if($('photoSheet').classList.contains('on')) { $('photoSheet').classList.remove('on'); return true; }
+  if(on == 'pCatch') { catchBack(); return true; }
   show('pList');
   return true;
 }
@@ -270,7 +319,7 @@ function drawList()
     return `<div class="item" onclick="openStrike('${s.uid}')"><span class="tag" style="background:${c}22;color:${c};border-color:${c}">${esc(s.type)}</span>
       <div class="txt"><div style="font-size:13px;font-weight:700">${s.peak !== undefined ? s.peak.toFixed(1) + '&deg;' : ''} &middot; ${s.done ? mmss(s.fight) : 'fighting&hellip;'}${s.graph ? ' &nbsp;&#128200;' : ''}</div>
       <div class="meta">${s.notime ? 'time unknown' : when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}${s.later ? ' &middot; <span title="saved on the rod while the phone was away">saved on rod</span>' : ''}</div></div>
-      ${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
+      ${catchTag(s)}${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
   }).join('') : '<div class="empty">No strikes for this choice.</div>';
 }
 
@@ -282,6 +331,113 @@ function cloudLine()
     : waiting ? `&#9729; ${esc(user)} &middot; ${waiting} waiting to go online`
     : `&#9729; ${esc(user)} &middot; all ${all.length} saved online`;
 }
+
+// FISH OUT: the fish (and its kg), + PHOTOS while photos are missing; LOST IT
+function catchTag(s)
+{
+  if(s.result == 'lost') return '<span class="tag" style="color:#ff8d98;border-color:#ff4d5e">&#10005; lost</span>';
+  if(s.result != 'fish') return '';
+  const n = s.photos ? Object.keys(s.photos).length : 0;
+  const name = (s.fish || 'Fish') + (s.kg ? ' ' + s.kg + ' kg' : '');
+  return `<span class="tag" style="color:#3ddc84;border-color:#3ddc84">&#127907; ${esc(name)}</span>` +
+         (n < 3 ? `<span class="tag" style="color:#ffc928;border-color:#ffc928;margin-left:4px" onclick="event.stopPropagation();openCatch('${s.uid}')">+ PHOTOS</span>` : '');
+}
+
+// ---------- catch: fish, weight, length, 3 photos ----------
+const FISH = ['Sea bass','Gilthead bream','White bream','Mullet','Sole','Ray','Mackerel','Dogfish','Other'];
+const SLOTS = { hook: ['&#129693;', 'Hook in<br>the mouth'], weight: ['&#9878;&#65039;', 'Weight<br>(scale)'], length: ['&#128207;', 'Length<br>(tape)'] };
+let cat = null, catFish = '', sheetSlot = '', catBackTo = 'pList';
+
+function photoUrl(uid, slot) { return '/photo/' + uid.replace(/[^A-Za-z0-9_-]/g, '') + '_' + slot + '.jpg?t=' + Date.now(); }
+function hasPhoto(s, slot) { return APP && APP.hasPhoto ? APP.hasPhoto(s.uid, slot) : false; }
+
+function photoThumbs(s)
+{
+  if(!s.photos) return '';
+  return '<div class="photos" style="margin-top:8px">' + Object.keys(SLOTS).map(k =>
+    hasPhoto(s, k) ? `<div class="slot done" style="height:84px;background-image:url('${photoUrl(s.uid, k)}')"></div>`
+    : s.photos[k] ? `<a class="slot done" style="height:84px;color:#22d3ff" href="${esc(s.photos[k])}">online &#8599;</a>`
+    : `<div class="slot" style="height:84px;opacity:.5">${SLOTS[k][0]}</div>`).join('') + '</div>';
+}
+
+// '' = the newest strike (FISH OUT just tapped)
+function openCatch(uid)
+{
+  if(!uid && APP && APP.newestUid) uid = APP.newestUid();
+  if(!uid) { load(); uid = all.length ? all[0].uid : ''; }
+  cat = uid ? full(uid) : null;
+
+  if(!cat)
+  {
+    show('pList');
+    return;
+  }
+
+  catBackTo = document.querySelector('.page.on').id == 'pStrike' ? 'pStrike' : 'pList';
+  show('pCatch');
+  $('cTitle').innerHTML = cat.result == 'fish' || !cat.result ? 'Fish out! &#127881;' : 'Catch';
+  const p = [placeOf(cat), cat.country].filter(Boolean).join(', ');
+  $('cMeta').textContent = when(cat.time) + (cat.land ? ' · fight ' + mmss(cat.land) : '') + (p ? ' · ' + p : '');
+  $('cKg').value = cat.kg || '';
+  $('cCm').value = cat.cm || '';
+  catFish = cat.fish || '';
+  $('cOther').value = catFish && FISH.indexOf(catFish) < 0 ? catFish : '';
+  drawFish();
+  drawSlots();
+}
+
+function drawFish()
+{
+  const other = catFish && FISH.indexOf(catFish) < 0;
+  $('cFish').innerHTML = FISH.map(f => chip(f, f == catFish || (f == 'Other' && other), `pickFish('${f}')`)).join('');
+  $('cOther').style.display = catFish == 'Other' || other ? '' : 'none';
+}
+
+function pickFish(f) { catFish = catFish == f ? '' : f; drawFish(); if(f == 'Other' && catFish) $('cOther').focus(); }
+
+function drawSlots()
+{
+  Object.keys(SLOTS).forEach(k =>
+  {
+    const el = $('slot_' + k), have = hasPhoto(cat, k);
+    el.className = 'slot' + (have ? ' done' : '');
+    el.style.backgroundImage = have ? `url('${photoUrl(cat.uid, k)}')` : '';
+    el.innerHTML = have ? `<span class="ok">&#10004;</span><span>${SLOTS[k][1].replace('<br>', ' ')}</span>`
+                        : `<span class="ic">${SLOTS[k][0]}</span>${SLOTS[k][1]}`;
+  });
+}
+
+function askPhoto(slot)
+{
+  sheetSlot = slot;
+  $('sheetTitle').innerHTML = SLOTS[slot][1].replace('<br>', ' ').toUpperCase();
+  $('photoSheet').classList.add('on');
+}
+
+function photoFrom(camera)
+{
+  $('photoSheet').classList.remove('on');
+  if(!APP || !APP.photo) { $('cPhotoNote').textContent = 'Photos work in the app.'; return; }
+  $('cPhotoNote').textContent = camera ? 'Taking the photo…' : 'Choose a photo…';
+  APP.photo(cat.uid, sheetSlot, camera);
+}
+
+// from the app when the photo is kept (made small)
+function photoDone(slot, ok, note)
+{
+  $('cPhotoNote').textContent = ok ? 'Photo saved. It goes online with the strike.' : (note || '');
+  if(cat) { cat = full(cat.uid) || cat; drawSlots(); }
+}
+
+function saveCatch()
+{
+  if(!cat) return;
+  const fish = catFish == 'Other' || (catFish && FISH.indexOf(catFish) < 0) ? $('cOther').value.trim() : catFish;
+  if(APP && APP.setCatch) APP.setCatch(cat.uid, fish, $('cKg').value, $('cCm').value, cat.result == 'lost' ? '' : 'fish');
+  catBackTo == 'pStrike' ? openStrike(cat.uid) : show('pList');
+}
+
+function catchBack() { catBackTo == 'pStrike' ? openStrike(cat.uid) : show('pList'); }
 
 // ---------- map ----------
 let map = null, layer = null;
@@ -351,7 +507,13 @@ function openStrike(uid)
     stat('PULL', cur.peak !== undefined ? cur.peak.toFixed(1) + '&deg;' : '–') +
     stat('FIGHT', cur.done ? mmss(cur.fight) : '…') +
     stat('KNOCKS', cur.knocks !== undefined ? cur.knocks : '–') +
-    (cur.wave >= 0 && cur.wave !== undefined ? stat('SEA', WAVES[cur.wave] || '–', 15) : '');
+    (cur.wave >= 0 && cur.wave !== undefined ? stat('SEA', WAVES[cur.wave] || '–', 15) : '') +
+    (cur.land ? stat(cur.result == 'lost' ? 'LOST AFTER' : 'REEL IN &rarr; OUT', mmss(cur.land)) : '') +
+    (cur.kg ? stat('KG', esc(cur.kg)) : '') + (cur.cm ? stat('CM', esc(cur.cm)) : '');
+
+  $('sCatch').innerHTML = cur.result == 'lost' ? '<span class="meta">&#10060; Lost it (the fish got off)</span>' :
+    `<button class="btn" onclick="openCatch('${cur.uid}')">&#127907; ${cur.result == 'fish' ? 'Catch &amp; photos' : 'It was a fish: add the catch'}</button>` +
+    (cur.fish ? ` <span class="meta">${esc(cur.fish)}</span>` : '') + photoThumbs(cur);
 
   build(cur.graphdata);
 }
@@ -571,6 +733,6 @@ function demo()
 }
 
 // the Map tab opens the page straight on the map
-if(location.hash == '#pMap') show('pMap'); else drawList();
+if(location.hash == '#pMap') show('pMap'); else if(location.hash == '#catch') { drawList(); openCatch(''); } else drawList();
 </script>
 </body></html>

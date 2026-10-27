@@ -4,16 +4,22 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.View;
 import android.view.Window;
@@ -31,6 +37,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,6 +63,11 @@ public class MainActivity extends Activity
 
     private static final int REQ_PERMISSIONS = 1;
     private static final int REQ_BLUETOOTH_ON = 2;
+    private static final int REQ_PHOTO = 3;
+
+    // the catch photo being taken / chosen
+    private String photoUid = "", photoSlot = "";
+    private boolean photoCamera = false;
 
     static volatile boolean visible = false;
 
@@ -197,7 +211,191 @@ public class MainActivity extends Activity
     protected void onActivityResult(int code, int result, Intent data)
     {
         super.onActivityResult(code, result, data);
+
+        if(code == REQ_PHOTO)
+        {
+            gotPhoto(result == RESULT_OK, data);
+            return;
+        }
+
         RodLink.get(this).kick();
+    }
+
+    // ---------- catch photos (hook in the mouth, weight, length) ----------
+
+    private void takePhoto(String uid, String slot, boolean camera)
+    {
+        photoUid = uid;
+        photoSlot = slot;
+        photoCamera = camera;
+
+        // the phone may close the app while the camera is open: remember which photo it was
+        getSharedPreferences("app", MODE_PRIVATE).edit().putString("photoUid", uid).putString("photoSlot", slot)
+            .putBoolean("photoCamera", camera).apply();
+
+        try
+        {
+            if(camera)
+            {
+                PhotoProvider.cameraFile(this).delete();
+                Uri out = PhotoProvider.cameraUri();
+                Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                i.putExtra(MediaStore.EXTRA_OUTPUT, out);
+                i.setClipData(ClipData.newRawUri("", out));
+                i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivityForResult(i, REQ_PHOTO);
+            }
+            else
+            {
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.setType("image/*");
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                startActivityForResult(i, REQ_PHOTO);
+            }
+        }
+        catch(Exception e)
+        {
+            photoDone(false, camera ? "No camera app on this phone" : "No gallery app on this phone");
+        }
+    }
+
+    private void gotPhoto(final boolean ok, final Intent data)
+    {
+        if(photoUid.isEmpty())
+        {
+            SharedPreferences p = getSharedPreferences("app", MODE_PRIVATE);
+            photoUid = p.getString("photoUid", "");
+            photoSlot = p.getString("photoSlot", "");
+            photoCamera = p.getBoolean("photoCamera", false);
+        }
+
+        final String uid = photoUid, slot = photoSlot;
+        final boolean camera = photoCamera;
+
+        if(!ok || uid.isEmpty())
+        {
+            photoDone(false, "");
+            return;
+        }
+
+        new Thread(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                StrikeStore st = StrikeStore.get(MainActivity.this);
+                boolean saved = false;
+
+                try
+                {
+                    Uri src = !camera && data != null ? data.getData() : null;
+                    File camFile = PhotoProvider.cameraFile(MainActivity.this);
+
+                    if(src == null && !camFile.exists())
+                        throw new Exception("no photo");
+
+                    saved = smallJpeg(src, camFile, st.photoFile(uid, slot));
+                    camFile.delete();
+                }
+                catch(Exception e)
+                {
+                    saved = false;
+                }
+
+                if(saved)
+                    st.photoSaved(uid, slot);
+
+                final boolean done = saved;
+
+                handler.post(new Runnable()
+                {
+                    @Override
+                    public void run()
+                    {
+                        photoDone(done, done ? "" : "Could not read that photo");
+                    }
+                });
+
+                if(saved)
+                    st.syncNow(true);                // online now if there is internet
+            }
+        }).start();
+    }
+
+    private void photoDone(boolean ok, String note)
+    {
+        strikes.evaluateJavascript("window.photoDone && photoDone(" + quote(photoSlot) + "," + ok + "," + quote(note) + ")", null);
+    }
+
+    // The photo made small: longest side 1600 px, JPEG ~200-400 KB, turned the right way up
+    private boolean smallJpeg(Uri src, File camFile, File out) throws Exception
+    {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        InputStream in = open(src, camFile);
+        BitmapFactory.decodeStream(in, null, o);
+        in.close();
+
+        if(o.outWidth <= 0 || o.outHeight <= 0)
+            return false;
+
+        int side = Math.max(o.outWidth, o.outHeight);
+        int sample = 1;
+
+        while(side / (sample * 2) >= 1600)
+            sample *= 2;
+
+        BitmapFactory.Options d = new BitmapFactory.Options();
+        d.inSampleSize = sample;
+        in = open(src, camFile);
+        Bitmap b = BitmapFactory.decodeStream(in, null, d);
+        in.close();
+
+        if(b == null)
+            return false;
+
+        // which way up the camera held it
+        int turn = 0;
+
+        try
+        {
+            in = open(src, camFile);
+            int or = new ExifInterface(in).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            in.close();
+            turn = or == ExifInterface.ORIENTATION_ROTATE_90 ? 90 : or == ExifInterface.ORIENTATION_ROTATE_180 ? 180
+                 : or == ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
+        }
+        catch(Exception e)
+        {
+        }
+
+        float scale = Math.min(1f, 1600f / Math.max(b.getWidth(), b.getHeight()));
+        Matrix m = new Matrix();
+        m.postScale(scale, scale);
+        m.postRotate(turn);
+        Bitmap small = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
+
+        FileOutputStream f = new FileOutputStream(out);
+        boolean ok = small.compress(Bitmap.CompressFormat.JPEG, 82, f);
+        f.close();
+
+        if(small != b)
+            small.recycle();
+        b.recycle();
+        return ok;
+    }
+
+    private InputStream open(Uri src, File camFile) throws Exception
+    {
+        return src != null ? getContentResolver().openInputStream(src) : new FileInputStream(camFile);
+    }
+
+    // FISH OUT in the app (or ADD PHOTOS): the catch page of the newest strike
+    private void openCatch()
+    {
+        strikes.setVisibility(View.VISIBLE);
+        strikes.loadUrl(DASHBOARD_URL + "app/strikes.html#catch");
+        lightTab(TAB_STRIKES);
     }
 
     // Once: let the app keep watching the rod with the screen off
@@ -383,6 +581,21 @@ public class MainActivity extends Activity
                     return asset(path.substring(1), path.endsWith(".html") ? "text/html"
                                  : path.endsWith(".js") ? "application/javascript"
                                  : path.endsWith(".css") ? "text/css" : "image/png");
+
+                // a catch photo kept on the phone
+                if(path.matches("/photo/[A-Za-z0-9_-]+_(hook|weight|length)\\.jpg"))
+                {
+                    String name = path.substring(7, path.length() - 4);
+                    int cut = name.lastIndexOf('_');
+                    File f = StrikeStore.get(MainActivity.this).photoFile(name.substring(0, cut), name.substring(cut + 1));
+
+                    if(!f.exists())
+                        return answer(404, "text/plain", new byte[0]);
+
+                    Map<String, String> headers = new HashMap<>();
+                    headers.put("Cache-Control", "no-store");
+                    return new WebResourceResponse("image/jpeg", null, 200, "OK", headers, new FileInputStream(f));
+                }
 
                 if(path.equals("/favicon.ico"))
                     return answer(404, "text/plain", new byte[0]);
@@ -636,6 +849,48 @@ public class MainActivity extends Activity
         public void delete(String uid)
         {
             StrikeStore.get(MainActivity.this).delete(uid);
+        }
+
+        // CATCH page
+        @JavascriptInterface
+        public String newestUid()
+        {
+            return StrikeStore.get(MainActivity.this).newestUid();
+        }
+
+        @JavascriptInterface
+        public void setCatch(String uid, String fish, String kg, String cm, String result)
+        {
+            StrikeStore.get(MainActivity.this).setCatch(uid, fish, kg, cm, result);
+
+            new Thread(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    StrikeStore.get(MainActivity.this).syncNow(true);
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public boolean hasPhoto(String uid, String slot)
+        {
+            return StrikeStore.get(MainActivity.this).photoFile(uid, slot).exists();
+        }
+
+        // camera = true: take one now; false: choose from the gallery
+        @JavascriptInterface
+        public void photo(final String uid, final String slot, final boolean camera)
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    takePhoto(uid, slot, camera);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -962,6 +1217,20 @@ public class MainActivity extends Activity
             catch(Exception e)
             {
             }
+        }
+
+        // FISH OUT tapped (or ADD PHOTOS): the catch page
+        @JavascriptInterface
+        public void fishOut()
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    openCatch();
+                }
+            });
         }
 
         @JavascriptInterface

@@ -296,7 +296,8 @@ static void handlePacket(const uint8_t* buf, size_t len)
     memset(&p, 0, sizeof(p));
     memcpy(&p, buf, len < sizeof(p) ? len : sizeof(p));    // an older rod sends a shorter one
     bool ext = len >= offsetof(ss_heartbeat_t, chan);       // rod 2.3 fields
-    bool v24 = len >= sizeof(ss_heartbeat_t);                // rod 2.4: channel, crowd
+    bool v24 = len >= offsetof(ss_heartbeat_t, land);        // rod 2.4: channel, crowd
+    bool v31 = len >= sizeof(ss_heartbeat_t);                // rod 3.1: the landing
 
     LOCK();
     status.rod_state = p.state;
@@ -332,6 +333,9 @@ static void handlePacket(const uint8_t* buf, size_t len)
       status.rods = p.rods;
       status.crowd = (p.flags & SS_F_CROWD) != 0;
     }
+
+    status.land = v31 ? p.land : 0;
+    status.land_sec = v31 ? p.landSec : 0;
 
     status.last_hb_ms = millis();
     status.hb_count++;

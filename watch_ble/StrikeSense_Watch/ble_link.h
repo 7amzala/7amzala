@@ -69,6 +69,8 @@ typedef struct
   long batleft;             // rod battery minutes left, -1 = still measuring
   bool dir;                 // pull direction learned
   bool dropwatch;           // drop-back seen, watching for a pull
+  int land;                 // fight after REEL IN: 0 none, 1 fighting, 2 fish out, 3 lost it
+  long landsec;             // fight timer, seconds (at the answer; age_ms later)
 
   bool command_busy;        // a button is still being sent
 

@@ -46,6 +46,13 @@
             </intent-filter>
         </activity>
 
+        <!-- the camera app writes the catch photo here (app's own cache) -->
+        <provider
+            android:name=".PhotoProvider"
+            android:authorities="com.laarif.strikesense.photos"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <service
             android:name=".RodService"
             android:exported="false"

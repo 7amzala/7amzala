@@ -578,6 +578,38 @@ int main()
           "after power off: the strikes are still there (time from before)");
     check(ask(700403, "/logstrike?seq=" + q, b) && b.body.find("\"have\":true") != NO, "after power off: the graph too");
 
+    // the fight: REEL IN after a strike, FISH OUT from the phone; kept in the log, also after power off
+    {
+      strikeActive = false; rodState = ST_MONITORING;
+      startStrike("SLOW PULL");
+      step(8);
+      cmdReelIn();                            // the angler takes the rod
+      step(20);                               // the fight; the rod saves the strike meanwhile (paused = calm)
+      check(landState == 1, "REEL IN after a strike: the fight timer runs");
+      check(ask(700420, "/data", b) && b.body.find("\"land\":1") != NO, "/data: the app sees the FIGHT");
+      check(ask(700421, "/fishout", b) && b.body == "OK", "FISH OUT from the app");
+      std::string fs = std::to_string(logSeq);
+      check(ask(700422, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("\"result\":\"fish\"") != NO &&
+            b.body.find("\"land\":20") != NO, "/log: the strike has FISH OUT and its fight time (20 s)");
+      printf("        /log = %.300s\n", b.body.c_str());
+      check(ask(700423, "/strikes", b) && b.body.find("\"result\":\"fish\"") != NO, "/strikes: the same");
+      check(ask(700424, "/lostfish", b) && b.body == "NO FIGHT", "a second answer is refused (the fight is over)");
+      logReady = false; slistCount = 0;
+      logBegin();
+      check(ask(700425, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("\"result\":\"fish\"") != NO,
+            "after power off: FISH OUT still there");
+      cmdReady();
+      step(1);
+      check(landState == 0, "READY: the fight screen ends");
+      // REEL IN with no strike lately: no timer (new bait)
+      step(700);
+      cmdReelIn();
+      step(1);
+      check(landState == 0, "REEL IN without a strike in the last 10 min: no fight timer");
+      cmdReady();
+      step(1);
+    }
+
     // many strikes in a row (rough sea): none lost, the oldest replaced when full
     int writesBefore = mockFs().writes;
     for (int i = 0; i < 14; i++) { strikeActive = false; rodState = ST_MONITORING; startStrike("SLOW PULL"); step(0.5); }
@@ -673,6 +705,7 @@ int main()
     ok1 = ask(800960, "/data", b, 5) && b.body.back() == '}';
     ok2 = ask(500960, "/watch", b, 5) && b.body.back() == '}';
     readNotifications();
+    printf("        a minute later: phone %d, watch %d, wrong line %d\n", ok1, ok2, wrongLine);
     check(ok1 && ok2 && wrongLine == 0, "a minute later: own line for each device again (answers reach only the asker)");
   }
 

@@ -42,6 +42,7 @@ final class StrikeStore
     private final Context app;
     private final File index;
     private final File graphs;
+    private final File photos;              // the catch photos: <uid>_<slot>.jpg
     private JSONArray list;                 // newest last, without graphs
 
     private Location lastFix;
@@ -64,6 +65,8 @@ final class StrikeStore
         index = new File(c.getFilesDir(), "strikes.json");
         graphs = new File(c.getFilesDir(), "strike_graphs");
         graphs.mkdirs();
+        photos = new File(c.getFilesDir(), "photos");
+        photos.mkdirs();
 
         try
         {
@@ -126,6 +129,9 @@ final class StrikeStore
                 put(s, "rseq", r.optLong("seq"));     // its number in the rod's strike log
                 changed = true;
             }
+
+            if(landing(s, r))
+                changed = true;
 
             // fight still going: the numbers grow
             if(s.optInt("fight", -1) != r.optInt("fight") || s.optBoolean("done") != r.optBoolean("done")
@@ -219,6 +225,9 @@ final class StrikeStore
                 changed = true;
             }
 
+            if(landing(s, r))
+                changed = true;
+
             if(!r.optBoolean("graph") && !s.optBoolean("graph") && !s.optBoolean("nograph"))
             {
                 put(s, "nograph", true);         // the rod had no graph for it
@@ -233,6 +242,107 @@ final class StrikeStore
         }
 
         return top;
+    }
+
+    // REEL IN -> FISH OUT / LOST IT from the rod (watch or app). A result set
+    // in the app (CATCH page) is not undone by a rod that has none.
+    private static boolean landing(JSONObject s, JSONObject r)
+    {
+        String res = r.optString("result", "");
+        int land = r.optInt("land", 0);
+
+        if(res.isEmpty() || (res.equals(s.optString("result")) && land == s.optInt("land", -1)))
+            return false;
+
+        put(s, "result", res);
+        put(s, "land", land);
+        put(s, "synced", false);
+        return true;
+    }
+
+    // ---------- the catch: fish, weight, length, 3 photos ----------
+
+    static final String[] PHOTO_SLOTS = { "hook", "weight", "length" };
+
+    File photoFile(String uid, String slot)
+    {
+        return new File(photos, uid.replaceAll("[^A-Za-z0-9_-]", "") + "_" + slot + ".jpg");
+    }
+
+    // The newest strike of the last 30 minutes (FISH OUT just tapped), else ""
+    synchronized String newestUid()
+    {
+        JSONObject s = list.length() > 0 ? list.optJSONObject(list.length() - 1) : null;
+        return s != null && System.currentTimeMillis() - s.optLong("time") < 30 * 60000L ? s.optString("uid") : "";
+    }
+
+    // From the CATCH page: what fish, kg, cm ("" = not given); marks it a fish
+    synchronized void setCatch(String uid, String fish, String kg, String cm, String result)
+    {
+        JSONObject s = byUid(uid);
+
+        if(s == null)
+            return;
+
+        put(s, "fish", fish.trim());
+        put(s, "kg", kg.trim());
+        put(s, "cm", cm.trim());
+
+        if(!result.isEmpty())
+            put(s, "result", result);
+
+        put(s, "synced", false);
+        save();
+    }
+
+    // A photo was taken / chosen (already made small): goes online with the next sync
+    synchronized void photoSaved(String uid, String slot)
+    {
+        JSONObject s = byUid(uid);
+
+        if(s == null)
+            return;
+
+        try
+        {
+            JSONObject ph = s.optJSONObject("photos");
+
+            if(ph == null)
+            {
+                ph = new JSONObject();
+                s.put("photos", ph);
+            }
+
+            ph.put(slot, "");                // "" = on the phone, not online yet
+            if(s.optString("result").isEmpty())
+                s.put("result", "fish");
+            s.put("synced", false);
+            save();
+        }
+        catch(Exception e)
+        {
+        }
+    }
+
+    // Photos on the phone not online yet: [uid, slot] pairs
+    private synchronized List<String[]> photosToSend()
+    {
+        List<String[]> out = new java.util.ArrayList<>();
+
+        for(int i = 0; i < list.length(); i++)
+        {
+            JSONObject s = list.optJSONObject(i);
+            JSONObject ph = s == null ? null : s.optJSONObject("photos");
+
+            if(ph == null)
+                continue;
+
+            for(String slot : PHOTO_SLOTS)
+                if(ph.has(slot) && ph.optString(slot).isEmpty() && photoFile(s.optString("uid"), slot).exists())
+                    out.add(new String[] { s.optString("uid"), slot });
+        }
+
+        return out;
     }
 
     // How far the app got in this rod's strike log
@@ -663,9 +773,60 @@ final class StrikeStore
             return;
         }
 
+        // the photos first (each on its own: ~300 KB): the row then gets their links
+        int photoWait = 0;
+
+        for(String[] p : photosToSend())
+        {
+            try
+            {
+                FileInputStream in = new FileInputStream(photoFile(p[0], p[1]));
+                byte[] jpg;
+
+                try
+                {
+                    jpg = readAll(in);
+                }
+                finally
+                {
+                    in.close();
+                }
+
+                JSONObject body = new JSONObject();
+                body.put("action", "photo");
+                body.put("username", username());
+                body.put("token", token());
+                body.put("uid", p[0]);
+                body.put("slot", p[1]);
+                body.put("data", android.util.Base64.encodeToString(jpg, android.util.Base64.NO_WRAP));
+
+                JSONObject answer = new JSONObject(http(url, body.toString()));
+
+                if(!answer.optBoolean("ok") || answer.optString("url").isEmpty())
+                    throw new Exception(answer.optString("error", "sheet said no"));
+
+                synchronized(this)
+                {
+                    JSONObject s = byUid(p[0]);
+
+                    if(s != null && s.optJSONObject("photos") != null)
+                    {
+                        s.optJSONObject("photos").put(p[1], answer.optString("url"));
+                        s.put("synced", false);
+                        todo = replaceInTodo(todo, s);
+                        save();
+                    }
+                }
+            }
+            catch(Exception e)
+            {
+                photoWait++;
+            }
+        }
+
         if(todo.length() == 0)
         {
-            cloudNote = "all saved online";
+            cloudNote = photoWait > 0 ? photoWait + " photos waiting for internet" : "all saved online";
             return;
         }
 
@@ -701,6 +862,24 @@ final class StrikeStore
         {
             cloudNote = todo.length() + " waiting for internet";
         }
+    }
+
+    // the strike (with its new photo link) in the list to send, added if missing
+    private JSONArray replaceInTodo(JSONArray todo, JSONObject s)
+    {
+        JSONArray out = new JSONArray();
+        String uid = s.optString("uid");
+
+        for(int i = 0; i < todo.length(); i++)
+        {
+            JSONObject t = todo.optJSONObject(i);
+
+            if(t != null && !t.optString("uid").equals(uid))
+                out.put(t);
+        }
+
+        out.put(withGraph(s));
+        return out;
     }
 
     // A new phone (or the app was reinstalled): get everything back from the sheet
@@ -814,6 +993,9 @@ final class StrikeStore
             {
                 list.remove(i);
                 new File(graphs, uid + ".json").delete();
+
+                for(String slot : PHOTO_SLOTS)
+                    photoFile(uid, slot).delete();
                 save();
                 return;
             }

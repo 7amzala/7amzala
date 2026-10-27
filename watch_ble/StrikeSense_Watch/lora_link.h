@@ -77,6 +77,10 @@ typedef struct
   uint8_t  loss;           // % of the rod's heartbeats missed lately
   int      lmode;          // the rod's link choice (0 auto, 1 BT only, 2 LoRa only), -1 unknown
   int      chm;            // the rod's channel choice CHM_xxx, -1 unknown
+
+  // ---------- rod 3.1: the landing ----------
+  uint8_t  land;           // 0 none, 1 fighting, 2 fish out, 3 lost it
+  uint16_t land_sec;       // fight timer, seconds (at the heartbeat)
 } lora_link_status_t;
 
 // Call once in setup()

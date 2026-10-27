@@ -158,7 +158,9 @@ enum
   CMD_RELEARN  = 8,   // learn the sea again, stay armed (no pause)
   CMD_SETTIME  = 9,   // the watch's clock to a rod that lost its time (arg, tz15)
   CMD_LINKMODE = 10,  // arg: 0 auto, 1 Bluetooth only, 2 LoRa only (set on the watch)
-  CMD_CHANMODE = 11   // arg: CHM_xxx (set on the watch)
+  CMD_CHANMODE = 11,  // arg: CHM_xxx (set on the watch)
+  CMD_FISHOUT  = 12,  // fish landed: stop the fight timer
+  CMD_LOSTFISH = 13   // the fish got off: stop the fight timer
 };
 
 // heartbeat flags
@@ -210,6 +212,10 @@ typedef struct __attribute__((packed))
   uint8_t  rods;         // other rods heard on this channel (last 30 s)
   uint8_t  gap10;        // calm heartbeat every gap10 x 100 ms (the watch counts what it missed)
   uint8_t  modes;        // link choice (bits 0-1: 0 auto, 1 BT only, 2 LoRa only) | channel choice CHM_xxx << 2
+
+  // ---- rod 3.1: the landing (REEL IN -> FISH OUT) ----
+  uint8_t  land;         // 0 none, 1 fighting, 2 fish out, 3 lost it
+  uint16_t landSec;      // fight timer, seconds
 } ss_heartbeat_t;
 
 #define SS_HEARTBEAT_V1_LEN 14   // size before the rod 2.3 fields

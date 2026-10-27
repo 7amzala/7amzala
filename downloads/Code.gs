@@ -2,13 +2,21 @@
 // LAARIF STRIKESENSE - strikes database in Google Sheets
 //
 // Paste all of this in: Extensions > Apps Script (replace what is there).
-// Then Deploy > New deployment > Web app (Execute as: Me, Who has access:
-// Anyone). The app sends every strike here with the username.
+// First time: Deploy > New deployment > Web app (Execute as: Me, Who has
+// access: Anyone). The app sends every strike here with the username.
+//
+// UPDATING (keeps the same link, so the app keeps working):
+//   Deploy > Manage deployments > pencil (Edit) > Version: New version >
+//   Deploy. Google asks once to allow Google Drive (for the catch photos).
 //
 // Tabs it makes by itself:
 //   Strikes - one row per strike: user, date, time, country, city, spot
 //             (tap to open the map), type, pull, fight, knocks, sea,
-//             a small graph in the cell
+//             a small graph in the cell; the catch: result, REEL IN to
+//             FISH OUT time, fish, kg, cm and links to the 3 photos
+//             (hook in the mouth, weight, length)
+//
+// Photos: Google Drive folder "StrikeSense photos", one folder per tester.
 //   Users   - every registered tester (passwords are never stored,
 //             only a scrambled check value)
 // =====================================================
@@ -17,7 +25,11 @@
 const INVITE_CODE = '';
 
 const STRIKE_COLS = ['User', 'Date', 'Time', 'Country', 'City / beach', 'Spot', 'Type', 'Pull (deg)', 'Fight (m:ss)',
-                     'Knocks', 'Biggest knock', 'Sea', 'Wind', 'Graph', 'Tilt data', 'Rod', 'Strike ID', 'Full data'];
+                     'Knocks', 'Biggest knock', 'Sea', 'Wind', 'Graph', 'Tilt data', 'Rod', 'Strike ID', 'Full data',
+                     // the catch (added at the end: older rows and the columns above stay where they are)
+                     'Result', 'Reel in to out (m:ss)', 'Fish', 'kg', 'cm', 'Photo: hook', 'Photo: weight', 'Photo: length'];
+const PHOTO_SLOTS = ['hook', 'weight', 'length'];
+const PHOTO_FOLDER = 'StrikeSense photos';
 const USER_COLS = ['Username', 'Registered', 'Last seen', 'Strikes', 'Salt', 'Check', 'Token'];
 
 const WAVES = ['flat', 'small waves', 'waves', 'big waves'];
@@ -33,6 +45,7 @@ function doPost(e) {
       case 'login':    return out_(login_(req));
       case 'add':      return out_(addStrikes_(req));
       case 'list':     return out_(listStrikes_(req));
+      case 'photo':    return out_(addPhoto_(req));
       case 'ping':     return out_({ ok: true });
     }
     return out_({ ok: false, error: 'unknown action' });
@@ -127,6 +140,11 @@ function addStrikes_(req) {
     // the spot: tap to open Google Maps; the graph: a small line in the cell
     if (s.lat !== undefined && s.lat !== '')
       sh.getRange(r, 6).setFormula('=HYPERLINK("https://www.google.com/maps?q=' + s.lat + ',' + s.lon + '","📍 open map")');
+    // the photos: tap to open
+    PHOTO_SLOTS.forEach((k, i) => {
+      const url = s.photos && s.photos[k];
+      if (url) sh.getRange(r, 24 + i).setFormula('=HYPERLINK("' + String(url).replace(/"/g, '') + '","📷 ' + k + '")');
+    });
     sh.getRange(r, 14).setFormulaR1C1('=IF(R[0]C[1]="","",SPARKLINE(SPLIT(R[0]C[1],","),{"color","#1e7bff";"linewidth",2}))');
   });
 
@@ -160,8 +178,43 @@ function strikeRow_(name, s) {
     tilt,
     s.rod || '',
     String(s.uid),
-    JSON.stringify(s)                             // everything, for the app and for tuning the detection
+    JSON.stringify(s),                            // everything, for the app and for tuning the detection
+    s.result === 'fish' ? 'FISH OUT' : s.result === 'lost' ? 'lost it' : '',
+    s.land ? Math.floor(s.land / 60) + ':' + ('0' + (s.land % 60)).slice(-2) : '',
+    s.fish || '',
+    s.kg !== undefined && s.kg !== '' ? Number(s.kg) : '',
+    s.cm !== undefined && s.cm !== '' ? Number(s.cm) : '',
+    '', '', ''                                    // photos (formulas above)
   ];
+}
+
+// ---------- catch photos ----------
+
+// One photo (JPEG, made small on the phone) into the tester's Drive folder.
+// Answers its link; the app then sends the strike again with the link.
+function addPhoto_(req) {
+  const user = checkToken_(req);
+  if (!user) return { ok: false, error: 'Please log in again' };
+  const slot = String(req.slot || '');
+  if (PHOTO_SLOTS.indexOf(slot) < 0) return { ok: false, error: 'unknown photo' };
+  if (!req.data || String(req.data).length > 8000000) return { ok: false, error: 'photo missing or too big' };
+
+  const uid = String(req.uid || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const name = uid + '_' + slot + '.jpg';
+  const folder = subFolder_(subFolder_(DriveApp.getRootFolder(), PHOTO_FOLDER), user.name);
+
+  // the same photo taken again: replace it
+  const old = folder.getFilesByName(name);
+  while (old.hasNext()) old.next().setTrashed(true);
+
+  const blob = Utilities.newBlob(Utilities.base64Decode(req.data), 'image/jpeg', name);
+  const file = folder.createFile(blob);
+  return { ok: true, url: file.getUrl() };
+}
+
+function subFolder_(parent, name) {
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 
 function countUser_(sh, name) {
@@ -177,7 +230,7 @@ function listStrikes_(req) {
   const sh = tab_('Strikes', STRIKE_COLS);
   const n = sh.getLastRow() - 1;
   if (n < 1) return { ok: true, strikes: [] };
-  const rows = sh.getRange(2, 1, n, STRIKE_COLS.length).getValues();
+  const rows = sh.getRange(2, 1, n, 18).getValues();
   const list = [];
   rows.forEach(r => {
     if (r[0] !== user.name) return;
@@ -191,6 +244,13 @@ function listStrikes_(req) {
 function tab_(name, cols) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(name);
+  // an older sheet: add the new column titles at the end
+  if (sh && sh.getLastColumn() < cols.length) {
+    if (sh.getMaxColumns() < cols.length) sh.insertColumnsAfter(sh.getMaxColumns(), cols.length - sh.getMaxColumns());
+    const from = sh.getLastColumn() + 1;
+    sh.getRange(1, from, 1, cols.length - from + 1).setValues([cols.slice(from - 1)])
+      .setFontWeight('bold').setBackground('#0b1428').setFontColor('#eaf3ff');
+  }
   if (!sh) {
     sh = ss.insertSheet(name);
     sh.appendRow(cols);
