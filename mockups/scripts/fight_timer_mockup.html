@@ -1,0 +1,130 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:36px;background:#dde2ea;font-family:Arial,Helvetica,sans-serif;width:2340px;color:#0b1428}
+h1{font-size:36px;margin:0 0 8px}
+.cap{font-size:20px;color:#38465f;margin-bottom:26px;line-height:1.5}
+.row{display:flex;gap:34px;align-items:flex-start}
+.col{width:430px}
+.step{font-size:22px;font-weight:800;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+.n{display:inline-flex;width:34px;height:34px;border-radius:50%;background:#1e7bff;color:#fff;align-items:center;justify-content:center;font-size:18px}
+.note{font-size:17px;color:#38465f;line-height:1.5;margin-top:14px}
+/* watch */
+.watch{width:430px;height:430px;border-radius:50%;border:10px solid #2a2f38;background:#000;position:relative;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.35);color:#fff;text-align:center}
+.ring{position:absolute;inset:14px;border-radius:50%;border:9px solid #10202c;border-bottom-color:transparent}
+.top{position:absolute;top:34px;width:100%;font-size:15px;color:#9aa8c0}
+.top b{color:#3ddc84;letter-spacing:-1px}
+.pill{display:inline-block;margin-top:8px;border:1px solid;border-radius:18px;padding:5px 16px;font-size:18px}
+.big{font-size:70px;font-weight:700;letter-spacing:1px;margin-top:6px;font-variant-numeric:tabular-nums}
+.sub{font-size:19px;color:#9aa8c0}
+.wbtn{width:128px;height:128px;border-radius:50%;margin:8px auto 0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-weight:800;font-size:20px}
+.small{font-size:16px;color:#9aa8c0;margin-top:8px}
+/* phone */
+.phone{width:430px;height:780px;border-radius:44px;border:12px solid #05070c;background:linear-gradient(#0b1730,#050a16);color:#fff;padding:26px 22px;position:relative;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.ph{font-size:26px;font-weight:800}
+.phs{font-size:15px;color:#8fa0bf;margin-top:4px}
+.card{background:#0f1c36;border:1px solid #233457;border-radius:16px;padding:16px;margin-top:16px}
+.lbl{font-size:14px;letter-spacing:1px;color:#8fa0bf;font-weight:700;margin:20px 0 10px}
+.btn{border-radius:16px;padding:20px;text-align:center;font-size:22px;font-weight:800}
+.photos{display:flex;gap:10px}
+.ph3{flex:1;height:150px;border-radius:14px;border:2px dashed #3a5182;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:15px;color:#b9c6df;text-align:center;gap:6px;position:relative;overflow:hidden}
+.ph3 .ic{font-size:34px}
+.ph3.done{border:2px solid #3ddc84}
+.ph3 .ok{position:absolute;top:6px;right:8px;color:#3ddc84;font-size:18px}
+.field{display:flex;gap:10px}
+.field div{flex:1;background:#0b152b;border:1px solid #2a3c63;border-radius:12px;padding:12px;font-size:24px;font-weight:700}
+.field small{display:block;font-size:13px;color:#8fa0bf;font-weight:400;margin-bottom:4px}
+table{border-collapse:collapse;font-size:16px;background:#fff}
+td,th{border:1px solid #c8d0de;padding:8px 9px;text-align:left}
+th{background:#eef2f8}
+.sheet{background:#fff;border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+a{color:#1a5fd6}
+.q{background:#fff6dc;border:2px solid #f0c040;border-radius:14px;padding:16px 18px;font-size:17px;line-height:1.55;margin-top:20px}
+</style></head><body>
+<h1>Fight timer + FISH OUT + 3 photos (mockup, watch and app)</h1>
+<div class="cap">The timer starts when you tap <b>REEL IN</b> and stops when you tap <b>FISH OUT</b> (on the watch <b>or</b> in the app &mdash; both show the same timer). Then the app asks for 3 photos: <b>hook in the mouth</b>, <b>the weight</b> (scale), <b>the length</b> (tape). They go into the Google Sheet with the strike.</div>
+
+<div class="row">
+ <!-- 1 watch fight -->
+ <div class="col">
+  <div class="step"><span class="n">1</span>Watch: after REEL IN</div>
+  <div class="watch"><div class="ring" style="border-color:#ff8a3d #ff8a3d transparent #ff8a3d"></div>
+   <div class="top"><b>&#9602;&#9603;&#9605;&#9607;</b> &nbsp;&#8725; 78% &nbsp;&#8986; 41%<br><span class="pill" style="color:#ff8a3d;border-color:#ff8a3d">FIGHT</span></div>
+   <div style="position:absolute;top:104px;width:100%">
+    <div class="big">2:37</div>
+    <div class="wbtn" style="background:#3ddc84;color:#05210f;box-shadow:0 0 0 12px #0c2a18">&#127907;<span>FISH OUT</span></div>
+    <div class="small">lost it? hold 2 s</div>
+   </div>
+  </div>
+  <div class="note">The REEL IN screen becomes the <b>fight</b>: a big timer and a green <b>FISH OUT</b> button. The timer runs from the REEL IN tap.</div>
+ </div>
+
+ <!-- 2 watch done -->
+ <div class="col">
+  <div class="step"><span class="n">2</span>Watch: FISH OUT tapped</div>
+  <div class="watch"><div class="ring" style="border-color:#3ddc84 #3ddc84 transparent #3ddc84"></div>
+   <div class="top"><b>&#9602;&#9603;&#9605;&#9607;</b> &nbsp;&#8725; 78% &nbsp;&#8986; 41%<br><span class="pill" style="color:#3ddc84;border-color:#3ddc84">FISH OUT</span></div>
+   <div style="position:absolute;top:104px;width:100%">
+    <div class="sub">fight time</div>
+    <div class="big" style="color:#3ddc84">4:12</div>
+    <div class="sub">photos: in the app</div>
+    <div class="wbtn" style="width:96px;height:96px;background:#22d3ff;color:#001a24;font-size:36px;margin-top:10px">&#9654;</div>
+    <div class="small" style="color:#22d3ff">READY</div>
+   </div>
+  </div>
+  <div class="note">One short buzz. The fight time stays on the screen; READY casts again as today. (On the watch: no photos &mdash; it has no camera.)</div>
+ </div>
+
+ <!-- 3 app fight -->
+ <div class="col">
+  <div class="step"><span class="n">3</span>App: the same fight</div>
+  <div class="phone">
+   <div class="ph">Rod</div><div class="phs">connected &middot; <b style="color:#22a8ff">Bluetooth</b> &nbsp; <span style="color:#3ddc84">&#9602;&#9603;&#9605;&#9607;</span></div>
+   <div class="card" style="text-align:center;border-color:#ff8a3d">
+    <div style="color:#ff8a3d;font-weight:800;letter-spacing:1px">FIGHT</div>
+    <div style="font-size:96px;font-weight:700;font-variant-numeric:tabular-nums">2:37</div>
+    <div class="phs">Run &middot; 2.1 g &middot; strike at 19:42</div>
+   </div>
+   <div class="btn" style="background:#3ddc84;color:#05210f;margin-top:22px">&#127907; FISH OUT</div>
+   <div class="btn" style="background:transparent;border:2px solid #ff5d6c;color:#ff8a94;margin-top:14px;font-size:18px;padding:14px">Lost it</div>
+   <div class="note" style="color:#8fa0bf">Tap on the watch or here: the other one stops too.</div>
+  </div>
+  <div class="note">On the rod page in the app, the same timer and the same button. <b>Lost it</b> = the fish got off (saved as a fight, no photos).</div>
+ </div>
+
+ <!-- 4 app photos -->
+ <div class="col">
+  <div class="step"><span class="n">4</span>App: 3 photos</div>
+  <div class="phone">
+   <div class="ph">Fish out! &#127881;</div><div class="phs">19:42 &middot; fight 4:12 &middot; Pescador beach</div>
+   <div class="lbl">PHOTOS (tap: camera or gallery)</div>
+   <div class="photos">
+    <div class="ph3 done" style="background:linear-gradient(135deg,#2c4d6b,#1a2f45)"><span class="ok">&#10004;</span><span class="ic">&#129693;</span>Hook in<br>the mouth</div>
+    <div class="ph3"><span class="ic">&#9878;&#65039;</span>Weight<br>(scale)</div>
+    <div class="ph3"><span class="ic">&#128207;</span>Length<br>(tape)</div>
+   </div>
+   <div class="lbl">NUMBERS (optional)</div>
+   <div class="field"><div><small>Weight</small>1.8 kg</div><div><small>Length</small>52 cm</div></div>
+   <div class="lbl">FISH</div>
+   <div class="field"><div style="font-size:20px">Sea bass &#9662;</div></div>
+   <div class="btn" style="background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#001a33;margin-top:26px">SAVE &#10004;</div>
+   <div class="phs" style="text-align:center;margin-top:12px">Later is fine: it waits in My strikes as <b style="color:#ffc928">+ PHOTOS</b></div>
+  </div>
+  <div class="note">Each photo is optional. Photos are made smaller on the phone (about 300 KB) and upload when there is internet.</div>
+ </div>
+
+ <!-- 5 sheet -->
+ <div class="col" style="width:520px">
+  <div class="step"><span class="n">5</span>Google Sheet: new columns</div>
+  <div class="sheet"><table>
+   <tr><th>Time</th><th>Fight</th><th>kg</th><th>cm</th><th>Hook</th><th>Weight</th><th>Length</th></tr>
+   <tr><td>19:42</td><td>4:12</td><td>1.8</td><td>52</td><td><a>photo</a></td><td><a>photo</a></td><td><a>photo</a></td></tr>
+   <tr><td>18:20</td><td>1:30</td><td></td><td></td><td><a>photo</a></td><td></td><td></td></tr>
+   <tr><td>17:05</td><td>0:48</td><td colspan="5" style="color:#c0392b">lost it</td></tr>
+  </table>
+  <div class="note" style="margin-top:12px">Photos go into a <b>Google Drive folder</b> next to the Sheet ("StrikeSense photos"). The Sheet keeps a <b>link</b> to each photo (a Sheet can't hold the pictures themselves well).</div></div>
+  <div class="q"><b>To do this I need to:</b><br>&bull; rod + watch: fight timer, FISH OUT, Lost it<br>&bull; app: timer, FISH OUT, photo page<br>&bull; Google Script (Code.gs): save photos to Drive &mdash; you copy the new script into your Sheet once and press <b>Deploy</b>.</div>
+ </div>
+</div>
+</body></html>
