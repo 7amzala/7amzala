@@ -20,6 +20,16 @@ static portMUX_TYPE bleLock = portMUX_INITIALIZER_UNLOCKED;   // phone writes vs
 #define BLE_BD 0
 #endif
 
+#if defined(ESP32) && !defined(BLE_MOCK_LINES) && !defined(BLE_MOCK_NIMBLE)
+#if BLE_BD
+#pragma message("StrikeSense Bluetooth: Bluedroid - own line for each device")
+#elif BLE_LINES
+#pragma message("StrikeSense Bluetooth: NimBLE - own line for each device")
+#else
+#warning "StrikeSense Bluetooth: unknown library - one shared line for phone + watch"
+#endif
+#endif
+
 class BleServer
 {
 public:
