@@ -1,0 +1,83 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:34px;background:#dde2ea;font-family:Arial,Helvetica,sans-serif;width:2000px;color:#0b1428}
+h1{font-size:34px;margin:0 0 6px}
+.cap{font-size:19px;color:#38465f;margin-bottom:22px;line-height:1.5}
+.sec{font-size:22px;font-weight:900;margin:22px 0 12px}
+.row{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap}
+.panel{background:linear-gradient(160deg,#16307a,#0a1636 60%);border-radius:18px;padding:18px 20px;color:#eaf3ff;width:560px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.lab{font-size:15px;font-weight:800;color:#0b1428;margin-bottom:8px}
+.lab span{display:inline-block;color:#fff;border-radius:7px;padding:2px 8px;margin-right:6px;background:#1e7bff}
+.conn{display:flex;justify-content:flex-end;align-items:center;gap:7px;color:#22d3ff;font-weight:800;font-size:15px;margin-bottom:8px}
+.conn i{width:12px;height:12px;border-radius:50%;background:#22d3ff;display:inline-block}
+.line{display:flex;align-items:center;gap:10px;border:1px solid #2c3f73;border-radius:22px;padding:7px 14px;margin:7px 0 7px auto;width:max-content;background:rgba(5,12,30,.45);white-space:nowrap;font-size:17px}
+.line .who{font-weight:900;color:#eaf3ff;display:flex;align-items:center;gap:6px}
+.line .what{font-weight:800}
+.line .dim{color:#8fa0bf;font-weight:700;font-size:15px}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:18px}
+.bars b{width:5px;border-radius:2px;background:#2b3a5c}
+.bars b:nth-child(1){height:6px}.bars b:nth-child(2){height:10px}.bars b:nth-child(3){height:14px}.bars b:nth-child(4){height:18px}
+.note{font-size:15px;color:#38465f;margin-top:8px;line-height:1.5;width:560px}
+/* fight */
+.fight{background:#0b1730;border-radius:18px;padding:18px;display:flex;gap:14px;width:1150px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.timer{border:2px solid #ff8a3d;border-radius:16px;width:260px;text-align:center;color:#fff;padding:16px 8px}
+.timer .t1{color:#ff8a3d;font-weight:900;letter-spacing:1px}
+.timer .t2{font-size:74px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.1}
+.timer .t3{color:#8fa0bf;font-size:15px}
+.btn{flex:1;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-weight:900;font-size:20px;padding:12px}
+.btn small{font-size:13px;font-weight:700;opacity:.8}
+.b1{background:#3ddc84;color:#05210f}
+.b2{border:2px solid #ff5d6c;color:#ff8a94;background:rgba(255,93,108,.06)}
+.b3{border:2px solid #6b7790;color:#a9bbd6;background:rgba(107,119,144,.06)}
+</style></head><body>
+<h1>Status lines + fight buttons (mockup, app)</h1>
+<div class="cap">Top right of the live screen: one line for the <b>rod</b> (the phone's own Bluetooth to the rod) and one for the <b>watch</b>, each with its symbol and name, always on one line. Bottom: the fight buttons with <b>big symbols</b>.</div>
+
+<svg width="0" height="0" style="position:absolute">
+ <defs>
+  <symbol id="rod" viewBox="0 0 24 24"><path d="M3 21 L19 4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="7" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19 4 Q22 9 21 15" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M21 15 q1 3 -1.5 3" stroke="currentColor" stroke-width="1.4" fill="none"/></symbol>
+  <symbol id="watch" viewBox="0 0 24 24"><rect x="8" y="1.5" width="8" height="4" rx="1" fill="currentColor"/><rect x="8" y="18.5" width="8" height="4" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 8.5 V12 L14.5 13.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></symbol>
+ </defs>
+</svg>
+
+<div class="sec">1 &middot; The two lines (rod + watch)</div>
+<div class="row">
+ <div><div class="lab"><span>A</span>Watch on Bluetooth</div>
+ <div class="panel"><div class="conn"><i></i>CONNECTED</div>
+  <div class="line"><span class="who"><svg width="22" height="22" style="color:#eaf3ff"><use href="#rod"/></svg>Rod</span><span class="what" style="color:#22a8ff">Bluetooth</span><span class="bars"><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b></span><span class="dim">-52 dBm</span></div>
+  <div class="line"><span class="who"><svg width="22" height="22" style="color:#eaf3ff"><use href="#watch"/></svg>Watch</span><span class="what" style="color:#22a8ff">Bluetooth</span><span class="bars"><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b></b></span></div>
+ </div>
+ <div class="note">Word <b style="color:#1a7fd6">blue</b>, bars <b style="color:#16a35a">green</b>.</div></div>
+
+ <div><div class="lab"><span>B</span>Watch on LoRa</div>
+ <div class="panel"><div class="conn"><i></i>CONNECTED</div>
+  <div class="line"><span class="who"><svg width="22" height="22" style="color:#eaf3ff"><use href="#rod"/></svg>Rod</span><span class="what" style="color:#22a8ff">Bluetooth</span><span class="bars"><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b></span><span class="dim">-52 dBm</span></div>
+  <div class="line"><span class="who"><svg width="22" height="22" style="color:#eaf3ff"><use href="#watch"/></svg>Watch</span><span class="what" style="color:#ffc928">LoRa</span><span class="dim">500 m</span><span class="bars"><b style="background:#ffc928"></b><b style="background:#ffc928"></b><b style="background:#ffc928"></b><b style="background:#ffc928"></b></span></div>
+ </div>
+ <div class="note">Word and bars <b style="color:#b98a00">yellow</b>, "500 m" on the same line.</div></div>
+
+ <div><div class="lab"><span>C</span>Watch not connected</div>
+ <div class="panel"><div class="conn"><i></i>CONNECTED</div>
+  <div class="line"><span class="who"><svg width="22" height="22" style="color:#eaf3ff"><use href="#rod"/></svg>Rod</span><span class="what" style="color:#22a8ff">Bluetooth</span><span class="bars"><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b style="background:#3ddc84"></b><b></b></span><span class="dim">-61 dBm</span></div>
+  <div class="line"><span class="who" style="color:#8fa0bf"><svg width="22" height="22" style="color:#8fa0bf"><use href="#watch"/></svg>Watch</span><span class="what" style="color:#8fa0bf">not connected</span></div>
+ </div>
+ <div class="note">Grey.</div></div>
+</div>
+
+<div class="sec">2 &middot; Fight buttons (after REEL IN that follows a strike)</div>
+<div class="fight">
+ <div class="timer"><div class="t1">FIGHT</div><div class="t2">2:37</div><div class="t3">from REEL IN</div></div>
+ <div class="btn b1">
+  <svg width="120" height="80" viewBox="0 0 120 80"><path d="M10 40 Q40 8 78 26 L100 12 L94 40 L100 68 L78 54 Q40 72 10 40 Z" fill="#05210f" opacity=".9"/><circle cx="28" cy="36" r="4" fill="#3ddc84"/><circle cx="92" cy="22" r="17" fill="#05210f" stroke="#3ddc84" stroke-width="3"/><path d="M84 22 l6 6 l11 -12" stroke="#3ddc84" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  FISH OUT<small>caught it</small></div>
+ <div class="btn b2">
+  <svg width="120" height="80" viewBox="0 0 120 80"><path d="M58 4 L58 30" stroke="#ff8a94" stroke-width="3"/><path d="M58 36 L58 44" stroke="#ff8a94" stroke-width="3" stroke-dasharray="3 3"/><path d="M52 31 l12 4 M52 37 l12 -4" stroke="#ff5d6c" stroke-width="3" stroke-linecap="round"/><path d="M16 62 Q38 44 62 56 L76 48 L72 62 L76 76 L62 68 Q38 80 16 62 Z" fill="none" stroke="#ff8a94" stroke-width="3"/><path d="M84 52 q8 -4 14 0 M84 62 q10 0 16 4" stroke="#ff8a94" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+  LOST IT<small>it got off</small></div>
+ <div class="btn b3">
+  <svg width="120" height="80" viewBox="0 0 120 80"><path d="M60 4 L60 44 Q60 62 46 62 Q34 62 34 50" stroke="#a9bbd6" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M34 50 l-5 6" stroke="#a9bbd6" stroke-width="4" stroke-linecap="round"/><circle cx="86" cy="44" r="16" fill="none" stroke="#a9bbd6" stroke-width="3"/><path d="M75 55 L97 33" stroke="#a9bbd6" stroke-width="3"/></svg>
+  NO FISH<small>false alarm</small></div>
+</div>
+<div class="note" style="width:1150px">Big symbols, easy to hit with wet hands: <b>fish + tick</b> = caught, <b>fish + cut line</b> = lost it, <b>empty hook + "no" sign</b> = no fish. The watch shows the same three (FISH OUT big, LOST IT and NO FISH small under it).</div>
+</body></html>
