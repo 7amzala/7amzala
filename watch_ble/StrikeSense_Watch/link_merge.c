@@ -134,6 +134,7 @@ uint8_t link_path_to_cmd(const char *path, uint32_t *utc, int *tz_min)
     { "/learn",    CMD_LEARN },
     { "/fishout",  CMD_FISHOUT },
     { "/lostfish", CMD_LOSTFISH },
+    { "/nofish",   CMD_NOFISH },
   };
 
   // the link / channel choice set on the watch: the number in *utc

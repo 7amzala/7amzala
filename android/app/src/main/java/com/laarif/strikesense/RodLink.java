@@ -380,6 +380,17 @@ final class RodLink
         return state == State.CONNECTED;
     }
 
+    // Connections that failed before the rod answered, in a row. Many: the
+    // rod probably forgot this phone (new rod software = a fresh rod), so
+    // the app offers to pair again.
+    private volatile int failedInARow = 0;
+    private boolean linkUp = false;         // this try reached the rod (not just "rod switched off")
+
+    boolean pairingLost()
+    {
+        return paired() && failedInARow >= 4;
+    }
+
     int rssi()
     {
         return rssi;
@@ -735,6 +746,11 @@ final class RodLink
     // Connection gone: clean up and look again
     private void lost()
     {
+        if(linkUp && state != State.CONNECTED)
+            failedInARow++;                  // the rod was there but the link did not work
+
+        linkUp = false;
+
         closeGatt();
 
         if(running)
@@ -757,6 +773,7 @@ final class RodLink
 
                     if(status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED)
                     {
+                        linkUp = true;
                         // bigger pieces first, then find the rod's service
                         if(!g.requestMtu(517))
                             g.discoverServices();
@@ -850,6 +867,7 @@ final class RodLink
 
                     h.removeCallbacks(connectTimeout);
                     state = State.CONNECTED;
+                    failedInARow = 0;
 
                     g.requestConnectionPriority(fast ? BluetoothGatt.CONNECTION_PRIORITY_HIGH : BluetoothGatt.CONNECTION_PRIORITY_BALANCED);
 

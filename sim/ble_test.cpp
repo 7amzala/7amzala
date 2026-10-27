@@ -318,6 +318,16 @@ int main()
     check(ask(500030, "/wping?r=-66", b) && b.body == "OK", "watch ping (every 2 s) answered");
     ask(700002, "/data", b);
     check(b.body.find("\"wlink\":\"bt\"") != NO && b.body.find("\"wbars\":3") != NO, "watch on Bluetooth at -66 dBm: phone shows 'Watch Bluetooth', 3 bars");
+    check(ask(500031, "/watch", b) && ask(800031, "/data", b) && b.body.find("\"wbars\":3") != NO,
+          "a /watch question without the signal does not reset the bars");
+#if BLE_BD
+    check(ask(500032, "/wping?r=0", b) && ask(800032, "/data", b) && b.body.find("\"wbars\":0") != NO,
+          "(Bluedroid) the watch does not know its signal: no bars (the rod can measure it only with NimBLE)");
+#else
+    check(ask(500032, "/wping?r=0", b) && ask(800032, "/data", b) && b.body.find("\"wbars\":4") != NO,
+          "the watch does not know its signal (0): the rod measures the watch's link itself (-58 dBm: 4 bars)");
+#endif
+    ask(500033, "/wping?r=-66", b);
     step(7);
     ask(700003, "/data", b);
     check(b.body.find("\"wlink\":\"none\"") != NO, "watch gone (no ping for 6 s): 'not connected'");
@@ -601,13 +611,39 @@ int main()
       cmdReady();
       step(1);
       check(landState == 0, "READY: the fight screen ends");
-      // REEL IN with no strike lately: no timer (new bait)
+      // REEL IN with no strike lately: the timer runs too; NO FISH ends it (nothing saved)
       step(700);
+      int before = slistCount;
       cmdReelIn();
-      step(1);
-      check(landState == 0, "REEL IN without a strike in the last 10 min: no fight timer");
+      step(5);
+      check(landState == 1, "REEL IN without a strike: the fight timer runs too");
+      check(ask(700426, "/nofish", b) && b.body == "OK" && landState == 4 && slistCount == before, "NO FISH: timer stops, nothing new in the strike list");
       cmdReady();
       step(1);
+      // a fish the rod did not alarm on: its own entry "NO ALARM"
+      cmdReelIn();
+      step(30);
+      check(ask(700427, "/fishout", b) && b.body == "OK", "FISH OUT with no strike before");
+      check(slistCount == before + 1 && std::string(slist[slistCount - 1].type) == "NO ALARM" && slist[slistCount - 1].result == 1 &&
+            slist[slistCount - 1].land == 30, "... kept as its own entry: NO ALARM, FISH OUT, 0:30");
+      step(3);
+      check(ask(700428, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("NO ALARM") != NO && b.body.find("\"result\":\"fish\"") != NO,
+            "... and in the strike log for the app");
+      cmdReady();
+      step(1);
+    }
+
+    // a false alarm: the strike gets NO FISH
+    {
+      strikeActive = false; rodState = ST_MONITORING;
+      startStrike("SHARP STRIKE");
+      step(3);
+      cmdReelIn();
+      step(4);
+      check(ask(700429, "/nofish", b) && b.body == "OK" && slist[slistCount - 1].result == 3, "strike then NO FISH: the strike is marked a false alarm");
+      check(ask(700430, "/strikes", b) && b.body.find("\"result\":\"nofish\"") != NO, "/strikes: result nofish");
+      cmdReady();
+      step(40);                               // saved before the next test counts writes
     }
 
     // many strikes in a row (rough sea): none lost, the oldest replaced when full
@@ -642,6 +678,42 @@ int main()
     mockFs().total = 1536 * 1024;
     logReady = false; slistCount = 0;
     logBegin();
+  }
+
+  // ---- a new sketch uploaded: a fresh rod (not after a plain restart) ----
+  printf("\n=== NEW SKETCH = FRESH ROD ===\n");
+  {
+    Preferences p;
+    p.begin("strikesense", false);
+    p.putString("build", "an older sketch");
+    p.putULong("pin", 482913);
+    p.putInt("lmode", 2);                     // LoRa only
+    p.putInt("lchm", 3);                      // 1 km B
+    p.putBool("hasdir", true);
+    p.putULong("lseq", 77);
+    p.end();
+    p.begin("presets", false);
+    p.putString("p0name", "rough sea");
+    p.end();
+    freshBonds = false;
+    freshAfterUpload();
+    p.begin("strikesense", true);
+    bool kept = p.getULong("pin", 0) == 482913 && p.getULong("lseq", 0) == 77;
+    bool reset = p.getInt("lmode", -1) == -1 && p.getInt("lchm", -1) == -1 && !p.getBool("hasdir", false);
+    p.end();
+    p.begin("presets", true);
+    bool presetsGone = p.getString("p0name", "") == "";
+    p.end();
+    check(freshBonds && reset && presetsGone, "new sketch: settings back to default (link, channel, direction, presets), phone + watch forgotten");
+    check(kept, "... the PIN and the strike log numbers are kept");
+    freshBonds = false;
+    p.begin("strikesense", false);
+    p.putInt("lmode", 1);
+    p.end();
+    freshAfterUpload();                       // the same sketch again (a restart)
+    p.begin("strikesense", true);
+    check(!freshBonds && p.getInt("lmode", -1) == 1, "a plain restart: everything kept");
+    p.end();
   }
 
   // ---- devices that vanish without the rod being told (the app stuck on LEARNING) ----

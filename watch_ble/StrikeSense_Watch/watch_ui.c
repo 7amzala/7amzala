@@ -371,9 +371,9 @@ static void screen_dark(void)
 
 static const char *btn1_path = "";
 
-// FIGHT screen: tap FISH OUT, hold it 2 s = LOST IT
-#define LOST_HOLD_MS 2000
-static uint32_t fish_press_at = 0;    // when the button went down
+// FIGHT screen: FISH OUT (big), LOST IT and NO FISH (small, under it)
+static lv_obj_t *fight_btn[2];
+static lv_obj_t *fight_lbl[2];
 static lv_obj_t *hold_btn = NULL;     // the hold-2-s cell being held
 
 static long last_knock_id = -1;
@@ -486,20 +486,6 @@ static void button_clicked(lv_event_t *e)
 {
   const char *path = (const char *)lv_event_get_user_data(e);
 
-  // FISH OUT: a tap; held 2 s: the fish got off
-  if(path != NULL && strcmp(path, "#fish") == 0)
-  {
-    bool lost = fish_press_at != 0 && lv_tick_get() - fish_press_at >= LOST_HOLD_MS;
-    fish_press_at = 0;
-
-    if(!swiped)
-    {
-      ble_link_command(lost ? "/lostfish" : "/fishout");
-      buzz_play(BUZZ_TAP);
-    }
-
-    return;
-  }
 
   if(path != NULL && strcmp(path, "#teach") == 0 && !swiped)
   {
@@ -551,12 +537,6 @@ static void button_clicked(lv_event_t *e)
     if(mode == MODE_STRIKE)
       strike_quiet = strike_seen;     // answered: stop the strike buzz
   }
-}
-
-static void button_pressed(lv_event_t *e)
-{
-  (void)e;
-  fish_press_at = lv_tick_get();
 }
 
 static lv_obj_t *button(lv_obj_t **text)
@@ -908,6 +888,8 @@ static void layout(ui_mode_t m)
   lv_obj_align(st_pill, LV_ALIGN_TOP_MID, st ? -10 : 0, lst ? 32 : 66);
   show(st_trend, st);
   show(st_time, st);
+  show(fight_btn[0], false);              // (the FIGHT screen shows them itself)
+  show(fight_btn[1], false);
 
   // graph panel: home and strike (same live data)
   show(st_panel, live || st);
@@ -2318,7 +2300,10 @@ static void ui_timer(lv_timer_t *t)
   {
     layout(MODE_REELED);
 
-    // after a strike, REEL IN starts the fight timer: FISH OUT (tap) or LOST IT (hold 2 s)
+    // REEL IN starts the fight timer: FISH OUT, LOST IT or NO FISH ends it
+    show(fight_btn[0], s.land == 1);
+    show(fight_btn[1], s.land == 1);
+
     if(s.land != 0)
     {
       long sec = s.landsec + (s.land == 1 ? (long)(s.age_ms / 1000) : 0);
@@ -2329,31 +2314,27 @@ static void ui_timer(lv_timer_t *t)
 
       if(s.land == 1)
       {
-        bool down = fish_press_at != 0 && lv_obj_has_state(btn1, LV_STATE_PRESSED);
-        uint32_t held = down ? now - fish_press_at : 0;
-        bool lost = held >= LOST_HOLD_MS;
-        bool holding = held > 300;
-
-        ring_set(holding ? (int)(lost ? 100 : held * 100 / LOST_HOLD_MS) : 0, COL_RED);
-        pill_set(lost ? "LOST IT" : "FIGHT", lost ? COL_RED : COL_ORANGE, true);
+        ring_set(0, COL_ORANGE);
+        pill_set("FIGHT", COL_ORANGE, true);
         set_text_color(title, COL_TEXT);
-        set_text(subtitle, holding ? (lost ? "let go: lost it" : "keep holding: lost it") : "hold 2 s if it got off");
-        set_text_color(subtitle, holding ? COL_RED : COL_DIM);
+        set_text(subtitle, "how did it end?");
+        set_text_color(subtitle, COL_DIM);
 
-        set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : lost ? LV_SYMBOL_CLOSE : LV_SYMBOL_OK, "#fish", 268, 112, 112,
-                   lost ? COL_RED : COL_GREEN, lv_color_hex(0x05210f));
+        set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : LV_SYMBOL_OK, "/fishout", 268, 112, 112,
+                   COL_GREEN, lv_color_hex(0x05210f));
         set_outline(btn1, COL_GREEN);
-        set_text(btn1_cap, lost ? "LOST IT" : "FISH OUT");
-        set_text_color(btn1_cap, lost ? COL_RED : COL_GREEN);
+        set_text(btn1_cap, "FISH OUT");
+        set_text_color(btn1_cap, COL_GREEN);
       }
       else
       {
-        bool fish = s.land == 2;
+        bool fish = s.land == 2, none = s.land == 4;
+        lv_color_t c = fish ? COL_GREEN : none ? COL_DIM : COL_RED;
 
-        ring_set(100, fish ? COL_GREEN : COL_RED);
-        pill_set(fish ? "FISH OUT" : "LOST IT", fish ? COL_GREEN : COL_RED, false);
+        ring_set(100, c);
+        pill_set(fish ? "FISH OUT" : none ? "NO FISH" : "LOST IT", c, false);
         set_text_color(title, fish ? COL_GREEN : COL_TEXT);
-        set_text(subtitle, fish ? "fight time - photos in the app" : "fight time");
+        set_text(subtitle, fish ? "fight time - photos in the app" : none ? "no fish this time" : "fight time");
         set_text_color(subtitle, COL_DIM);
 
         set_button(btn1, btn1_label, &btn1_path, s.command_busy ? "..." : LV_SYMBOL_PLAY, "/ready", 268, 112, 112, COL_CYAN, lv_color_hex(0x04121a));
@@ -2875,7 +2856,23 @@ void watch_ui_create(void)
 
   // big round button (READY / SKIP) and its name under it
   btn1 = button(&btn1_label);
-  lv_obj_add_event_cb(btn1, button_pressed, LV_EVENT_PRESSED, NULL);
+
+  // FIGHT: LOST IT / NO FISH, small, under FISH OUT
+  for(int i = 0; i < 2; i++)
+  {
+    fight_btn[i] = button(&fight_lbl[i]);
+    lv_obj_set_size(fight_btn[i], 112, 40);
+    lv_obj_align(fight_btn[i], LV_ALIGN_TOP_MID, i == 0 ? -62 : 62, 366);
+    lv_obj_set_style_radius(fight_btn[i], 20, 0);
+    lv_obj_set_style_border_width(fight_btn[i], 1, 0);
+    lv_obj_set_style_border_color(fight_btn[i], i == 0 ? COL_RED : lv_color_hex(0x4a5872), 0);
+    lv_obj_set_style_bg_color(fight_btn[i], i == 0 ? lv_color_hex(0x3a0d14) : COL_CARD, 0);
+    lv_obj_set_style_text_font(fight_lbl[i], FONT_TINY, 0);
+    lv_obj_set_style_text_color(fight_lbl[i], i == 0 ? COL_RED : COL_DIM, 0);
+    lv_label_set_text(fight_lbl[i], i == 0 ? "LOST IT" : "NO FISH");
+    lv_obj_add_event_cb(fight_btn[i], button_clicked, LV_EVENT_CLICKED, (void *)(i == 0 ? "/lostfish" : "/nofish"));
+    lv_obj_add_flag(fight_btn[i], LV_OBJ_FLAG_HIDDEN);
+  }
   btn1_cap = label(scr, FONT_TINY, COL_DIM);
 
   // ---------- STRIKE screen ----------

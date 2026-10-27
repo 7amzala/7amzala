@@ -255,6 +255,12 @@ void ble_link_get(ble_link_status_t *s, bool take_peak)
       s->landsec = 48;
       break;
 
+    case 16:                                    // NO FISH
+      strcpy(s->state, "paused");
+      s->land = 4;
+      s->landsec = 35;
+      break;
+
     case 6:                                     // pull test
       strcpy(s->state, "pulltest");
       s->dir = false;
@@ -785,29 +791,25 @@ int main(void)
     page = 0; vpage = 0;
     scene = 13; scene_start = sim_ms; run_ms(1000); save("w22_fight");
     int b = sent_n;
-    press(233, 268);                                     // tap: FISH OUT
+    press(233, 268);                                     // FISH OUT
     int tap_ok = sent_n == b + 1 && strcmp(sent[b], "/fishout") == 0;
-
-    touch_x = 233; touch_y = 268; touch_down = 1;        // hold 1 s: still a fight, the ring fills
-    run_ms(1000);
-    save("w22b_holding");
-    run_ms(1300);                                        // 2.3 s: LOST IT
-    save("w22c_lost_hold");
-    touch_down = 0; run_ms(200);
-    int hold_ok = sent_n == b + 2 && strcmp(sent[b + 1], "/lostfish") == 0;
-
-    press(233, 268);                                     // a quick tap again: FISH OUT, not lost
-    int again_ok = sent_n == b + 3 && strcmp(sent[b + 2], "/fishout") == 0;
+    press(171, 386);                                     // LOST IT
+    int lost_ok = sent_n == b + 2 && strcmp(sent[b + 1], "/lostfish") == 0;
+    press(295, 386);                                     // NO FISH
+    int none_ok = sent_n == b + 3 && strcmp(sent[b + 2], "/nofish") == 0;
 
     scene = 14; scene_start = sim_ms; run_ms(1000); save("w23_fishout");
+    press(371, 386);                                     // where NO FISH was: hidden now, nothing
     press(233, 268);                                     // READY
     int ready_ok = sent_n == b + 4 && strcmp(sent[b + 3], "/ready") == 0;
     scene = 15; scene_start = sim_ms; run_ms(1000); save("w24_lost");
+    scene = 16; scene_start = sim_ms; run_ms(1000); save("w24b_nofish");
     scene = 5; scene_start = sim_ms; run_ms(1000); save("w25_reeled_no_fight");
+    int hidden_ok = lv_obj_has_flag(fight_btn[0], LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(fight_btn[1], LV_OBJ_FLAG_HIDDEN);
 
-    printf("%s: FIGHT: tap -> /fishout (%s), hold 2 s -> /lostfish (%s), tap again -> /fishout (%s), then READY (%s)\n",
-           tap_ok && hold_ok && again_ok && ready_ok ? "PASS" : "FAIL",
-           tap_ok ? "yes" : "no", hold_ok ? "yes" : "no", again_ok ? "yes" : "no", ready_ok ? "yes" : "no");
+    printf("%s: FIGHT: FISH OUT (%s), LOST IT (%s), NO FISH (%s), then READY (%s), small buttons gone after (%s)\n",
+           tap_ok && lost_ok && none_ok && ready_ok && hidden_ok ? "PASS" : "FAIL",
+           tap_ok ? "yes" : "no", lost_ok ? "yes" : "no", none_ok ? "yes" : "no", ready_ok ? "yes" : "no", hidden_ok ? "yes" : "no");
   }
   return 0;
 }

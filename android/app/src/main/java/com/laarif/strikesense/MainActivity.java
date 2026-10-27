@@ -523,7 +523,8 @@ public class MainActivity extends Activity
                 }
                 else
                 {
-                    js("if(window.setStatus) setStatus(" + quote(helpStatus(link.state())) + ")");
+                    js("if(window.setStatus) setStatus(" + quote(helpStatus(link.state())) + ");"
+                       + " if(window.showRepair) showRepair(" + link.pairingLost() + ")");
                 }
             }
             else
@@ -1203,6 +1204,10 @@ public class MainActivity extends Activity
                 public void run()
                 {
                     RodLink.get(MainActivity.this).forget();
+
+                    // a fresh start with the rod: Phone + watch again (not watch only)
+                    if(RodService.isWatchOnly(MainActivity.this))
+                        setWatchOnly(false);
 
                     handler.post(new Runnable()
                     {

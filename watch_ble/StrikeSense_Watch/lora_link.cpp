@@ -131,18 +131,27 @@ static bool sendRaw(const void* data, size_t len, bool urgent = false)
   if(!keyed || len + SS_WIRE_OVERHEAD > sizeof(out))
     return false;
 
+  // listen before talk. Busy 3 times in a row: send anyway (a check that
+  // always says "busy" - noise, the rod's own packets - kept every answer
+  // back: the rod only heard the watch when a strike was confirmed, which
+  // skips the check)
+  static uint8_t busyRow = 0;
+
   if(!urgent)
   {
     int16_t cad = radio.scanChannel();
     loraIrq = false;
 
-    if(cad == RADIOLIB_LORA_DETECTED)
+    if(cad == RADIOLIB_LORA_DETECTED && busyRow < 3)
     {
+      busyRow++;
       backoffUntil = millis() + random(20, 80);
       radio.startReceive();
       return false;
     }
   }
+
+  busyRow = 0;
 
   ss_wire_t w = { SS_MAGIC, 1, rodTag, txCtr++ };
   memcpy(out, &w, sizeof(w));

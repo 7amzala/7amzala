@@ -25,6 +25,7 @@ extern unsigned long simMillis;
 inline float simLoraLoss = 0.0f;      // 0..1 chance a packet is lost
 class SX1262;
 inline SX1262* simDeafTx = nullptr;   // this radio's packets never reach anyone (its sending is broken)
+inline SX1262* simCadBusy = nullptr;  // this radio's "listen before talk" always says busy (noise)
 inline unsigned long simLoraSent = 0;
 inline unsigned long simLoraLost = 0;
 inline unsigned long simLoraCollided = 0;
@@ -70,6 +71,7 @@ struct SX1262 {
 
   // Listen before talk: another LoRa packet on this channel right now?
   int16_t scanChannel() {
+    if (this == simCadBusy) return RADIOLIB_LORA_DETECTED;
     for (SX1262* o : all())
       if (o != this && o->txing && sameChannel(o) && rssiFrom(o) > sensitivity()) return RADIOLIB_LORA_DETECTED;
     return RADIOLIB_CHANNEL_FREE;

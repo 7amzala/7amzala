@@ -355,6 +355,36 @@ public:
     }
   }
 
+  bool hasArg(const char* name)
+  {
+    for(int i = 0; i < argCount; i++)
+      if(argNames[i] == name)
+        return true;
+
+    return false;
+  }
+
+  // the connection of the device whose question is being answered (-1 = none)
+  int askerConn()
+  {
+    return replyLine >= 0 ? (int)lines[replyLine].id : -1;
+  }
+
+  // how strong the rod hears a connection, dBm (0 = unknown). The watch
+  // says how it hears the rod; when it cannot (0), this is used instead.
+  int connRssi(int id)
+  {
+#if BLE_LINES && !BLE_BD
+    int8_t r = 0;
+
+    if(id >= 0 && ble_gap_conn_rssi((uint16_t)id, &r) == 0)
+      return r;
+#else
+    (void)id;
+#endif
+    return 0;
+  }
+
   String arg(const char* name)
   {
     for(int i = 0; i < argCount; i++)

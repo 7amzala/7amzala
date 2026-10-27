@@ -91,6 +91,7 @@ struct MockLink
   int drops = 0;
   size_t biggest = 0;
   std::vector<std::string> pieces;     // what reached the phone / watch
+  int rssi = -58;                      // how strong the rod hears it
 };
 inline MockLink* mockLinks() { static MockLink l[8]; return l; }
 inline gatts_event_handler& mockGattsHandler() { static gatts_event_handler h = nullptr; return h; }
@@ -171,6 +172,12 @@ inline int ble_gatts_notify_custom(uint16_t conn, uint16_t, os_mbuf* om)
   mockDrain(conn);
   if(mockPoolUsed() >= 20 || mockLinks()[conn].queued >= 12) return BLE_HS_ENOMEM;
   mockDeliver(conn, (const uint8_t*)d.data(), d.size());
+  return 0;
+}
+inline int ble_gap_conn_rssi(uint16_t conn, int8_t* r)
+{
+  if(conn >= 8 || !mockLinks()[conn].up) return 2;
+  *r = (int8_t)mockLinks()[conn].rssi;
   return 0;
 }
 inline int ble_gap_conn_find(uint16_t conn, ble_gap_conn_desc* d)

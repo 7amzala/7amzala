@@ -162,6 +162,14 @@ void session(float loss)
   while (lora_link_get_status().land != 2 && simMillis - seen0 < 15000) step(0.1);
   check(lora_link_get_status().land == 2 && lora_link_get_status().land_sec == (uint16_t)slist[slistCount - 1].land,
         "watch shows FISH OUT and the same fight time");
+  // READY, REEL IN again (new bait) and NO FISH from the watch
+  check(command(CMD_READY, "READY"), "READY confirmed");
+  step(1);
+  check(command(CMD_REELIN, "REELIN"), "REEL IN again (new bait)");
+  step(2);
+  check(landState == 1, "the timer runs on every REEL IN");
+  check(command(CMD_NOFISH, "NOFISH"), "NO FISH from the watch over LoRa");
+  check(landState == 4, "rod: no fish, timer stopped");
 
   check(command(CMD_RESUME, "RESUME"), "ADJUST -> READY (resume) confirmed");
   for (int i = 0; i < 30 && rodState != ST_MONITORING; i++) step(0.5);
@@ -598,6 +606,49 @@ void crowdTest()
   setChanMode(CHM_AUTO);
 }
 
+// The phone app: Bluetooth only for a while (the rod's LoRa quiet), then
+// LoRa only. The rod must see the watch over LoRa soon - no strike needed.
+// The watch restarts: its packet numbers start lower than the last one
+// the rod saw. The rod must still hear it (not take it for a copy).
+// And a watch whose "listen before talk" always says busy (noise).
+void watchRestartAndNoise()
+{
+  printf("\n===== watch restarts / noisy channel =====\n");
+  setLinkMode(2);
+  step(10);
+  lastWatchCtr = 0xFFF00000u;                     // as if the watch had sent a lot before
+  unsigned long seen0 = watchLastSeen;
+  step(12);
+  check(watchLastSeen != seen0 && watchConnected(), "watch restarted (lower packet numbers): the rod still hears it");
+
+  simCadBusy = watchRadio();
+  step(20);
+  unsigned long at = watchLastSeen;
+  step(12);
+  check(watchLastSeen != at && watchConnected(), "watch's 'listen before talk' always busy: its answers still reach the rod");
+  simCadBusy = nullptr;
+  setLinkMode(0);
+  step(5);
+}
+
+void loraOnlyFromBt()
+{
+  printf("\n===== Bluetooth only -> LoRa only (from the app) =====\n");
+  setLinkMode(1);
+  step(90);                                       // the watch stops hearing the rod
+  printf("  after 90 s Bluetooth only: watch hears the rod %d, searching %d\n",
+         lora_link_get_status().connected, lora_link_get_status().searching);
+  unsigned long t0 = simMillis;
+  setLinkMode(2);
+  while (!watchConnected() && simMillis - t0 < 60000) step(0.1);
+  printf("  LoRa only: the rod sees the watch after %.1f s (watch hears rod %d)\n", (simMillis - t0) / 1000.0, lora_link_get_status().connected);
+  check(watchConnected() && simMillis - t0 < 20000, "LoRa only chosen: the app shows the watch connected within 20 s, no strike needed");
+  step(30);
+  check(watchConnected(), "... and stays connected");
+  setLinkMode(0);
+  step(10);
+}
+
 int main()
 {
   Serial.quiet = true;
@@ -618,6 +669,8 @@ int main()
   privateLora();
   autoChannelTest();
   crowdTest();
+  loraOnlyFromBt();
+  watchRestartAndNoise();
 
   printf("\n%d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;

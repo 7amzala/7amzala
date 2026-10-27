@@ -689,15 +689,56 @@ static void setPhase(ble_link_phase_t p)
   portEXIT_CRITICAL(&mux);
 }
 
+// Close the link for real before the client goes. A client deleted while
+// its link was still closing could leave the link open underneath: every
+// new "connect" to the rod then failed (the watch said "connecting" until
+// it was switched off) - e.g. after LoRa only, back to Bluetooth / Auto.
+static void dropLink(BLEClient *c)
+{
+  if(c == nullptr || !c->isConnected())
+    return;
+
+  c->disconnect();
+  uint32_t t0 = millis();
+
+  while(c->isConnected() && millis() - t0 < 3000)
+  {
+    esp_task_wdt_reset();
+    delay(20);
+  }
+}
+
+// The watch only ever connects to its rod: a link still open from before
+// (not closed properly) is closed before a new connect
+static void closeLeftoverLinks()
+{
+#if defined(CONFIG_NIMBLE_ENABLED)
+  for(uint16_t h = 0; h < 16; h++)
+  {
+    ble_gap_conn_desc d;
+
+    if(ble_gap_conn_find(h, &d) == 0)
+    {
+      Serial.printf("[BLE] closing a link left open (%u)\n", (unsigned)h);
+      ble_gap_terminate(h, BLE_ERR_REM_USER_CONN_TERM);
+
+      for(int i = 0; i < 100 && ble_gap_conn_find(h, &d) == 0; i++)
+      {
+        esp_task_wdt_reset();
+        delay(20);
+      }
+    }
+  }
+#endif
+}
+
 static void lost()
 {
   Serial.println("[BLE] rod lost, searching again");
 
   if(client != nullptr)
   {
-    if(client->isConnected())
-      client->disconnect();
-
+    dropLink(client);
     delete client;
     client = nullptr;
   }
@@ -848,6 +889,7 @@ static void connectToRodAt(BLEAddress addr)
 {
   setPhase(BLE_LINK_CONNECTING);
   lostFlag = false;
+  closeLeftoverLinks();
 
   client = BLEDevice::createClient();
   client->setClientCallbacks(new ClientCallbacks());

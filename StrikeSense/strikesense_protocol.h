@@ -160,7 +160,8 @@ enum
   CMD_LINKMODE = 10,  // arg: 0 auto, 1 Bluetooth only, 2 LoRa only (set on the watch)
   CMD_CHANMODE = 11,  // arg: CHM_xxx (set on the watch)
   CMD_FISHOUT  = 12,  // fish landed: stop the fight timer
-  CMD_LOSTFISH = 13   // the fish got off: stop the fight timer
+  CMD_LOSTFISH = 13,  // the fish got off: stop the fight timer
+  CMD_NOFISH   = 14   // no fish (false alarm, new bait): stop the fight timer
 };
 
 // heartbeat flags
@@ -214,7 +215,7 @@ typedef struct __attribute__((packed))
   uint8_t  modes;        // link choice (bits 0-1: 0 auto, 1 BT only, 2 LoRa only) | channel choice CHM_xxx << 2
 
   // ---- rod 3.1: the landing (REEL IN -> FISH OUT) ----
-  uint8_t  land;         // 0 none, 1 fighting, 2 fish out, 3 lost it
+  uint8_t  land;         // 0 none, 1 fighting, 2 fish out, 3 lost it, 4 no fish
   uint16_t landSec;      // fight timer, seconds
 } ss_heartbeat_t;
 

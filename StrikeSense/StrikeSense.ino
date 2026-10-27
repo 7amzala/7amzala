@@ -11,6 +11,9 @@
 #endif
 #include <Wire.h>
 #include <Preferences.h>
+#if defined(ESP32) && __has_include("esp_app_desc.h")
+#include "esp_app_desc.h"
+#endif
 #include <LittleFS.h>
 #include <esp_task_wdt.h>
 
@@ -440,6 +443,36 @@ public:
       if(sendPiece(lines[i], nowMs))
         sendTurn = (i + 1) % MAX_LINES;
     }
+  }
+
+  bool hasArg(const char* name)
+  {
+    for(int i = 0; i < argCount; i++)
+      if(argNames[i] == name)
+        return true;
+
+    return false;
+  }
+
+  // the connection of the device whose question is being answered (-1 = none)
+  int askerConn()
+  {
+    return replyLine >= 0 ? (int)lines[replyLine].id : -1;
+  }
+
+  // how strong the rod hears a connection, dBm (0 = unknown). The watch
+  // says how it hears the rod; when it cannot (0), this is used instead.
+  int connRssi(int id)
+  {
+#if BLE_LINES && !BLE_BD
+    int8_t r = 0;
+
+    if(id >= 0 && ble_gap_conn_rssi((uint16_t)id, &r) == 0)
+      return r;
+#else
+    (void)id;
+#endif
+    return 0;
   }
 
   String arg(const char* name)
@@ -4952,6 +4985,12 @@ button.action {
   color:#ff8a94 !important;
 }
 
+.nofish {
+  background:transparent !important;
+  border:2px solid #6b7790 !important;
+  color:#a9bbd6 !important;
+}
+
 .reel {
   background:#ee4747;
   color:#fff;
@@ -5881,7 +5920,8 @@ function setWatchOnlyView(only, info)
 <button id="landPhotos" class="action fishout" onclick="addPhotos()" style="display:none;margin-top:10px">&#128247; ADD PHOTOS</button>
 </div>
 <button id="fishOutButton" class="action fishout" onclick="fishOut()" style="display:none">&#127907; FISH OUT</button>
-<button id="lostButton" class="action lost" onclick="lostFish()" style="display:none">Lost it</button>
+<button id="lostButton" class="action lost" onclick="lostFish()" style="display:none">Lost it (it got off)</button>
+<button id="noFishButton" class="action nofish" onclick="noFish()" style="display:none">No fish (false alarm / new bait)</button>
 <button id="readyButton" class="action ready" onclick="ready()" style="display:none">READY</button>
 <button id="skipButton" class="action skip" onclick="skipPull()" style="display:none">SKIP</button>
 </div>
@@ -8453,6 +8493,11 @@ async function lostFish()
   await fetch("/lostfish");
 }
 
+async function noFish()
+{
+  await fetch("/nofish");
+}
+
 function fmtLand(sec)
 {
   return Math.floor(sec / 60) + ":" + ("0" + (sec % 60)).slice(-2);
@@ -8466,16 +8511,17 @@ function showLand(d)
   card.style.display = land ? "block" : "none";
   el("fishOutButton").style.display = land === 1 ? "block" : "none";
   el("lostButton").style.display = land === 1 ? "block" : "none";
+  el("noFishButton").style.display = land === 1 ? "block" : "none";
 
   if(!land)
     return;
 
-  card.className = "landCard" + (land === 2 ? " done" : land === 3 ? " lost" : "");
-  el("landTitle").innerText = land === 1 ? "FIGHT" : land === 2 ? "FISH OUT" : "LOST IT";
+  card.className = "landCard" + (land === 2 ? " done" : land >= 3 ? " lost" : "");
+  el("landTitle").innerText = land === 1 ? "FIGHT" : land === 2 ? "FISH OUT" : land === 3 ? "LOST IT" : "NO FISH";
   el("landTime").innerText = fmtLand(d.landsec || 0);
   var app = !!(window.StrikeApp && StrikeApp.fishOut);
   el("landPhotos").style.display = land === 2 && app ? "block" : "none";
-  el("landSub").innerText = land === 1 ? "from REEL IN" : land === 2 ? (app ? "fight time" : "fight time - add photos in the app") : "fight time";
+  el("landSub").innerText = land === 1 ? "from REEL IN - how did it end?" : land === 2 ? (app ? "fight time" : "fight time - add photos in the app") : land === 4 ? "no fish this time" : "fight time";
 }
 
 async function ready()
@@ -10262,6 +10308,31 @@ void addLinkMode(String& json)
 
 unsigned long watchBtAt = 0;            // last "/wping" or "/watch" from the watch over Bluetooth
 int watchBtRssi = 0;                    // how strong the watch hears the rod (dBm, 0 = unknown)
+int watchBtConn = -1;                   // the watch's Bluetooth connection (the rod can measure it too)
+
+// what the watch said about the signal (only when it says something)
+void noteWatchHere()
+{
+  watchBtAt = millis();
+#if defined(ESP32)
+  watchBtConn = server.askerConn();
+
+  if(server.hasArg("r"))
+    watchBtRssi = server.arg("r").toInt();
+#else
+  watchBtRssi = server.arg("r").toInt();
+#endif
+}
+
+// the watch's signal: what it said, else what the rod measures
+int watchSignal()
+{
+#if defined(ESP32)
+  if(watchBtRssi == 0)
+    return server.connRssi(watchBtConn);
+#endif
+  return watchBtRssi;
+}
 
 int rssiBars(int rssi)
 {
@@ -10289,7 +10360,7 @@ void addWatchLink(String& json)
   json += bt ? "bt" : lora ? "lora" : "none";
   json += "\"";
 
-  addField(json, "wbars", (long)(bt ? rssiBars(watchBtRssi) : loraBarsNow));
+  addField(json, "wbars", (long)(bt ? rssiBars(watchSignal()) : loraBarsNow));
   addField(json, "wlora", lora);
 }
 
@@ -10320,7 +10391,7 @@ struct StrikeSummary
   int knocks;
   bool done;
   int16_t land;                         // REEL IN -> FISH OUT / LOST IT, seconds
-  uint8_t result;                       // 0 none, 1 fish out, 2 lost it
+  uint8_t result;                       // 0 none, 1 fish out, 2 lost it, 3 no fish
 };
 
 StrikeSummary slist[SLIST_N];
@@ -10399,8 +10470,7 @@ void handleForget()
 // The watch: "I'm here over Bluetooth, hearing you this strong" (every 2 s)
 void handleWatchPing()
 {
-  watchBtAt = millis();
-  watchBtRssi = server.arg("r").toInt();
+  noteWatchHere();
   server.send(200, "text/plain", "OK");
 }
 
@@ -10437,7 +10507,7 @@ void handleStrikes()
     addField(json, "done", s.done);
     addField(json, "land", (long)s.land);
     json += ",\"result\":\"";
-    json += s.result == 1 ? "fish" : s.result == 2 ? "lost" : "";
+    json += s.result == 1 ? "fish" : s.result == 2 ? "lost" : s.result == 3 ? "nofish" : "";
     json += "\"}";
   }
 
@@ -10477,7 +10547,7 @@ struct LogRec
   int16_t zt[ZOOM_EACH * 2];
   // rod 3.1: the landing (older records end before this: read as 0)
   int16_t land;                         // REEL IN -> FISH OUT / LOST IT, seconds
-  int16_t result;                       // 0 none, 1 fish out, 2 lost it
+  int16_t result;                       // 0 none, 1 fish out, 2 lost it, 3 no fish
 };
 
 const size_t LOG_OLD_SIZE = offsetof(LogRec, land);
@@ -10601,13 +10671,15 @@ struct StrikeLog
 };
 
 // =====================================================
-// LANDING: REEL IN after a strike starts the fight timer, FISH OUT or
-// LOST IT (watch or app) stops it. Kept with the strike.
+// LANDING: REEL IN starts the fight timer; FISH OUT, LOST IT or NO FISH
+// (watch or app) stops it. Kept with the strike of the last 10 minutes; a
+// fish with no strike before gets its own entry ("NO ALARM").
 // =====================================================
 
-const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // REEL IN up to 10 min after the strike
+const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // the strike it belongs to: up to 10 min before
 
-int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it
+int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it, 4 no fish
+unsigned long landOwnN = 0;             // "NO ALARM" entries made
 unsigned long landStartMs = 0;
 unsigned long landEndMs = 0;
 unsigned long landStrikeId = 0;
@@ -10624,19 +10696,47 @@ long landSeconds()
 
 void landOnReelIn()
 {
-  if(landState == 1 || slistCount == 0)
+  if(landState == 1)
     return;
-
-  StrikeSummary& s = slist[slistCount - 1];
-
-  if(millis() - s.startMs > LAND_AFTER_STRIKE_MS || s.result != 0)
-    return;                             // no strike lately: new bait, no fight
 
   landState = 1;
   landStartMs = millis();
   landEndMs = 0;
-  landStrikeId = s.id;
-  Serial.println("FIGHT: timer started (REEL IN)");
+  landStrikeId = 0;
+
+  if(slistCount > 0)
+  {
+    StrikeSummary& s = slist[slistCount - 1];
+
+    if(millis() - s.startMs <= LAND_AFTER_STRIKE_MS && s.result == 0)
+      landStrikeId = s.id;              // the strike this fight belongs to
+  }
+
+  Serial.println(landStrikeId ? "FIGHT: timer started (REEL IN after a strike)" : "FIGHT: timer started (REEL IN, no strike before)");
+}
+
+// A fish (or one that got off) with no strike before: its own entry
+void landOwnEntry()
+{
+  if(slistCount == SLIST_N)
+  {
+    logSaveOldest();
+
+    for(int i = 1; i < SLIST_N; i++)
+      slist[i - 1] = slist[i];
+
+    slistCount--;
+  }
+
+  StrikeSummary& n = slist[slistCount++];
+  memset(&n, 0, sizeof(n));
+  n.id = 900000 + (++landOwnN);         // not a strike number (the watch must not alarm)
+  n.seq = logReady ? ++logSeq : 0;
+  strncpy(n.type, "NO ALARM", sizeof(n.type) - 1);
+  n.startMs = landStartMs;
+  n.lastActiveMs = landStartMs;
+  n.done = true;
+  landStrikeId = n.id;
 }
 
 // Every reading: casting again (READY / resume / learning) ends the landing
@@ -10646,16 +10746,19 @@ void landTick()
     landState = 0;
 }
 
-// FISH OUT (fish = true) or LOST IT
-bool cmdFishOut(bool fish)
+// how the fight ended: 1 FISH OUT, 2 LOST IT, 3 NO FISH
+bool cmdLand(int result)
 {
-  if(landState != 1)
+  if(landState != 1 || result < 1 || result > 3)
     return false;
 
-  landState = fish ? 2 : 3;
+  landState = result + 1;
   landEndMs = millis();
 
   int16_t sec = (int16_t)landSeconds();
+
+  if(landStrikeId == 0 && result != 3)
+    landOwnEntry();
 
   for(int i = 0; i < slistCount; i++)
   {
@@ -10665,24 +10768,29 @@ bool cmdFishOut(bool fish)
       continue;
 
     st.land = sec;
-    st.result = fish ? 1 : 2;
+    st.result = (uint8_t)result;
 
     if(st.stored && logReady)
       StrikeLog::setLand(st.seq, st.land, st.result);   // else written with it later
   }
 
-  Serial.printf("FIGHT: %s after %d:%02d\n", fish ? "FISH OUT" : "LOST IT", sec / 60, sec % 60);
+  Serial.printf("FIGHT: %s after %d:%02d\n", result == 1 ? "FISH OUT" : result == 2 ? "LOST IT" : "NO FISH", sec / 60, sec % 60);
   return true;
 }
 
 void handleFishOut()
 {
-  server.send(200, "text/plain", cmdFishOut(true) ? "OK" : "NO FIGHT");
+  server.send(200, "text/plain", cmdLand(1) ? "OK" : "NO FIGHT");
 }
 
 void handleLostFish()
 {
-  server.send(200, "text/plain", cmdFishOut(false) ? "OK" : "NO FIGHT");
+  server.send(200, "text/plain", cmdLand(2) ? "OK" : "NO FIGHT");
+}
+
+void handleNoFish()
+{
+  server.send(200, "text/plain", cmdLand(3) ? "OK" : "NO FIGHT");
 }
 
 void addLand(String& json)
@@ -10805,7 +10913,7 @@ void handleLog()
       addField(json, "graph", r.count > 1);
       addField(json, "land", (long)r.land);
       json += ",\"result\":\"";
-      json += r.result == 1 ? "fish" : r.result == 2 ? "lost" : "";
+      json += r.result == 1 ? "fish" : r.result == 2 ? "lost" : r.result == 3 ? "nofish" : "";
       json += "\"}";
     }
   }
@@ -10879,8 +10987,7 @@ void handleLogStrike()
 
 void handleWatch()
 {
-  watchBtAt = millis();
-  watchBtRssi = server.arg("r").toInt();
+  noteWatchHere();
   server.send(200, "application/json", watchJson());
 }
 
@@ -11402,12 +11509,18 @@ bool loraSend(const void* data, size_t len, bool urgent = false)
   if(c.limited && dutyTokens < air + (urgent ? 0 : 2000))
     return false;
 
-  // listen before talk: another LoRa packet on the air? wait a moment
+  // listen before talk: another LoRa packet on the air? wait a moment.
+  // "Busy" 3 times in a row: send anyway (a check that always says busy
+  // must not hold everything back)
+  static uint8_t busyRow = 0;
   int16_t cad = radio.scanChannel();
   loraIrq = false;
 
-  if(cad == RADIOLIB_LORA_DETECTED)
+  if(cad != RADIOLIB_LORA_DETECTED || busyRow >= 3)
+    busyRow = 0;
+  else
   {
+    busyRow++;
     loraBackoffUntil = millis() + (urgent ? random(5, 25) : random(20, 80));
     radio.startReceive();
     return false;
@@ -11723,8 +11836,9 @@ void handleCommand(ss_command_t c)
     case CMD_SETTIME:  setClock((long)c.arg, (long)c.tz15 * 15); break;
     case CMD_LINKMODE: setLinkMode((int)c.arg); break;
     case CMD_CHANMODE: setChanMode((int)c.arg); break;
-    case CMD_FISHOUT:  cmdFishOut(true); break;
-    case CMD_LOSTFISH: cmdFishOut(false); break;
+    case CMD_FISHOUT:  cmdLand(1); break;
+    case CMD_LOSTFISH: cmdLand(2); break;
+    case CMD_NOFISH:   cmdLand(3); break;
   }
 }
 
@@ -11794,7 +11908,9 @@ void handleRaw(const uint8_t* buf, size_t len)
     return;
   }
 
-  if(w.from != 1 || (lastWatchCtr != 0 && w.ctr <= lastWatchCtr) || n > 64)
+  // a copy of a recent packet is refused; a much lower number = the watch
+  // restarted (its numbers start again), accepted
+  if(w.from != 1 || (lastWatchCtr != 0 && w.ctr <= lastWatchCtr && lastWatchCtr - w.ctr < 0x100000u) || n > 64)
     return;                                       // not from our watch, or a copy of an old packet
 
   lastWatchCtr = w.ctr;
@@ -12062,14 +12178,74 @@ void addWatchChanMode(String&) {}
 // SETUP
 // =====================================================
 
+// A new sketch uploaded (not a restart): a fresh rod - settings back to
+// default, paired phone and watch forgotten (pair again with the PIN), new
+// LoRa key. Kept: the PIN, the strike log numbers, the total time and the
+// sensor's noise calibration (that is the hardware, not a setting).
+bool freshBonds = false;
+
+// a fingerprint of the uploaded program (changes with every new upload)
+String buildId()
+{
+#if defined(ESP32) && __has_include("esp_app_desc.h")
+  char sha[17] = { 0 };
+  esp_app_get_elf_sha256(sha, sizeof(sha));
+  return String(sha);
+#else
+  return String(__DATE__ " " __TIME__);
+#endif
+}
+
+void freshAfterUpload()
+{
+  String BUILD = buildId();
+
+  Preferences p;
+  p.begin("strikesense", false);
+
+  if(p.getString("build", "") == BUILD)
+  {
+    p.end();
+    return;
+  }
+
+  uint32_t pin = p.getULong("pin", 0);
+  uint32_t lseq = p.getULong("lseq", 0);
+  uint32_t lboot = p.getULong("lboot", 0);
+  uint32_t total = p.getULong("total", 0);
+  bool hasFloor = p.getBool("hasfloor", false), hasFloorA = p.getBool("hasfloorA", false);
+  float floor0 = p.getFloat("floor", 0), floorA = p.getFloat("floorA", 0);
+
+  p.clear();
+
+  if(pin) p.putULong("pin", pin);
+  if(lseq) p.putULong("lseq", lseq);
+  if(lboot) p.putULong("lboot", lboot);
+  if(total) p.putULong("total", total);
+  if(hasFloor) { p.putBool("hasfloor", true); p.putFloat("floor", floor0); }
+  if(hasFloorA) { p.putBool("hasfloorA", true); p.putFloat("floorA", floorA); }
+  p.putString("build", BUILD);
+  p.end();
+
+  Preferences q;
+  q.begin("presets", false);
+  q.clear();
+  q.end();
+
+  freshBonds = true;
+  Serial.println("NEW SKETCH UPLOADED: a fresh rod - settings back to default, phone and watch must pair again (PIN)");
+}
+
 void setup()
 {
   Serial.begin(115200);
 
   delay(1000);
 
+  freshAfterUpload();
+
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.1 (fight timer: REEL IN to FISH OUT) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.2 (fight: FISH OUT / LOST IT / NO FISH; fresh after upload) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);
@@ -12119,6 +12295,7 @@ void setup()
   server.on("/ready", handleReady);
   server.on("/fishout", handleFishOut);
   server.on("/lostfish", handleLostFish);
+  server.on("/nofish", handleNoFish);
   server.on("/relearn", handleRelearn);
   server.on("/skippull", handleSkipPull);
   server.on("/sea", handleSea);
@@ -12145,6 +12322,9 @@ void setup()
 
   logBegin();
   server.begin();
+
+  if(freshBonds)
+    forgetPairedDevices();              // new sketch: phone and watch pair again
 
   loraBegin();
 

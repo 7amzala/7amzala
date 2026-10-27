@@ -147,7 +147,7 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
 <script>
 // ---------- data ----------
 const APP = window.StrikeStore || null;
-const COLORS = { 'SHARP STRIKE':'#ff4d5e', 'SLOW PULL':'#ffba52', 'DROP-BACK + PULL':'#9b8cff', 'REPEATED BITE':'#22d3ff', 'SHAKING FISH':'#3ddc84' };
+const COLORS = { 'SHARP STRIKE':'#ff4d5e', 'SLOW PULL':'#ffba52', 'DROP-BACK + PULL':'#9b8cff', 'REPEATED BITE':'#22d3ff', 'SHAKING FISH':'#3ddc84', 'NO ALARM':'#a9bbd6' };
 const colorOf = t => COLORS[t] || '#22d3ff';
 let all = [], country = 'All', place = 'All', range = 0;    // range: 0 any, 7, 30, 365 days
 const RANGES = [[0,'Any date'],[7,'Last 7 days'],[30,'Last 30 days'],[365,'Last 12 months']];
@@ -326,6 +326,7 @@ function cloudLine()
 function catchTag(s)
 {
   if(s.result == 'lost') return '<span class="tag" style="color:#ff8d98;border-color:#ff4d5e">&#10005; lost</span>';
+  if(s.result == 'nofish') return '<span class="tag" style="color:#8ea6c8;border-color:#3a4a66">no fish</span>';
   if(s.result != 'fish') return '';
   const n = s.photos ? Object.keys(s.photos).length : 0;
   const name = (s.fish || 'Fish') + (s.kg ? ' ' + s.kg + ' kg' : '');
@@ -335,7 +336,7 @@ function catchTag(s)
 
 // ---------- catch: fish, weight, length, 3 photos ----------
 const FISH = ['Sea bass','Gilthead bream','White bream','Mullet','Sole','Ray','Mackerel','Dogfish','Other'];
-const SLOTS = { hook: ['&#129693;', 'Hook in<br>the mouth'], weight: ['&#9878;&#65039;', 'Weight<br>(scale)'], length: ['&#128207;', 'Length<br>(tape)'] };
+const SLOTS = { hook: ['&#128031;', 'The fish<br>(whole)'], weight: ['&#9878;&#65039;', 'Weight<br>(scale)'], length: ['&#128207;', 'Length<br>(tape)'] };
 let cat = null, catFish = '', catBackTo = 'pList';
 
 function photoUrl(uid, slot) { return '/photo/' + uid.replace(/[^A-Za-z0-9_-]/g, '') + '_' + slot + '.jpg?t=' + Date.now(); }
@@ -492,10 +493,11 @@ function openStrike(uid)
     stat('FIGHT', cur.done ? mmss(cur.fight) : '…') +
     stat('KNOCKS', cur.knocks !== undefined ? cur.knocks : '–') +
     (cur.wave >= 0 && cur.wave !== undefined ? stat('SEA', WAVES[cur.wave] || '–', 15) : '') +
-    (cur.land ? stat(cur.result == 'lost' ? 'LOST AFTER' : 'REEL IN &rarr; OUT', mmss(cur.land)) : '') +
+    (cur.land && cur.result != 'nofish' ? stat(cur.result == 'lost' ? 'LOST AFTER' : 'REEL IN &rarr; OUT', mmss(cur.land)) : '') +
     (cur.kg ? stat('KG', esc(cur.kg)) : '') + (cur.cm ? stat('CM', esc(cur.cm)) : '');
 
   $('sCatch').innerHTML = cur.result == 'lost' ? '<span class="meta">&#10060; Lost it (the fish got off)</span>' :
+    cur.result == 'nofish' ? '<span class="meta">No fish (false alarm or new bait)</span>' :
     `<button class="btn" onclick="openCatch('${cur.uid}')">&#127907; ${cur.result == 'fish' ? 'Catch &amp; photos' : 'It was a fish: add the catch'}</button>` +
     (cur.fish ? ` <span class="meta">${esc(cur.fish)}</span>` : '') + photoThumbs(cur);
 

@@ -153,6 +153,12 @@
 </ol>
 </div>
 
+<div class="card" id="repair" style="display:none;border-color:#ffba52">
+<b style="color:#ffba52">The rod does not answer this phone.</b><br>
+If the rod got new software, it starts fresh and has forgotten this phone: pair again with the rod's PIN.
+<button class="main" onclick="StrikeApp.forgetRod()">PAIR AGAIN</button>
+</div>
+
 <button class="main" onclick="StrikeApp.openBluetooth()">BLUETOOTH</button>
 <button onclick="StrikeApp.retry()">SEARCH AGAIN</button>
 <button onclick="StrikeApp.appSettings()">APP PERMISSIONS</button>
@@ -165,6 +171,12 @@
 function setStatus(t)
 {
   document.getElementById("status").textContent = t;
+}
+
+// many failed connections: the rod may have forgotten this phone
+function showRepair(on)
+{
+  document.getElementById("repair").style.display = on ? "" : "none";
 }
 </script>
 

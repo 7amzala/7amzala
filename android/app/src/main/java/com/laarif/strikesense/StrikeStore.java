@@ -684,7 +684,7 @@ final class StrikeStore
     // Laarif StrikeSense's own sheet (Apps Script web app): every tester's
     // strikes go there with their username
     static final String SHEET_URL =
-        "https://script.google.com/macros/s/AKfycbzmwI0EyzP_Ww1tlzg0AoIL9A5s7YJ1tBa-XYN0XnLZmgtOyzLPTBrNbJfula53ofsV/exec";
+        "https://script.google.com/macros/s/AKfycbyecgNPh2ZRt9WnHZ2iRcKi4s7dBwNFlaneT3MwHEnEP76QVrh607H3pWrUPc36nXCt/exec";
 
     String cloudUrl()
     {

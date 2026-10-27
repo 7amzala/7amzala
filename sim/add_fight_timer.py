@@ -6,8 +6,9 @@ FISH OUT or LOST IT is tapped, on the watch or in the app. The time and
 the result are kept with the strike (memory, strike log in flash, /strikes,
 /log) and shown live (/data, the watch's /watch, LoRa heartbeat).
 
-A REEL IN with no strike in the last 10 minutes (new bait, moving the
-rod) starts no timer.
+REEL IN always starts the timer, and FISH OUT, LOST IT or NO FISH (false
+alarm, new bait) ends it. A strike in the 10 minutes before gets the
+result; a fish with no strike before is kept as its own "NO ALARM" entry.
 
     python3 add_fight_timer.py <sketch.ino>      (edits in place)
 """
@@ -42,7 +43,7 @@ rep('''  int knocks;
 StrikeSummary slist[SLIST_N];''', '''  int knocks;
   bool done;
   int16_t land;                         // REEL IN -> FISH OUT / LOST IT, seconds
-  uint8_t result;                       // 0 none, 1 fish out, 2 lost it
+  uint8_t result;                       // 0 none, 1 fish out, 2 lost it, 3 no fish
 };
 
 StrikeSummary slist[SLIST_N];''')
@@ -69,7 +70,7 @@ rep('''    addField(json, "done", s.done);
     json += "}";''', '''    addField(json, "done", s.done);
     addField(json, "land", (long)s.land);
     json += ",\\"result\\":\\"";
-    json += s.result == 1 ? "fish" : s.result == 2 ? "lost" : "";
+    json += s.result == 1 ? "fish" : s.result == 2 ? "lost" : s.result == 3 ? "nofish" : "";
     json += "\\"}";''')
 
 # ---------- strike log: two more numbers at the end (older records still read) ----------
@@ -81,7 +82,7 @@ const uint32_t LOG_MAGIC''', '''  int16_t zk[ZOOM_EACH * 2];
   int16_t zt[ZOOM_EACH * 2];
   // rod 3.1: the landing (older records end before this: read as 0)
   int16_t land;                         // REEL IN -> FISH OUT / LOST IT, seconds
-  int16_t result;                       // 0 none, 1 fish out, 2 lost it
+  int16_t result;                       // 0 none, 1 fish out, 2 lost it, 3 no fish
 };
 
 const size_t LOG_OLD_SIZE = offsetof(LogRec, land);
@@ -129,13 +130,15 @@ rep('''    Serial.printf("STRIKE LOG: strike %lu saved (%s%s)\\n", (unsigned lon
 };
 
 // =====================================================
-// LANDING: REEL IN after a strike starts the fight timer, FISH OUT or
-// LOST IT (watch or app) stops it. Kept with the strike.
+// LANDING: REEL IN starts the fight timer; FISH OUT, LOST IT or NO FISH
+// (watch or app) stops it. Kept with the strike of the last 10 minutes; a
+// fish with no strike before gets its own entry ("NO ALARM").
 // =====================================================
 
-const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // REEL IN up to 10 min after the strike
+const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // the strike it belongs to: up to 10 min before
 
-int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it
+int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it, 4 no fish
+unsigned long landOwnN = 0;             // "NO ALARM" entries made
 unsigned long landStartMs = 0;
 unsigned long landEndMs = 0;
 unsigned long landStrikeId = 0;
@@ -152,19 +155,47 @@ long landSeconds()
 
 void landOnReelIn()
 {
-  if(landState == 1 || slistCount == 0)
+  if(landState == 1)
     return;
-
-  StrikeSummary& s = slist[slistCount - 1];
-
-  if(millis() - s.startMs > LAND_AFTER_STRIKE_MS || s.result != 0)
-    return;                             // no strike lately: new bait, no fight
 
   landState = 1;
   landStartMs = millis();
   landEndMs = 0;
-  landStrikeId = s.id;
-  Serial.println("FIGHT: timer started (REEL IN)");
+  landStrikeId = 0;
+
+  if(slistCount > 0)
+  {
+    StrikeSummary& s = slist[slistCount - 1];
+
+    if(millis() - s.startMs <= LAND_AFTER_STRIKE_MS && s.result == 0)
+      landStrikeId = s.id;              // the strike this fight belongs to
+  }
+
+  Serial.println(landStrikeId ? "FIGHT: timer started (REEL IN after a strike)" : "FIGHT: timer started (REEL IN, no strike before)");
+}
+
+// A fish (or one that got off) with no strike before: its own entry
+void landOwnEntry()
+{
+  if(slistCount == SLIST_N)
+  {
+    logSaveOldest();
+
+    for(int i = 1; i < SLIST_N; i++)
+      slist[i - 1] = slist[i];
+
+    slistCount--;
+  }
+
+  StrikeSummary& n = slist[slistCount++];
+  memset(&n, 0, sizeof(n));
+  n.id = 900000 + (++landOwnN);         // not a strike number (the watch must not alarm)
+  n.seq = logReady ? ++logSeq : 0;
+  strncpy(n.type, "NO ALARM", sizeof(n.type) - 1);
+  n.startMs = landStartMs;
+  n.lastActiveMs = landStartMs;
+  n.done = true;
+  landStrikeId = n.id;
 }
 
 // Every reading: casting again (READY / resume / learning) ends the landing
@@ -174,16 +205,19 @@ void landTick()
     landState = 0;
 }
 
-// FISH OUT (fish = true) or LOST IT
-bool cmdFishOut(bool fish)
+// how the fight ended: 1 FISH OUT, 2 LOST IT, 3 NO FISH
+bool cmdLand(int result)
 {
-  if(landState != 1)
+  if(landState != 1 || result < 1 || result > 3)
     return false;
 
-  landState = fish ? 2 : 3;
+  landState = result + 1;
   landEndMs = millis();
 
   int16_t sec = (int16_t)landSeconds();
+
+  if(landStrikeId == 0 && result != 3)
+    landOwnEntry();
 
   for(int i = 0; i < slistCount; i++)
   {
@@ -193,24 +227,29 @@ bool cmdFishOut(bool fish)
       continue;
 
     st.land = sec;
-    st.result = fish ? 1 : 2;
+    st.result = (uint8_t)result;
 
     if(st.stored && logReady)
       StrikeLog::setLand(st.seq, st.land, st.result);   // else written with it later
   }
 
-  Serial.printf("FIGHT: %s after %d:%02d\\n", fish ? "FISH OUT" : "LOST IT", sec / 60, sec % 60);
+  Serial.printf("FIGHT: %s after %d:%02d\\n", result == 1 ? "FISH OUT" : result == 2 ? "LOST IT" : "NO FISH", sec / 60, sec % 60);
   return true;
 }
 
 void handleFishOut()
 {
-  server.send(200, "text/plain", cmdFishOut(true) ? "OK" : "NO FIGHT");
+  server.send(200, "text/plain", cmdLand(1) ? "OK" : "NO FIGHT");
 }
 
 void handleLostFish()
 {
-  server.send(200, "text/plain", cmdFishOut(false) ? "OK" : "NO FIGHT");
+  server.send(200, "text/plain", cmdLand(2) ? "OK" : "NO FIGHT");
+}
+
+void handleNoFish()
+{
+  server.send(200, "text/plain", cmdLand(3) ? "OK" : "NO FIGHT");
 }
 
 void addLand(String& json)
@@ -223,7 +262,7 @@ rep('''      addField(json, "graph", r.count > 1);
       json += "}";''', '''      addField(json, "graph", r.count > 1);
       addField(json, "land", (long)r.land);
       json += ",\\"result\\":\\"";
-      json += r.result == 1 ? "fish" : r.result == 2 ? "lost" : "";
+      json += r.result == 1 ? "fish" : r.result == 2 ? "lost" : r.result == 3 ? "nofish" : "";
       json += "\\"}";''')
 
 # ---------- REEL IN starts it ----------
@@ -249,14 +288,16 @@ rep('''  server.on("/ready", handleReady);
 ''', '''  server.on("/ready", handleReady);
   server.on("/fishout", handleFishOut);
   server.on("/lostfish", handleLostFish);
+  server.on("/nofish", handleNoFish);
 ''')
 
 # ---------- LoRa: the watch's buttons and the timer ----------
 if lora:
     rep('''    case CMD_CHANMODE: setChanMode((int)c.arg); break;
 ''', '''    case CMD_CHANMODE: setChanMode((int)c.arg); break;
-    case CMD_FISHOUT:  cmdFishOut(true); break;
-    case CMD_LOSTFISH: cmdFishOut(false); break;
+    case CMD_FISHOUT:  cmdLand(1); break;
+    case CMD_LOSTFISH: cmdLand(2); break;
+    case CMD_NOFISH:   cmdLand(3); break;
 ''')
     rep('''  p.modes = (uint8_t)((linkMode & 3) | (chanMode << 2));
 ''', '''  p.modes = (uint8_t)((linkMode & 3) | (chanMode << 2));
@@ -275,7 +316,8 @@ rep('''<button id="readyButton" class="action ready" onclick="ready()" style="di
 <button id="landPhotos" class="action fishout" onclick="addPhotos()" style="display:none;margin-top:10px">&#128247; ADD PHOTOS</button>
 </div>
 <button id="fishOutButton" class="action fishout" onclick="fishOut()" style="display:none">&#127907; FISH OUT</button>
-<button id="lostButton" class="action lost" onclick="lostFish()" style="display:none">Lost it</button>
+<button id="lostButton" class="action lost" onclick="lostFish()" style="display:none">Lost it (it got off)</button>
+<button id="noFishButton" class="action nofish" onclick="noFish()" style="display:none">No fish (false alarm / new bait)</button>
 <button id="readyButton" class="action ready" onclick="ready()" style="display:none">READY</button>''')
 
 rep('''.reel {''', '''.landCard {
@@ -306,6 +348,12 @@ rep('''.reel {''', '''.landCard {
   color:#ff8a94 !important;
 }
 
+.nofish {
+  background:transparent !important;
+  border:2px solid #6b7790 !important;
+  color:#a9bbd6 !important;
+}
+
 .reel {''')
 
 rep('''async function ready()
@@ -326,6 +374,11 @@ async function lostFish()
   await fetch("/lostfish");
 }
 
+async function noFish()
+{
+  await fetch("/nofish");
+}
+
 function fmtLand(sec)
 {
   return Math.floor(sec / 60) + ":" + ("0" + (sec % 60)).slice(-2);
@@ -339,16 +392,17 @@ function showLand(d)
   card.style.display = land ? "block" : "none";
   el("fishOutButton").style.display = land === 1 ? "block" : "none";
   el("lostButton").style.display = land === 1 ? "block" : "none";
+  el("noFishButton").style.display = land === 1 ? "block" : "none";
 
   if(!land)
     return;
 
-  card.className = "landCard" + (land === 2 ? " done" : land === 3 ? " lost" : "");
-  el("landTitle").innerText = land === 1 ? "FIGHT" : land === 2 ? "FISH OUT" : "LOST IT";
+  card.className = "landCard" + (land === 2 ? " done" : land >= 3 ? " lost" : "");
+  el("landTitle").innerText = land === 1 ? "FIGHT" : land === 2 ? "FISH OUT" : land === 3 ? "LOST IT" : "NO FISH";
   el("landTime").innerText = fmtLand(d.landsec || 0);
   var app = !!(window.StrikeApp && StrikeApp.fishOut);
   el("landPhotos").style.display = land === 2 && app ? "block" : "none";
-  el("landSub").innerText = land === 1 ? "from REEL IN" : land === 2 ? (app ? "fight time" : "fight time - add photos in the app") : "fight time";
+  el("landSub").innerText = land === 1 ? "from REEL IN - how did it end?" : land === 2 ? (app ? "fight time" : "fight time - add photos in the app") : land === 4 ? "no fish this time" : "fight time";
 }
 
 async function ready()

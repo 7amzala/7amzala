@@ -28,6 +28,8 @@
 #include "watch_clock.h"
 #include "strike_sd.h"
 #include <esp_task_wdt.h>
+#include <Preferences.h>
+#include "esp_app_desc.h"
 
 // Watchdog: if the screen task, the Bluetooth loop or the LoRa task is ever stuck for
 // 30 s, the watch restarts by itself instead of staying frozen. (30 s:
@@ -44,6 +46,45 @@ static void watchdogStart()
 #else
   esp_task_wdt_init(WATCHDOG_MS / 1000, true);
 #endif
+}
+
+// A new sketch uploaded (not a restart): a fresh watch. It forgets its
+// rod (pair again over Bluetooth with the rod's PIN), the LoRa key, LoRa
+// only and the taught look. Kept: the clock and the strike history on the
+// SD card. The program's fingerprint changes with every new upload.
+static bool freshAfterUpload()
+{
+  char sha[17] = { 0 };
+  esp_app_get_elf_sha256(sha, sizeof(sha));
+
+  Preferences p;
+  p.begin("fresh", false);
+  bool fresh = p.getString("build", "") != String(sha);
+
+  if(fresh)
+    p.putString("build", sha);
+
+  p.end();
+
+  if(!fresh)
+    return false;
+
+  // LoRa packet numbers go on from before (the rod refuses old numbers)
+  p.begin("pair", false);
+  uint32_t lboot = p.getULong("lboot", 0);
+  p.clear();
+
+  if(lboot)
+    p.putULong("lboot", lboot);
+
+  p.end();
+
+  p.begin("look", false);
+  p.clear();
+  p.end();
+
+  Serial.println("[WATCH] NEW SKETCH UPLOADED: a fresh watch - pair it with the rod again (PIN)");
+  return true;
 }
 
 static const char *resetReason()
@@ -78,6 +119,7 @@ void setup()
 
   Serial.printf("[WATCH] started after: %s\n", resetReason());
   watchdogStart();          // before the screen task starts (it checks in too)
+  bool fresh = freshAfterUpload();
 
   Touch_Init();
   clock_begin();            // time and date (clock chip on the touch bus)
@@ -88,6 +130,9 @@ void setup()
   imu_begin();              // raise to wake (screen goes dark after 30 s)
 
   ble_link_begin();         // Bluetooth to the rod
+
+  if(fresh)
+    ble_link_forget();      // new sketch: the rod's pairing too (Bluetooth bonds)
   lora_link_start_task();   // LoRa to the rod (its own task: never misses a packet)
 
   esp_task_wdt_add(NULL);   // from here on the loop below checks in too
