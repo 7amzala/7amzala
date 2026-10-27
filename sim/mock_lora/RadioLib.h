@@ -23,6 +23,8 @@
 
 extern unsigned long simMillis;
 inline float simLoraLoss = 0.0f;      // 0..1 chance a packet is lost
+class SX1262;
+inline SX1262* simDeafTx = nullptr;   // this radio's packets never reach anyone (its sending is broken)
 inline unsigned long simLoraSent = 0;
 inline unsigned long simLoraLost = 0;
 inline unsigned long simLoraCollided = 0;
@@ -101,7 +103,7 @@ struct SX1262 {
       if (!s->txing || simMillis < s->txDoneAt) continue;
       s->txing = false;
       simLoraSent++;
-      bool lost = (rand() % 1000) < simLoraLoss * 1000;
+      bool lost = (rand() % 1000) < simLoraLoss * 1000 || s == simDeafTx;
       if (lost) simLoraLost++;
       for (SX1262* o : all()) {
         if (o == s || lost || !o->listening || o->txing || !o->sameChannel(s)) continue;

@@ -93,7 +93,8 @@ static uint16_t rodTag = 0;
 static uint32_t txCtr = 0;               // never repeats: boot count << 20 | n (bit 31: from the watch)
 static uint32_t lastRodCtr = 0;          // a copied (replayed) rod packet is ignored
 static volatile bool newKey = false;     // set from the Bluetooth task
-static volatile bool dropKey = false;    // "forget the rod": the key goes too (no LoRa without pairing)
+static volatile bool dropKey = false;
+static int hbSentN = 0;                  // answers sent (Serial Monitor, every 30 s)    // "forget the rod": the key goes too (no LoRa without pairing)
 static uint8_t keyIn[16];
 static uint16_t tagIn = 0;
 
@@ -422,8 +423,12 @@ static bool startLink(void)
     return false;
   }
 
-  // This module has its own antenna switch on RXEN / TXEN
+  // This module has its own antenna switch on RXEN / TXEN. Many SX1262
+  // modules switch the antenna with the chip's DIO2 pin instead (or too):
+  // without it the watch hears the rod but its own packets never leave the
+  // antenna. Harmless where DIO2 is not connected.
   radio.setRfSwitchPins(LORA_RXEN, LORA_TXEN);
+  radio.setDio2AsRfSwitch(true);
 
   radio.setDio1Action(onLoraIrq);
   radio.startReceive();
@@ -763,7 +768,23 @@ void lora_link_poll(void)
     w.loss = lossPct;
 
     if(sendRaw(&w, sizeof(w)))
+    {
       lastWatchHb = now;
+      hbSentN++;
+    }
+  }
+
+  // how many answers the watch sent (the rod's Serial Monitor says how many it heard)
+  static uint32_t saidAt = 0;
+
+  if(now - saidAt >= 30000)
+  {
+    saidAt = now;
+
+    if(keyed)
+      Serial.printf("[LoRa] sent %d answers to the rod in 30 s (hearing the rod: %s)\n", hbSentN, status.connected ? "yes" : "no");
+
+    hbSentN = 0;
   }
 }
 

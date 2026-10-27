@@ -5453,7 +5453,7 @@ function showWatch(d)
   }
 
   var lora = d.wlink == 'lora', bt = d.wlink == 'bt';
-  var c = bt ? '#22d3ff' : lora ? '#ffba52' : '#ff4d5e';
+  var c = bt ? '#22a8ff' : lora ? '#ffc928' : '#6b7790';     // blue Bluetooth, yellow LoRa, grey none
   var b = document.querySelectorAll('#wBars i');
 
   for(var i = 0; i < b.length; i++)
@@ -5461,8 +5461,8 @@ function showWatch(d)
 
   var via = document.getElementById('watchVia');
   var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
-  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
-    (d.lqual !== undefined ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
+  via.textContent = bt ? 'connected \u00b7 via Bluetooth' : lora ? 'connected \u00b7 via LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined && d.lqual >= 2 ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
 
   // many rods on the channel: Bluetooth gives the fastest alerts
   var tip = document.getElementById('crowdTip');
@@ -9985,10 +9985,15 @@ void handleLinkMode()
   server.send(200, "application/json", String("{\"lmode\":\"") + linkModeName() + "\"}");
 }
 
+unsigned long loraQuietFrom = 0;        // Bluetooth only: LoRa quiet from then (after telling the watch)
+
 void setLinkMode(int v)
 {
   if(v < 0 || v > 2)
     return;
+
+  if(v == 1 && linkMode != 1)
+    loraQuietFrom = millis() + 10000;   // 10 s more heartbeats: the watch hears "Bluetooth only"
 
   linkMode = v;
 
@@ -10828,6 +10833,8 @@ int chanMode = CHM_AUTO;
 unsigned long chanSince = 0;
 unsigned long strongSince = 0;
 bool moveQueued = false;        // tell the watch, then change channel
+int moveLeft = 0;               // "move" packets still to send
+int watchHeardN = 0;            // the watch's packets heard (Serial Monitor, every 30 s)
 bool moveAfterTx = false;
 int moveTo = CH_FAST;
 unsigned long loraBackoffUntil = 0;
@@ -11199,27 +11206,38 @@ int quieterLong()
   return busy[1] < busy[0] ? CH_LONG2 : CH_LONG1;
 }
 
-// tell the watch first (if it hears us), then change
+// tell the watch first (3 times: one may be lost), then change. Always: its
+// answers may not reach us while ours reach it.
 void startMove(int ch)
 {
   if(ch == curChan || moveQueued || moveAfterTx)
     return;
 
-  if(watchLastSeen != 0 && millis() - watchLastSeen < 15000)
+  if(linkMode == 1 && (long)(millis() - loraQuietFrom) >= 0)
   {
-    moveTo = ch;
-    moveQueued = true;
+    applyChannel(ch);                // Bluetooth only: LoRa is quiet, nobody to tell
+    return;
   }
-  else
-  {
-    applyChannel(ch);
-  }
+
+  moveTo = ch;
+  moveLeft = 3;
+  moveQueued = true;
 }
 
 // AUTO: fast first; long range when the watch hears us badly or not at all;
 // back to fast when it hears us strongly for a minute
 void autoChannel(unsigned long now)
 {
+  static unsigned long saidAt = 0;
+
+  if(now - saidAt >= 30000)
+  {
+    saidAt = now;
+    Serial.printf("[LoRa] the watch: %d packets heard in 30 s%s\n", watchHeardN,
+                  watchHeardN == 0 ? " (none: its LoRa sending does not reach the rod)" : "");
+    watchHeardN = 0;
+  }
+
   if(chanMode != CHM_AUTO)
   {
     int want = chanMode == CHM_FAST ? CH_FAST : chanMode == CHM_LONG1 ? CH_LONG1 : CH_LONG2;
@@ -11347,6 +11365,7 @@ void handlePacket(const uint8_t* buf, size_t len)
   watchLastSeen = millis();
   watchRssi = radio.getRSSI();
   watchSnr = radio.getSNR();
+  watchHeardN++;
 
   if(h->type == PKT_WATCH_HB && len >= sizeof(ss_watch_hb_t) - 1)
   {
@@ -11526,8 +11545,16 @@ void loraPoll()
     return;
   }
 
-  if(linkMode == 1)
+  if(linkMode == 1 && (long)(now - loraQuietFrom) >= 0)
+  {
+    if(moveQueued)                 // (a move asked just before: change now)
+    {
+      moveQueued = false;
+      applyChannel(moveTo);
+    }
+
     return;                        // Bluetooth only: the rod's LoRa stays quiet
+  }
 
   if((long)(now - loraBackoffUntil) < 0)
     return;                        // someone else is talking: wait our turn
@@ -11540,8 +11567,15 @@ void loraPoll()
 
     if(loraSend(&m, sizeof(m), true))
     {
-      moveQueued = false;
-      moveAfterTx = true;
+      if(--moveLeft > 0)
+      {
+        loraBackoffUntil = now + 80;   // the next copy a moment later
+      }
+      else
+      {
+        moveQueued = false;
+        moveAfterTx = true;            // the last one sent: change channel
+      }
     }
 
     return;
@@ -11658,7 +11692,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.8 (own Bluetooth lines, strikes in flash, smoother screen, steady LoRa) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.9 (instant link + channel changes, link colours) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

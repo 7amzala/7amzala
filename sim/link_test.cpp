@@ -195,6 +195,8 @@ ble_link_status_t screens(bool btFresh, bool takePeak = true)
 }
 
 // Rod heartbeats sent in "secs" seconds
+SX1262* watchRadio();
+
 int heartbeatsIn(double secs)
 {
   uint32_t before = lora_link_get_status().hb_count;
@@ -339,6 +341,30 @@ void switching()
   check(linkMode == 2, "watch link set on the watch (over LoRa): LoRa only");
   ble_link_command_lora("/linkmode?m=auto");
   check(linkMode == 0 && chanMode == CHM_AUTO, "back to Auto / Auto");
+
+  // the phone app changes things while the rod does NOT hear the watch (the
+  // watch's LoRa sending broken, it still hears the rod): it must follow at once
+  {
+    simDeafTx = watchRadio();
+    step(20);
+    setChanMode(CHM_LONG1);                      // the app: LoRa channel 1 km A
+    for (int i = 0; i < 60 && (lora_link_get_status().chan != CH_LONG1 || curChan != CH_LONG1); i++) step(0.1);
+    lora_link_status_t st = lora_link_get_status();
+    printf("  rod -> 1 km while deaf to the watch: watch on %d after the change, connected %d\n", st.chan, st.connected);
+    check(curChan == CH_LONG1 && st.chan == CH_LONG1, "app changes the channel, rod can't hear the watch: the watch follows within 6 s");
+    step(4);
+    check(lora_link_get_status().connected, "... and keeps the rod");
+    setLinkMode(1);                              // the app: Bluetooth only
+    step(4);
+    check(lora_link_get_status().lmode == 1, "app chooses Bluetooth only: the watch hears it over LoRa at once");
+    step(12);
+    int quiet = heartbeatsIn(5);
+    check(quiet == 0, "... and after 10 s the rod's LoRa is quiet");
+    setLinkMode(0);
+    setChanMode(CHM_AUTO);
+    simDeafTx = nullptr;
+    step(20);
+  }
 
   uint32_t u; int tz;
   check(link_path_to_cmd("/ready", &u, &tz) == CMD_READY && link_path_to_cmd("/reelin", &u, &tz) == CMD_REELIN &&

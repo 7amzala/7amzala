@@ -5271,7 +5271,7 @@ function showWatch(d)
   }
 
   var lora = d.wlink == 'lora', bt = d.wlink == 'bt';
-  var c = bt ? '#22d3ff' : lora ? '#ffba52' : '#ff4d5e';
+  var c = bt ? '#22a8ff' : lora ? '#ffc928' : '#6b7790';     // blue Bluetooth, yellow LoRa, grey none
   var b = document.querySelectorAll('#wBars i');
 
   for(var i = 0; i < b.length; i++)
@@ -5279,8 +5279,8 @@ function showWatch(d)
 
   var via = document.getElementById('watchVia');
   var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
-  via.textContent = bt ? 'Bluetooth' : lora ? 'LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
-    (d.lqual !== undefined ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
+  via.textContent = bt ? 'connected \u00b7 via Bluetooth' : lora ? 'connected \u00b7 via LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined && d.lqual >= 2 ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
 
   // many rods on the channel: Bluetooth gives the fastest alerts
   var tip = document.getElementById('crowdTip');
@@ -10494,7 +10494,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.8 (no LoRa; own Bluetooth lines, strikes in flash, smoother screen) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.9 (no LoRa; own Bluetooth lines, strikes in flash, link colours) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

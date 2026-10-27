@@ -122,6 +122,8 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #define COL_CARD    lv_color_hex(0x141924)    // list cells, round buttons
 #define COL_LINE    lv_color_hex(0x232a3a)    // thin borders
 #define COL_OFF     lv_color_hex(0x262b36)    // empty bars
+#define COL_BT      lv_color_hex(0x22a8ff)    // link bars: Bluetooth (blue)
+#define COL_LORA    lv_color_hex(0xffc928)    // link bars: LoRa (yellow)
 #define COL_GREEN   lv_color_hex(0x3ddc84)
 
 // Slow pull / drop-back shown (orange ring, title) from this % (was 30)
@@ -165,7 +167,9 @@ static lv_obj_t *scr;
 static lv_obj_t *boot_img;
 static lv_obj_t *ring;
 static lv_obj_t *bars[4];
-static lv_obj_t *bat_label;
+static lv_obj_t *bat_label;            // the rod's battery %
+static lv_obj_t *top_row;              // bars, rod icon + %, watch icon + %
+static lv_obj_t *wbat_label;           // the watch's own battery %
 static lv_obj_t *title;
 static lv_obj_t *subtitle;
 // the live graph's data (last 20 s): plain arrays the graph panel draws
@@ -855,10 +859,7 @@ static void layout(ui_mode_t m)
   // top: signal + rod battery (the strike screen shows the time there)
   bool top = live || sea || m == MODE_REELED || m == MODE_PULLTEST || m == MODE_RELEARN;
 
-  show(bat_label, top);
-
-  for(int i = 0; i < 4; i++)
-    show(bars[i], top);
+  show(top_row, top);
 
   // page dots: only on the three side-by-side pages
   for(int i = 0; i < 3; i++)
@@ -1021,26 +1022,29 @@ static void top_icons(const ble_link_status_t *s)
   int n = lora ? s->lora_bars :
           s->rssi == 0 ? 0 : s->rssi >= -60 ? 4 : s->rssi >= -70 ? 3 : s->rssi >= -80 ? 2 : 1;
 
+  // blue bars: Bluetooth; yellow bars: LoRa (the channel is in SETUP)
   for(int i = 0; i < 4; i++)
-    set_bg_color(bars[i], i < n ? (lora ? COL_ORANGE : COL_CYAN) : COL_OFF);
+    set_bg_color(bars[i], i < n ? (lora ? COL_LORA : COL_BT) : COL_OFF);
 
-  char t[40];
+  char t[12];
 
   if(s->bat < 0)
     snprintf(t, sizeof(t), "--");
   else
     snprintf(t, sizeof(t), "%d%%", s->bat);
 
-  // orange bars + "LoRa 500m Clear": rod far away, which channel, how busy
-  if(lora)
-  {
-    size_t n = strlen(t);
-    snprintf(t + n, sizeof(t) - n, " LoRa %s %s", s->lora_chan == 0 ? "500m" : "1km",
-             s->lora_quality == 0 ? "Clear" : s->lora_quality == 1 ? "Good" : s->lora_quality == 2 ? "Busy" : "Crowd");
-  }
-
   set_text(bat_label, t);
-  set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : lora ? COL_ORANGE : COL_DIM);
+  set_text_color(bat_label, s->bat >= 0 && s->bat < 15 ? COL_RED : COL_DIM);
+
+  int wb = watch_bat_percent();
+
+  if(wb < 0)
+    snprintf(t, sizeof(t), "--");
+  else
+    snprintf(t, sizeof(t), "%d%%", wb);
+
+  set_text(wbat_label, t);
+  set_text_color(wbat_label, wb >= 0 && wb < 15 ? COL_RED : COL_DIM);
 }
 
 // ---------- swipe: watch the finger (also over buttons) ----------
@@ -2475,15 +2479,57 @@ void watch_ui_create(void)
   ring = gauge_arc(scr, 452, 10, COL_RING_BG);
   lv_obj_center(ring);
 
-  // top: Bluetooth signal bars, rod battery
+  // top: link bars (blue Bluetooth, yellow LoRa), rod battery, watch battery -
+  // no words, a little rod and a little watch instead
+  top_row = lv_obj_create(scr);
+  lv_obj_remove_style_all(top_row);
+  lv_obj_clear_flag(top_row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_size(top_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(top_row, 5, 0);
+  lv_obj_align(top_row, LV_ALIGN_TOP_MID, 0, 43);
+
+  lv_obj_t *bar_box = lv_obj_create(top_row);
+  lv_obj_remove_style_all(bar_box);
+  lv_obj_set_size(bar_box, 23, 17);
+  lv_obj_set_style_pad_right(bar_box, 4, 0);
+
   for(int i = 0; i < 4; i++)
   {
-    bars[i] = box(scr, 4, 5 + i * 4, 1, COL_OFF);
-    lv_obj_align(bars[i], LV_ALIGN_TOP_MID, -32 + i * 6, 60 - (5 + i * 4));
+    bars[i] = box(bar_box, 4, 5 + i * 4, 1, COL_OFF);
+    lv_obj_set_pos(bars[i], i * 6, 17 - (5 + i * 4));
   }
 
-  bat_label = label(scr, FONT_MICRO, COL_DIM);
-  lv_obj_align(bat_label, LV_ALIGN_TOP_LEFT, 233, 44);     // grows to the right ("85% LoRa")
+  // the rod: a slanted line with its reel
+  static lv_point_t rod_pts[2] = { { 1, 15 }, { 12, 1 } };
+  lv_obj_t *rod_ico = lv_obj_create(top_row);
+  lv_obj_remove_style_all(rod_ico);
+  lv_obj_set_size(rod_ico, 14, 17);
+  lv_obj_t *rod_line = lv_line_create(rod_ico);
+  lv_line_set_points(rod_line, rod_pts, 2);
+  lv_obj_set_style_line_width(rod_line, 2, 0);
+  lv_obj_set_style_line_color(rod_line, COL_DIM, 0);
+  lv_obj_t *reel = box(rod_ico, 5, 5, LV_RADIUS_CIRCLE, COL_DIM);
+  lv_obj_set_pos(reel, 1, 9);
+
+  bat_label = label(top_row, FONT_MICRO, COL_DIM);
+
+  // the watch: a round face with its straps
+  lv_obj_t *w_ico = lv_obj_create(top_row);
+  lv_obj_remove_style_all(w_ico);
+  lv_obj_set_size(w_ico, 11, 17);
+  lv_obj_set_style_pad_left(w_ico, 0, 0);
+  lv_obj_t *strap1 = box(w_ico, 5, 3, 0, COL_DIM);
+  lv_obj_set_pos(strap1, 3, 0);
+  lv_obj_t *strap2 = box(w_ico, 5, 3, 0, COL_DIM);
+  lv_obj_set_pos(strap2, 3, 14);
+  lv_obj_t *face = box(w_ico, 11, 11, LV_RADIUS_CIRCLE, COL_BG);
+  lv_obj_set_style_border_width(face, 2, 0);
+  lv_obj_set_style_border_color(face, COL_DIM, 0);
+  lv_obj_set_pos(face, 0, 3);
+
+  wbat_label = label(top_row, FONT_MICRO, COL_DIM);
 
 
   // title + subtitle
