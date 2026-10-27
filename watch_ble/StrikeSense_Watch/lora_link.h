@@ -108,6 +108,7 @@ const char* lora_link_strike_name(uint8_t strike_type);
 // Kept in flash; without it the watch's LoRa stays quiet.
 void lora_link_set_key(uint16_t rod_tag, const uint8_t key[16]);
 bool lora_link_has_key(uint16_t rod_tag);       // already this rod's key?
+void lora_link_forget_key(void);                // "forget the rod": no LoRa until paired again
 
 const char* lora_link_chan_name(uint8_t chan);   // "500 m" / "1 km"
 const char* lora_link_quality_name(uint8_t q);   // Clear / Good / Busy / Congested

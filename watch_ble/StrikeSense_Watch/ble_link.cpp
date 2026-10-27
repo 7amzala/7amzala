@@ -15,6 +15,7 @@ extern "C" void pair_restart(void);     // StrikeSense_Watch.ino
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include "host/ble_gap.h"
+#include "host/ble_store.h"
 #elif defined(CONFIG_BLUEDROID_ENABLED)
 #include <esp_gap_ble_api.h>
 #endif
@@ -139,12 +140,31 @@ class WatchSecurity : public BLESecurityCallbacks
 #endif
 };
 
+// "LoRa only" (chosen in the app or on the watch), kept in flash: after a
+// restart the watch does not start a Bluetooth connection before the
+// rod's first LoRa heartbeat says it again
+static bool savedLoraOnly = false;
+
 static void loadPairing()
 {
   Preferences p;
   p.begin("pair", true);
   pairedAddr = p.getString("addr", "");
   pairedId = p.getString("id", "");
+  savedLoraOnly = p.getBool("loraonly", false);
+  p.end();
+}
+
+static void rememberLoraOnly(bool on)
+{
+  if(on == savedLoraOnly)
+    return;
+
+  savedLoraOnly = on;
+
+  Preferences p;
+  p.begin("pair", false);
+  p.putBool("loraonly", on);
   p.end();
 }
 
@@ -377,6 +397,9 @@ static void gotWatchData(const std::string &j)
   char lm[8] = "";
   jsonGet(j, "lmode", lm, sizeof(lm));
   s.lmode = strcmp(lm, "auto") == 0 ? 0 : strcmp(lm, "bt") == 0 ? 1 : strcmp(lm, "lora") == 0 ? 2 : -1;
+
+  if(s.lmode >= 0)
+    rememberLoraOnly(s.lmode == 2);
   s.chm = (int)jsonNum(j, "lchm", -1);
 
   float e = jsonNum(j, "energy", 0);
@@ -699,7 +722,17 @@ static bool loraOnly(uint32_t fresh_ms)
 {
 #if WATCH_LORA
   lora_link_status_t lo = lora_link_get_status();
-  return lo.last_hb_ms != 0 && millis() - lo.last_hb_ms < fresh_ms && (lo.flags & SS_F_LORA_ONLY);
+
+  if(lo.last_hb_ms != 0 && millis() - lo.last_hb_ms < fresh_ms)
+  {
+    bool on = (lo.flags & SS_F_LORA_ONLY) != 0;
+    rememberLoraOnly(on);
+    return on;
+  }
+
+  // nothing from the rod's LoRa lately: just after a start, the choice from
+  // before (its first heartbeat comes within seconds); later: Bluetooth again
+  return savedLoraOnly && millis() < 30000;
 #else
   (void)fresh_ms;
   return false;
@@ -1018,7 +1051,14 @@ void ble_link_forget(void)
     BLEAddress a(pairedAddr);
     esp_ble_remove_bond_device(a.getNative());
   }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  ble_store_clear();                    // (the watch is paired to one rod only)
 #endif
+
+#if WATCH_LORA
+  lora_link_forget_key();               // no LoRa until paired again over Bluetooth
+#endif
+  rememberLoraOnly(false);
 
   savePairing("", "");
   authFails = 0;

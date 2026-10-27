@@ -235,7 +235,12 @@ void switching()
   lora_link_status_t w = lora_link_get_status();
   check(w.ext, "rod sends the new heartbeat (rod 2.3 fields)");
   check(fabs(w.allow - pullAllow) < 0.02, "pull allowance reaches the watch over LoRa");
-  check(fabs(w.ftilt - fastTiltDeg) < 0.3, "fast tilt (the ring) reaches the watch");
+  // (compared right after a heartbeat: on the 1 km channel they come every 1.5 s)
+  uint32_t hbAt = w.hb_count;
+  float sent = fastTiltDeg;
+  for (int i = 0; i < 400 && lora_link_get_status().hb_count == hbAt; i++) { sent = fastTiltDeg; step(0.01); }
+  w = lora_link_get_status();
+  check(fabs(w.ftilt - sent) < 0.3, "fast tilt (the ring) reaches the watch");
   check(((w.flags & SS_F_DIR) != 0) == haveDir, "pull direction learned: same on the watch");
 
   // Bluetooth near: the screens use Bluetooth, untouched
@@ -429,8 +434,9 @@ void privateLora()
 {
   printf("\n===== PRIVATE LORA: OTHER RODS, COPIED AND CHANGED PACKETS =====\n");
   simLoraLoss = 0;
-  setChanMode(CHM_AUTO);
+  setChanMode(CHM_FAST);              // (the channel kept still: this is about other rods)
   settle();
+  for (int i = 0; i < 120 && (curChan != CH_FAST || lora_link_get_status().chan != CH_FAST || !lora_link_get_status().connected); i++) stepAll(0.5);
   SX1262* wr = watchRadio();
 
   // a friend's rod right next to us, same channel

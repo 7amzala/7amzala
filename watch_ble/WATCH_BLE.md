@@ -83,6 +83,13 @@ The phone app pairs the same way (its own pairing page). In the app:
 Settings > MY ROD > **Forget my devices** makes the rod forget the phone and
 the watch (new phone, lost watch); then pair again with the PIN.
 
+**Forget the rod on the watch:** SETUP > hold **Watch link** for 5 s (a tap
+still changes the link). The watch forgets the rod and its LoRa key and
+restarts into PAIR YOUR ROD, which asks for the PIN. A watch always pairs
+over Bluetooth with the PIN first; LoRa works only after that (the key
+comes over the encrypted Bluetooth). **LoRa only** is remembered after a
+restart: the watch does not try Bluetooth then.
+
 **LVGL settings:** come from `build_opt.h` in the sketch folder (64 KB
 memory); no `lv_conf.h` to copy.
 

@@ -125,6 +125,10 @@ bool ble_link_get_last_strike(ble_last_strike_t *o)
   return true;
 }
 
+static int forgot = 0, restarted = 0;
+void ble_link_forget(void) { forgot++; }
+void pair_restart(void) { restarted++; }
+
 void ble_link_command(const char *path)
 {
   if(sent_n < 64)
@@ -695,6 +699,25 @@ int main(void)
     printf("%s: SETUP watch link + LoRa channel: tap -> %s, %s (shows: %s / %s)\n", good ? "PASS" : "FAIL",
            sent_n > before ? sent[before] : "-", sent_n > before + 1 ? sent[before + 1] : "-",
            lv_label_get_text(cell_sub[3]), lv_label_get_text(cell_sub[4]));
+    sent_n = before;
+
+    // WATCH LINK held: after 0.6 s it shows "forget rod", after 5 s the rod
+    // is forgotten and the watch restarts into PAIR YOUR ROD; letting go
+    // earlier changes nothing (not a tap)
+    lv_obj_get_coords(cell[3], &a);
+    touch_x = (a.x1 + a.x2) / 2; touch_y = (a.y1 + a.y2) / 2;
+    touch_down = 1; run_ms(2000);
+    int warned = strcmp(lv_label_get_text(cell_sub[3]), "keep holding: forget rod") == 0;
+    touch_down = 0; run_ms(400);
+    int early_ok = forgot == 0;
+    for (int i = before; i < sent_n; i++) if (strncmp(sent[i], "/settime", 8) != 0) early_ok = 0;
+    touch_down = 1; run_ms(5300);
+    touch_down = 0; run_ms(400);
+    int extra = 0;
+    for (int i = before; i < sent_n; i++) if (strncmp(sent[i], "/settime", 8) != 0) extra++;
+    int ok = warned && early_ok && forgot == 1 && restarted == 1 && extra == 0;
+    printf("%s: WATCH LINK held 5 s: forget the rod (warning shown %d, let go early: nothing %d, forgotten %d, restart %d)\n",
+           ok ? "PASS" : "FAIL", warned, early_ok, forgot, restarted);
     sent_n = before;
   }
 

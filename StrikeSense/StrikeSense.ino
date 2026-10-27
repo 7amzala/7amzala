@@ -9057,7 +9057,7 @@ async function pollLoop()
   }
 
   await updateData();
-  setTimeout(pollLoop, 100);
+  setTimeout(pollLoop, 50);             // 20 times a second
 }
 
 const splashShownAt = Date.now();
@@ -11205,7 +11205,7 @@ void startMove(int ch)
   if(ch == curChan || moveQueued || moveAfterTx)
     return;
 
-  if(watchLastSeen != 0 && millis() - watchLastSeen < 6000)
+  if(watchLastSeen != 0 && millis() - watchLastSeen < 15000)
   {
     moveTo = ch;
     moveQueued = true;
@@ -11238,12 +11238,12 @@ void autoChannel(unsigned long now)
   {
     bool weak = fresh && (watchHearsRodRssi < -105 || watchHearsRodSnr < -3 || watchLoss > 35);
 
-    if(weak || quiet > 12000)
+    if(weak || quiet > 30000)
     {
       if(weak)
         Serial.printf("[LoRa] the watch hears us badly (%d dBm, SNR %d, %d%% missed) -> long range\n", watchHearsRodRssi, watchHearsRodSnr, watchLoss);
       else
-        Serial.println("[LoRa] the watch is silent for 12 s -> long range");
+        Serial.println("[LoRa] the watch is silent for 30 s -> long range");
 
       startMove(quieterLong());
     }
@@ -11257,9 +11257,9 @@ void autoChannel(unsigned long now)
     else if(strongSince == 0)
       strongSince = now;
 
-    if((strong && now - strongSince > 60000) || quiet > 30000)
+    if((strong && now - strongSince > 60000) || quiet > 60000)
     {
-      Serial.println(quiet > 30000 ? "[LoRa] the watch is silent for 30 s -> try the fast channel" : "[LoRa] the watch hears us strongly for 1 min -> fast channel");
+      Serial.println(quiet > 60000 ? "[LoRa] the watch is silent for 60 s -> try the fast channel" : "[LoRa] the watch hears us strongly for 1 min -> fast channel");
       startMove(CH_FAST);
     }
   }
@@ -11658,7 +11658,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.7 (own Bluetooth line for phone and watch, strikes saved in flash) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.8 (own Bluetooth lines, strikes in flash, smoother screen, steady LoRa) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

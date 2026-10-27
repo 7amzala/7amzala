@@ -137,6 +137,8 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #define SWIPE_MIN_MS 80           // a swipe takes at least this long
 #define PAGE_BACK_MS 30000        // other page: back to the main page after this
 #define HOLD_MS      2000         // RELEARN: hold this long
+#define FORGET_MS    5000         // WATCH LINK held this long: forget the rod (pair again)
+#define LONG_MS       600         // a press longer than this is a hold, not a tap
 
 #define GRAPH_POINTS 200          // 200 x 100 ms = 20 s
 #define KNOCK_LIMIT  100          // knock limit drawn at 100 on the graph (knock: top half, tilt: bottom half)
@@ -265,6 +267,8 @@ static int hist_total(void);
 static uint32_t page_since = 0;
 static bool swiped = false;           // this touch was a swipe: no button press
 static uint32_t hold_from = 0;
+static bool link_held = false;         // WATCH LINK was held, not tapped: letting go changes nothing
+void pair_restart(void);               // StrikeSense_Watch.ino: restart (into PAIR YOUR ROD)
 
 // vibration
 static long strike_seen = 0;          // strike id on the screen now
@@ -482,6 +486,12 @@ static void button_clicked(lv_event_t *e)
   }
 
   // WATCH LINK / LoRa CHANNEL: each tap = the next choice, kept on the rod (the app shows it too)
+  if(path != NULL && strcmp(path, "#link") == 0 && link_held)
+  {
+    link_held = false;                // a hold (forget the rod), not a tap
+    return;
+  }
+
   if(path != NULL && (strcmp(path, "#link") == 0 || strcmp(path, "#chan") == 0) && !swiped)
   {
     ble_link_status_t s;
@@ -1213,7 +1223,7 @@ static void cell_set(int i, const char *sub, float held, bool busy)
 {
   bool h = held > 0;
 
-  set_text(cell_sub[i], busy ? "..." : h ? "keep holding..." : sub);
+  set_text(cell_sub[i], busy ? "..." : h ? (strncmp(sub, "keep", 4) == 0 ? sub : "keep holding...") : sub);
   set_text_color(cell_sub[i], h ? COL_ORANGE : COL_DARK);
 
   if(lv_obj_get_style_border_color(cell[i], 0).full != (h ? COL_ORANGE : COL_LINE).full)
@@ -1265,7 +1275,8 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
 
   pill_set("SETUP", COL_ORANGE, false);
 
-  // RELEARN THE SEA and NEW PULL DIRECTION: hold 2 s (no accidents)
+  // RELEARN THE SEA and NEW PULL DIRECTION: hold 2 s (no accidents);
+  // WATCH LINK held 5 s: forget the rod (a tap still changes the link)
   lv_obj_t *held_now = NULL;
 
   if(!swiped)
@@ -1274,15 +1285,46 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
       held_now = cell[0];
     else if(lv_obj_has_state(cell[1], LV_STATE_PRESSED))
       held_now = cell[1];
+    else if(lv_obj_has_state(cell[3], LV_STATE_PRESSED))
+      held_now = cell[3];
   }
 
   if(held_now != hold_btn)
   {
     hold_btn = held_now;
     hold_from = held_now ? now : 0;
+
+    if(held_now == cell[3])
+      link_held = false;
   }
 
   uint32_t held = hold_btn ? now - hold_from : 0;
+
+  if(hold_btn == cell[3])
+  {
+    if(held >= LONG_MS)
+      link_held = true;               // letting go now is not a tap
+
+    if(held >= FORGET_MS)
+    {
+      ble_link_forget();              // the rod's pairing + its LoRa key
+      buzz_play(BUZZ_DROP);
+      hold_btn = NULL;
+      hold_from = 0;
+      swiped = true;
+      pair_restart();                 // into PAIR YOUR ROD (asks for the PIN)
+      return;
+    }
+
+    if(held >= LONG_MS)
+    {
+      float f = (float)(held - LONG_MS) / (FORGET_MS - LONG_MS);
+      show(ring, true);
+      ring_set((int)(f * 100), COL_RED);
+      cell_set(3, "keep holding: forget rod", f, false);
+      return;
+    }
+  }
 
   if(held >= HOLD_MS)
   {
@@ -2094,6 +2136,9 @@ static void ui_timer(lv_timer_t *t)
 
   // not in the middle of something: holding a setup button, teaching
   // the look, a finger on the screen (then as soon as it lifts)
+  if(mode != MODE_RELEARN)
+    hold_btn = NULL;                  // (a hold ends when the SETUP page is left)
+
   if(pending_home && hold_btn == NULL && imu_teach_state() != 1 && !finger_down)
   {
     pending_home = false;

@@ -93,6 +93,7 @@ static uint16_t rodTag = 0;
 static uint32_t txCtr = 0;               // never repeats: boot count << 20 | n (bit 31: from the watch)
 static uint32_t lastRodCtr = 0;          // a copied (replayed) rod packet is ignored
 static volatile bool newKey = false;     // set from the Bluetooth task
+static volatile bool dropKey = false;    // "forget the rod": the key goes too (no LoRa without pairing)
 static uint8_t keyIn[16];
 static uint16_t tagIn = 0;
 
@@ -601,6 +602,25 @@ void lora_link_poll(void)
   }
 
   // a new key from the Bluetooth task (just paired / rod changed)
+  if(dropKey)
+  {
+    dropKey = false;
+    keyed = false;
+    rodTag = 0;
+
+    Preferences p;
+    p.begin("pair", false);
+    p.remove("lkey");
+    p.remove("ltag");
+    p.end();
+
+    LOCK();
+    status.keyed = false;
+    UNLOCK();
+
+    Serial.println("[LoRa] rod forgotten: no LoRa until paired again over Bluetooth");
+  }
+
   if(newKey)
   {
     newKey = false;
@@ -752,6 +772,11 @@ void lora_link_set_key(uint16_t rod_tag, const uint8_t key[16])
   memcpy(keyIn, key, 16);
   tagIn = rod_tag;
   newKey = true;
+}
+
+void lora_link_forget_key(void)
+{
+  dropKey = true;
 }
 
 bool lora_link_has_key(uint16_t rod_tag)

@@ -8827,7 +8827,7 @@ async function pollLoop()
   }
 
   await updateData();
-  setTimeout(pollLoop, 100);
+  setTimeout(pollLoop, 50);             // 20 times a second
 }
 
 const splashShownAt = Date.now();
@@ -10494,7 +10494,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.7 (no LoRa; own Bluetooth lines, strikes saved in flash) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.8 (no LoRa; own Bluetooth lines, strikes in flash, smoother screen) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);
