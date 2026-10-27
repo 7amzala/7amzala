@@ -84,11 +84,86 @@ rep('''void handleWatch()
 {
   noteWatchHere();''')
 
+# the fight screen changed: phone and watch hear it now, not at the next tick
+rep('''void setup()
+{
+  Serial.begin(115200);
+''', '''void landNews()
+{
+#if defined(ESP32)
+  server.pushLive();
+#endif
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  lastHeartbeatSent = 0;                // LoRa: the next heartbeat goes now
+#endif
+}
+
+void setup()
+{
+  Serial.begin(115200);
+''')
+
 rep('''  addField(json, "wbars", (long)(bt ? rssiBars(watchBtRssi) : loraBarsNow));''',
     '''  addField(json, "wbars", (long)(bt ? rssiBars(watchSignal()) : loraBarsNow));''')
 
+# the watch on Bluetooth: its ping in the last 6 s, or its link still up
+# (pinged in the last minute) - a busy link must not show "not connected"
+rep('''  bool bt = watchBtAt != 0 && millis() - watchBtAt < 6000;      // it pings every 2 s''',
+    '''  bool bt = watchOnBluetooth();''')
+
+rep('''// the watch's signal: what it said, else what the rod measures''', '''// the watch is on Bluetooth: its ping in the last 6 s, or its link still up
+// (pinged in the last minute) - a busy link must not show "not connected"
+bool watchOnBluetooth()
+{
+  if(watchBtAt != 0 && millis() - watchBtAt < 6000)     // it pings every 2 s
+    return true;
+
+#if defined(ESP32)
+  if(watchBtAt != 0 && millis() - watchBtAt < 60000 && server.connUp(watchBtConn))
+    return true;                        // its link is up: a late ping is not "gone"
+#endif
+  return false;
+}
+
+// the watch's signal: what it said, else what the rod measures''')
+
 # ---------- LoRa ----------
 if lora:
+    # our rod's number but the wrong key: our own watch with an old key (the
+    # rod started fresh) - not another rod (that started crowd mode)
+    rep('''  if(w.rod != rodTag || memcmp(mac, buf + sizeof(w) + n, SS_MAC_LEN) != 0)
+  {
+    noteOtherRod(w.rod, loraAirtimeMs(len));      // not ours: only counted (crowd)
+    return;
+  }''', '''  if(w.rod != rodTag || memcmp(mac, buf + sizeof(w) + n, SS_MAC_LEN) != 0)
+  {
+    static unsigned long oldKeySaid = 0;
+
+    if(w.rod == rodTag && w.from == 1)
+    {
+      if(millis() - oldKeySaid > 30000)
+      {
+        oldKeySaid = millis();
+        Serial.println("[LoRa] our watch has an old key: it gets the new one when it connects over Bluetooth");
+      }
+
+      return;
+    }
+
+    noteOtherRod(w.rod, loraAirtimeMs(len));      // not ours: only counted (crowd)
+    return;
+  }''')
+
+    # Bluetooth only: LoRa goes quiet only once the watch is really on
+    # Bluetooth (the old link is kept until the new one works)
+    rep('''  if(linkMode == 1 && (long)(now - loraQuietFrom) >= 0)
+  {''', '''  if(linkMode == 1 && (long)(now - loraQuietFrom) >= 0 && watchOnBluetooth())
+  {''')
+
+    # crowd mode: the watch answers every 15 s, so 15 s without it is not "gone"
+    rep('''  return loraOk && watchLastSeen != 0 && millis() - watchLastSeen < 15000;''',
+        '''  return loraOk && watchLastSeen != 0 && millis() - watchLastSeen < (crowd ? 40000UL : 15000UL);''')
+
     rep('''  if(w.from != 1 || (lastWatchCtr != 0 && w.ctr <= lastWatchCtr) || n > 64)
     return;                                       // not from our watch, or a copy of an old packet''',
         '''  // a copy of a recent packet is refused; a much lower number = the watch

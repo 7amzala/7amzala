@@ -103,6 +103,12 @@ static const char *resetReason()
 }
 
 // Paired (pair_ui.c) or the rod forgot this watch: start again in the right screens
+// a line on the Serial Monitor from the screens (C code)
+extern "C" void watch_say(const char *t)
+{
+  Serial.println(t);
+}
+
 extern "C" void pair_restart(void)
 {
   delay(200);

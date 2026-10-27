@@ -370,6 +370,16 @@ public:
     return replyLine >= 0 ? (int)lines[replyLine].id : -1;
   }
 
+  // that Bluetooth connection is still up (-1: no)
+  bool connUp(int id)
+  {
+#if BLE_LINES
+    return id >= 0 && connAlive((uint16_t)id);
+#else
+    return false;
+#endif
+  }
+
   // how strong the rod hears a connection, dBm (0 = unknown). The watch
   // says how it hears the rod; when it cannot (0), this is used instead.
   int connRssi(int id)

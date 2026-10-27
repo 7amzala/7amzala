@@ -1002,10 +1002,12 @@ static void connectToRodAt(BLEAddress addr)
   snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
   send(newId(), path);
 
-  // our rod's LoRa key, if we don't have it yet (a rod without LoRa answers 404)
+  // our rod's LoRa key, at every connect: a rod that started fresh (new
+  // sketch) has a new key, and an old one here meant no LoRa at all (a rod
+  // without LoRa answers 404)
   uint16_t tag = pairedId.length() > 4 ? (uint16_t)strtol(pairedId.c_str() + 4, nullptr, 16) : 0;
 
-  if(tag != 0 && !lora_link_has_key(tag))
+  if(tag != 0)
   {
     keyId = newId();
     send(keyId, "/lorakey");

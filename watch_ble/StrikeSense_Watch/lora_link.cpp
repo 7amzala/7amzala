@@ -96,6 +96,7 @@ static volatile bool newKey = false;     // set from the Bluetooth task
 static volatile bool dropKey = false;
 static int hbSentN = 0;                  // answers sent (Serial Monitor, every 30 s)    // "forget the rod": the key goes too (no LoRa without pairing)
 static uint8_t keyIn[16];
+static uint8_t keyNow[16];               // the key in use (the same key again: nothing to do)
 static uint16_t tagIn = 0;
 
 // ---------- channels: follow the rod; search when it is lost ----------
@@ -218,6 +219,7 @@ static void loadKey(void)
       key[i] = (uint8_t)strtol(k.substring(2 * i, 2 * i + 2).c_str(), nullptr, 16);
 
     ss_aes_init(&aes, key);
+    memcpy(keyNow, key, 16);
     keyed = true;
   }
 
@@ -639,6 +641,9 @@ void lora_link_poll(void)
     Serial.println("[LoRa] rod forgotten: no LoRa until paired again over Bluetooth");
   }
 
+  if(newKey && keyed && rodTag == tagIn && memcmp(keyNow, keyIn, 16) == 0)
+    newKey = false;                      // asked at every Bluetooth connect: usually the same
+
   if(newKey)
   {
     newKey = false;
@@ -655,6 +660,7 @@ void lora_link_poll(void)
 
     rodTag = tagIn;
     ss_aes_init(&aes, keyIn);
+    memcpy(keyNow, keyIn, 16);
     keyed = true;
     lastRodCtr = 0;
 

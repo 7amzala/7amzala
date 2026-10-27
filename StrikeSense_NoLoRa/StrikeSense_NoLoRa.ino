@@ -440,6 +440,16 @@ public:
     return replyLine >= 0 ? (int)lines[replyLine].id : -1;
   }
 
+  // that Bluetooth connection is still up (-1: no)
+  bool connUp(int id)
+  {
+#if BLE_LINES
+    return id >= 0 && connAlive((uint16_t)id);
+#else
+    return false;
+#endif
+  }
+
   // how strong the rod hears a connection, dBm (0 = unknown). The watch
   // says how it hears the rod; when it cannot (0), this is used instead.
   int connRssi(int id)
@@ -2654,6 +2664,7 @@ void updateConditions(bool immediate)
 void fightOnStrike();
 void landOnReelIn();
 void landTick();
+void landNews();
 void addLand(String& json);
 void updateFight();
 void finishWatchRecording();
@@ -10046,6 +10057,20 @@ void noteWatchHere()
 #endif
 }
 
+// the watch is on Bluetooth: its ping in the last 6 s, or its link still up
+// (pinged in the last minute) - a busy link must not show "not connected"
+bool watchOnBluetooth()
+{
+  if(watchBtAt != 0 && millis() - watchBtAt < 6000)     // it pings every 2 s
+    return true;
+
+#if defined(ESP32)
+  if(watchBtAt != 0 && millis() - watchBtAt < 60000 && server.connUp(watchBtConn))
+    return true;                        // its link is up: a late ping is not "gone"
+#endif
+  return false;
+}
+
 // the watch's signal: what it said, else what the rod measures
 int watchSignal()
 {
@@ -10069,7 +10094,7 @@ int rssiBars(int rssi)
 // "wlink": bt / lora / none. Bluetooth wins when both work (the watch uses it).
 void addWatchLink(String& json)
 {
-  bool bt = watchBtAt != 0 && millis() - watchBtAt < 6000;      // it pings every 2 s
+  bool bt = watchOnBluetooth();
   bool lora = false;
   int loraBarsNow = 0;
 
@@ -10393,15 +10418,14 @@ struct StrikeLog
 };
 
 // =====================================================
-// LANDING: REEL IN starts the fight timer; FISH OUT, LOST IT or NO FISH
-// (watch or app) stops it. Kept with the strike of the last 10 minutes; a
-// fish with no strike before gets its own entry ("NO ALARM").
+// LANDING: REEL IN within 5 minutes of a real strike starts the fight
+// timer; FISH OUT, LOST IT or NO FISH (watch or app) stops it. Kept with
+// the strike. REEL IN with no strike before (new bait): no timer.
 // =====================================================
 
-const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // the strike it belongs to: up to 10 min before
+const unsigned long LAND_AFTER_STRIKE_MS = 300000;   // REEL IN up to 5 min after the strike
 
 int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it, 4 no fish
-unsigned long landOwnN = 0;             // "NO ALARM" entries made
 unsigned long landStartMs = 0;
 unsigned long landEndMs = 0;
 unsigned long landStrikeId = 0;
@@ -10418,54 +10442,33 @@ long landSeconds()
 
 void landOnReelIn()
 {
-  if(landState == 1)
+  if(landState == 1 || slistCount == 0)
     return;
+
+  StrikeSummary& s = slist[slistCount - 1];
+
+  if(millis() - s.startMs > LAND_AFTER_STRIKE_MS || s.result != 0)
+  {
+    Serial.println("REEL IN with no strike in the last 5 min: no fight timer (new bait)");
+    return;
+  }
 
   landState = 1;
   landStartMs = millis();
   landEndMs = 0;
-  landStrikeId = 0;
-
-  if(slistCount > 0)
-  {
-    StrikeSummary& s = slist[slistCount - 1];
-
-    if(millis() - s.startMs <= LAND_AFTER_STRIKE_MS && s.result == 0)
-      landStrikeId = s.id;              // the strike this fight belongs to
-  }
-
-  Serial.println(landStrikeId ? "FIGHT: timer started (REEL IN after a strike)" : "FIGHT: timer started (REEL IN, no strike before)");
-}
-
-// A fish (or one that got off) with no strike before: its own entry
-void landOwnEntry()
-{
-  if(slistCount == SLIST_N)
-  {
-    logSaveOldest();
-
-    for(int i = 1; i < SLIST_N; i++)
-      slist[i - 1] = slist[i];
-
-    slistCount--;
-  }
-
-  StrikeSummary& n = slist[slistCount++];
-  memset(&n, 0, sizeof(n));
-  n.id = 900000 + (++landOwnN);         // not a strike number (the watch must not alarm)
-  n.seq = logReady ? ++logSeq : 0;
-  strncpy(n.type, "NO ALARM", sizeof(n.type) - 1);
-  n.startMs = landStartMs;
-  n.lastActiveMs = landStartMs;
-  n.done = true;
-  landStrikeId = n.id;
+  landStrikeId = s.id;
+  landNews();
+  Serial.println("FIGHT: timer started (REEL IN after a strike)");
 }
 
 // Every reading: casting again (READY / resume / learning) ends the landing
 void landTick()
 {
   if(landState != 0 && rodState != ST_PAUSED)
+  {
     landState = 0;
+    landNews();
+  }
 }
 
 // how the fight ended: 1 FISH OUT, 2 LOST IT, 3 NO FISH
@@ -10478,9 +10481,7 @@ bool cmdLand(int result)
   landEndMs = millis();
 
   int16_t sec = (int16_t)landSeconds();
-
-  if(landStrikeId == 0 && result != 3)
-    landOwnEntry();
+  landNews();
 
   for(int i = 0; i < slistCount; i++)
   {
@@ -10965,6 +10966,16 @@ void handleStrike()
 // SETUP
 // =====================================================
 
+void landNews()
+{
+#if defined(ESP32)
+  server.pushLive();
+#endif
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  lastHeartbeatSent = 0;                // LoRa: the next heartbeat goes now
+#endif
+}
+
 // A new sketch uploaded (not a restart): a fresh rod - settings back to
 // default, paired phone and watch forgotten (pair again with the PIN), new
 // LoRa key. Kept: the PIN, the strike log numbers, the total time and the
@@ -11032,7 +11043,7 @@ void setup()
   freshAfterUpload();
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.2 (no LoRa; fight: FISH OUT / LOST IT / NO FISH; fresh after upload) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.3 (no LoRa; fight after a real strike) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

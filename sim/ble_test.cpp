@@ -314,7 +314,7 @@ int main()
     Answer b;
     step(7);
     ask(700001, "/data", b);
-    check(b.body.find("\"wlink\":\"none\"") != NO, "watch not pinging: phone shows 'watch not connected'");
+    check(b.body.find("\"wlink\":\"bt\"") != NO, "watch late with its ping but its link is up: still 'connected' (no flicker)");
     check(ask(500030, "/wping?r=-66", b) && b.body == "OK", "watch ping (every 2 s) answered");
     ask(700002, "/data", b);
     check(b.body.find("\"wlink\":\"bt\"") != NO && b.body.find("\"wbars\":3") != NO, "watch on Bluetooth at -66 dBm: phone shows 'Watch Bluetooth', 3 bars");
@@ -328,9 +328,12 @@ int main()
           "the watch does not know its signal (0): the rod measures the watch's link itself (-58 dBm: 4 bars)");
 #endif
     ask(500033, "/wping?r=-66", b);
+    srv->mockDisconnect(WATCH);
     step(7);
     ask(700003, "/data", b);
-    check(b.body.find("\"wlink\":\"none\"") != NO, "watch gone (no ping for 6 s): 'not connected'");
+    check(b.body.find("\"wlink\":\"none\"") != NO, "watch gone (its link down, no ping for 6 s): 'not connected'");
+    srv->mockConnect(WATCH, 247, true);
+    seen[WATCH] = 0; inbox[WATCH].clear();
 
     ask(700004, "/strikes", b);
     printf("        /strikes = %s\n", b.body.c_str());
@@ -611,24 +614,12 @@ int main()
       cmdReady();
       step(1);
       check(landState == 0, "READY: the fight screen ends");
-      // REEL IN with no strike lately: the timer runs too; NO FISH ends it (nothing saved)
-      step(700);
-      int before = slistCount;
+      // REEL IN with no new strike (new bait): no timer
+      step(10);
       cmdReelIn();
-      step(5);
-      check(landState == 1, "REEL IN without a strike: the fight timer runs too");
-      check(ask(700426, "/nofish", b) && b.body == "OK" && landState == 4 && slistCount == before, "NO FISH: timer stops, nothing new in the strike list");
-      cmdReady();
-      step(1);
-      // a fish the rod did not alarm on: its own entry "NO ALARM"
-      cmdReelIn();
-      step(30);
-      check(ask(700427, "/fishout", b) && b.body == "OK", "FISH OUT with no strike before");
-      check(slistCount == before + 1 && std::string(slist[slistCount - 1].type) == "NO ALARM" && slist[slistCount - 1].result == 1 &&
-            slist[slistCount - 1].land == 30, "... kept as its own entry: NO ALARM, FISH OUT, 0:30");
-      step(3);
-      check(ask(700428, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("NO ALARM") != NO && b.body.find("\"result\":\"fish\"") != NO,
-            "... and in the strike log for the app");
+      step(2);
+      check(landState == 0, "REEL IN with no new strike (new bait): no fight timer");
+      check(ask(700426, "/nofish", b) && b.body == "NO FIGHT", "... and NO FISH is refused (no fight)");
       cmdReady();
       step(1);
     }

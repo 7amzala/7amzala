@@ -162,14 +162,13 @@ void session(float loss)
   while (lora_link_get_status().land != 2 && simMillis - seen0 < 15000) step(0.1);
   check(lora_link_get_status().land == 2 && lora_link_get_status().land_sec == (uint16_t)slist[slistCount - 1].land,
         "watch shows FISH OUT and the same fight time");
-  // READY, REEL IN again (new bait) and NO FISH from the watch
+  // READY, then REEL IN again with no new strike (new bait): no timer
   check(command(CMD_READY, "READY"), "READY confirmed");
   step(1);
   check(command(CMD_REELIN, "REELIN"), "REEL IN again (new bait)");
   step(2);
-  check(landState == 1, "the timer runs on every REEL IN");
-  check(command(CMD_NOFISH, "NOFISH"), "NO FISH from the watch over LoRa");
-  check(landState == 4, "rod: no fish, timer stopped");
+  check(landState == 0, "REEL IN with no new strike (new bait): no fight timer");
+  check(lora_link_get_status().land == 0, "... and the watch shows the normal REELED IN screen");
 
   check(command(CMD_RESUME, "RESUME"), "ADJUST -> READY (resume) confirmed");
   for (int i = 0; i < 30 && rodState != ST_MONITORING; i++) step(0.5);
@@ -216,6 +215,16 @@ ble_link_status_t screens(bool btFresh, bool takePeak = true)
   lora_link_status_t lo = lora_link_get_status();
   link_merge(&s, &lo, simMillis, takePeak);
   return s;
+}
+
+// time passes with the watch on Bluetooth (it pings the rod every 2 s)
+void stepBt(double secs)
+{
+  for (double t = 0; t < secs; t += 0.5)
+  {
+    watchBtAt = millis();
+    step(0.5);
+  }
 }
 
 // Rod heartbeats sent in "secs" seconds
@@ -382,8 +391,11 @@ void switching()
     step(4);
     check(lora_link_get_status().lmode == 1, "app chooses Bluetooth only: the watch hears it over LoRa at once");
     step(12);
-    int quiet = heartbeatsIn(5);
-    check(quiet == 0, "... and after 10 s the rod's LoRa is quiet");
+    check(heartbeatsIn(5) > 0, "... the watch is not on Bluetooth yet: LoRa keeps going (the watch is never left without a link)");
+    stepBt(12);
+    uint32_t hq = lora_link_get_status().hb_count;
+    stepBt(5);
+    check(lora_link_get_status().hb_count == hq, "... the watch on Bluetooth: now the rod's LoRa is quiet");
     setLinkMode(0);
     setChanMode(CHM_AUTO);
     simDeafTx = nullptr;
@@ -399,10 +411,10 @@ void switching()
   step(2.5);
   check((lora_link_get_status().flags & SS_F_LORA_ONLY) != 0, "LoRa only chosen: the heartbeat tells the watch (it leaves Bluetooth)");
   linkMode = 1;
-  step(0.5);                              // a heartbeat already on the air still arrives
+  stepBt(0.5);                            // a heartbeat already on the air still arrives
   uint32_t hb0 = lora_link_get_status().hb_count;
   unsigned long sent0 = simLoraSent;
-  step(6);
+  stepBt(6);
   check(lora_link_get_status().hb_count == hb0, "Bluetooth only: the rod's LoRa stays quiet (saves battery)");
   printf("  Bluetooth only: %lu packets in 6 s\n", simLoraSent - sent0);
   linkMode = 0;

@@ -6,9 +6,9 @@ FISH OUT or LOST IT is tapped, on the watch or in the app. The time and
 the result are kept with the strike (memory, strike log in flash, /strikes,
 /log) and shown live (/data, the watch's /watch, LoRa heartbeat).
 
-REEL IN always starts the timer, and FISH OUT, LOST IT or NO FISH (false
-alarm, new bait) ends it. A strike in the 10 minutes before gets the
-result; a fish with no strike before is kept as its own "NO ALARM" entry.
+REEL IN within 5 minutes of a strike starts the timer (a REEL IN with no
+strike before - new bait - starts nothing), and FISH OUT, LOST IT or NO
+FISH (false alarm) ends it. The strike keeps the result.
 
     python3 add_fight_timer.py <sketch.ino>      (edits in place)
 """
@@ -32,6 +32,7 @@ rep('''void fightOnStrike();
 ''', '''void fightOnStrike();
 void landOnReelIn();
 void landTick();
+void landNews();
 void addLand(String& json);
 ''')
 
@@ -130,15 +131,14 @@ rep('''    Serial.printf("STRIKE LOG: strike %lu saved (%s%s)\\n", (unsigned lon
 };
 
 // =====================================================
-// LANDING: REEL IN starts the fight timer; FISH OUT, LOST IT or NO FISH
-// (watch or app) stops it. Kept with the strike of the last 10 minutes; a
-// fish with no strike before gets its own entry ("NO ALARM").
+// LANDING: REEL IN within 5 minutes of a real strike starts the fight
+// timer; FISH OUT, LOST IT or NO FISH (watch or app) stops it. Kept with
+// the strike. REEL IN with no strike before (new bait): no timer.
 // =====================================================
 
-const unsigned long LAND_AFTER_STRIKE_MS = 600000;   // the strike it belongs to: up to 10 min before
+const unsigned long LAND_AFTER_STRIKE_MS = 300000;   // REEL IN up to 5 min after the strike
 
 int landState = 0;                      // 0 none, 1 fighting, 2 fish out, 3 lost it, 4 no fish
-unsigned long landOwnN = 0;             // "NO ALARM" entries made
 unsigned long landStartMs = 0;
 unsigned long landEndMs = 0;
 unsigned long landStrikeId = 0;
@@ -155,54 +155,33 @@ long landSeconds()
 
 void landOnReelIn()
 {
-  if(landState == 1)
+  if(landState == 1 || slistCount == 0)
     return;
+
+  StrikeSummary& s = slist[slistCount - 1];
+
+  if(millis() - s.startMs > LAND_AFTER_STRIKE_MS || s.result != 0)
+  {
+    Serial.println("REEL IN with no strike in the last 5 min: no fight timer (new bait)");
+    return;
+  }
 
   landState = 1;
   landStartMs = millis();
   landEndMs = 0;
-  landStrikeId = 0;
-
-  if(slistCount > 0)
-  {
-    StrikeSummary& s = slist[slistCount - 1];
-
-    if(millis() - s.startMs <= LAND_AFTER_STRIKE_MS && s.result == 0)
-      landStrikeId = s.id;              // the strike this fight belongs to
-  }
-
-  Serial.println(landStrikeId ? "FIGHT: timer started (REEL IN after a strike)" : "FIGHT: timer started (REEL IN, no strike before)");
-}
-
-// A fish (or one that got off) with no strike before: its own entry
-void landOwnEntry()
-{
-  if(slistCount == SLIST_N)
-  {
-    logSaveOldest();
-
-    for(int i = 1; i < SLIST_N; i++)
-      slist[i - 1] = slist[i];
-
-    slistCount--;
-  }
-
-  StrikeSummary& n = slist[slistCount++];
-  memset(&n, 0, sizeof(n));
-  n.id = 900000 + (++landOwnN);         // not a strike number (the watch must not alarm)
-  n.seq = logReady ? ++logSeq : 0;
-  strncpy(n.type, "NO ALARM", sizeof(n.type) - 1);
-  n.startMs = landStartMs;
-  n.lastActiveMs = landStartMs;
-  n.done = true;
-  landStrikeId = n.id;
+  landStrikeId = s.id;
+  landNews();
+  Serial.println("FIGHT: timer started (REEL IN after a strike)");
 }
 
 // Every reading: casting again (READY / resume / learning) ends the landing
 void landTick()
 {
   if(landState != 0 && rodState != ST_PAUSED)
+  {
     landState = 0;
+    landNews();
+  }
 }
 
 // how the fight ended: 1 FISH OUT, 2 LOST IT, 3 NO FISH
@@ -215,9 +194,7 @@ bool cmdLand(int result)
   landEndMs = millis();
 
   int16_t sec = (int16_t)landSeconds();
-
-  if(landStrikeId == 0 && result != 3)
-    landOwnEntry();
+  landNews();
 
   for(int i = 0; i < slistCount; i++)
   {

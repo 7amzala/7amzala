@@ -128,6 +128,7 @@ bool ble_link_get_last_strike(ble_last_strike_t *o)
 static int forgot = 0, restarted = 0;
 void ble_link_forget(void) { forgot++; }
 void pair_restart(void) { restarted++; }
+void watch_say(const char *t) { (void)t; }
 
 void ble_link_command(const char *path)
 {

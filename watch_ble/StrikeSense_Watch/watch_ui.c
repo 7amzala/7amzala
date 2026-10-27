@@ -371,6 +371,8 @@ static void screen_dark(void)
 
 static const char *btn1_path = "";
 
+void watch_say(const char *t);          // a line on the Serial Monitor (StrikeSense_Watch.ino)
+
 // FIGHT screen: FISH OUT (big), LOST IT and NO FISH (small, under it)
 static lv_obj_t *fight_btn[2];
 static lv_obj_t *fight_lbl[2];
@@ -2301,6 +2303,17 @@ static void ui_timer(lv_timer_t *t)
     layout(MODE_REELED);
 
     // REEL IN starts the fight timer: FISH OUT, LOST IT or NO FISH ends it
+    static int land_was = -1;
+
+    if(s.land != land_was)
+    {
+      land_was = s.land;
+      char t[64];
+      snprintf(t, sizeof(t), "[WATCH] fight screen: %s (via %s)", s.land == 1 ? "FIGHT" : s.land == 2 ? "FISH OUT" :
+               s.land == 3 ? "LOST IT" : s.land == 4 ? "NO FISH" : "none", s.via == LINK_LORA ? "LoRa" : "Bluetooth");
+      watch_say(t);
+    }
+
     show(fight_btn[0], s.land == 1);
     show(fight_btn[1], s.land == 1);
 
