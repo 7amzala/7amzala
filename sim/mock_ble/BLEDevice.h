@@ -3,6 +3,7 @@
 // lets the test act as the phone.
 #include "Arduino.h"
 #include <vector>
+#include <map>
 #include <string>
 
 typedef int portMUX_TYPE;
@@ -91,7 +92,7 @@ struct MockLink
   size_t biggest = 0;
   std::vector<std::string> pieces;     // what reached the phone / watch
 };
-inline MockLink* mockLinks() { static MockLink l[4]; return l; }
+inline MockLink* mockLinks() { static MockLink l[8]; return l; }
 inline gatts_event_handler& mockGattsHandler() { static gatts_event_handler h = nullptr; return h; }
 inline void mockGattsFire(esp_gatts_cb_event_t e, esp_ble_gatts_cb_param_t* p) { if(mockGattsHandler()) mockGattsHandler()(e, 3, p); }
 
@@ -141,7 +142,7 @@ inline bool& mockAlwaysFull() { static bool v = false; return v; }    // test: t
 inline esp_err_t esp_ble_gatts_send_indicate(esp_gatt_if_t, uint16_t conn_id, uint16_t, uint16_t len, uint8_t* data, bool)
 {
   if(mockSendRefused()) return 0x101;
-  if(conn_id >= 4 || !mockLinks()[conn_id].up) return 0x103;   // ESP_ERR_INVALID_STATE
+  if(conn_id >= 8 || !mockLinks()[conn_id].up) return 0x103;   // ESP_ERR_INVALID_STATE
   if(len > mockLinks()[conn_id].mtu - 3) return 0x102;          // too big for this link
   mockDeliver(conn_id, data, len);
   return ESP_OK;
@@ -153,7 +154,7 @@ inline esp_err_t esp_ble_gatts_send_indicate(esp_gatt_if_t, uint16_t conn_id, ui
 inline int mockPoolUsed()
 {
   int n = 0;
-  for(int i = 0; i < 4; i++) if(mockLinks()[i].up) { mockDrain(i); n += mockLinks()[i].queued; }
+  for(int i = 0; i < 8; i++) if(mockLinks()[i].up) { mockDrain(i); n += mockLinks()[i].queued; }
   return n;
 }
 inline os_mbuf* ble_hs_mbuf_from_flat(const void* d, uint16_t n)
@@ -165,7 +166,7 @@ inline int ble_gatts_notify_custom(uint16_t conn, uint16_t, os_mbuf* om)
 {
   std::string d = om->d; delete om;
   if(mockSendRefused()) return 7;                                  // BLE_HS_ENOTCONN
-  if(conn >= 4 || !mockLinks()[conn].up) return 7;
+  if(conn >= 8 || !mockLinks()[conn].up) return 7;
   if((int)d.size() > mockLinks()[conn].mtu - 3) return 3;         // BLE_HS_EINVAL
   mockDrain(conn);
   if(mockPoolUsed() >= 20 || mockLinks()[conn].queued >= 12) return BLE_HS_ENOMEM;
@@ -174,7 +175,7 @@ inline int ble_gatts_notify_custom(uint16_t conn, uint16_t, os_mbuf* om)
 }
 inline int ble_gap_conn_find(uint16_t conn, ble_gap_conn_desc* d)
 {
-  if(conn >= 4 || !mockLinks()[conn].up) return 2;
+  if(conn >= 8 || !mockLinks()[conn].up) return 2;
   d->conn_handle = conn;
   d->conn_itvl = (uint16_t)(mockLinks()[conn].drainMs * 4 / 5);   // x 1.25 ms
   return 0;
@@ -183,7 +184,7 @@ inline int ble_gap_conn_find(uint16_t conn, ble_gap_conn_desc* d)
 
 inline uint16_t esp_ble_get_cur_sendable_packets_num(uint16_t conn_id)
 {
-  if(conn_id >= 4 || !mockLinks()[conn_id].up || mockAlwaysFull()) return 0;
+  if(conn_id >= 8 || !mockLinks()[conn_id].up || mockAlwaysFull()) return 0;
   mockDrain(conn_id);
   return 12 - mockLinks()[conn_id].queued;
 }
@@ -213,7 +214,7 @@ public:
   uint16_t getHandle() { return 42; }
   void notify()
   {
-    for(int i = 0; i < 4; i++)             // (the real one: every subscriber)
+    for(int i = 0; i < 8; i++)             // (the real one: every subscriber)
       if(mockLinks()[i].up) mockDeliver(i, (const uint8_t*)value.data(), std::min(value.size(), (size_t)mockLinks()[i].mtu - 3));
     extern unsigned long simMillis;
     if(slowLink())
@@ -242,7 +243,9 @@ public:
   BLEService* service = nullptr;
   void setCallbacks(BLEServerCallbacks* c) { cb = c; }
   BLEService* createService(const char*) { service = new BLEService(); return service; }
-  uint16_t getPeerMTU(uint16_t id) { return id < 4 && mockLinks()[id].up ? mockLinks()[id].mtu : 0; }
+  uint16_t getPeerMTU(uint16_t id) { return id < 8 && mockLinks()[id].up ? mockLinks()[id].mtu : 0; }
+  uint32_t getConnectedCount() { uint32_t n = 0; for(int i = 0; i < 8; i++) if(mockLinks()[i].up) n++; return n; }
+  std::map<uint16_t, int> getPeerDevices(bool) { std::map<uint16_t, int> m; for(int i = 0; i < 8; i++) if(mockLinks()[i].up) m[i] = 1; return m; }
   void disconnect(uint16_t id) { mockDisconnect(id); }
 
   // the test: a phone / watch connects (like the library: both callbacks)

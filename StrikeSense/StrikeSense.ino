@@ -130,6 +130,13 @@ public:
     liveBuilder = b;
   }
 
+  // Something happened (strike, knock): send the live message now, not at
+  // the next 100 ms tick, so the phone and the watch hear it at once
+  void pushLive()
+  {
+    lastLive = millis() - LIVE_MS;
+  }
+
   void on(const char* path, Handler h)
   {
     if(routeCount < MAX_ROUTES)
@@ -240,6 +247,88 @@ public:
     return clients > 0;
   }
 
+  // Every 2 s: the lines against the connections the Bluetooth library really
+  // has. A line left over from a device that went away without a word is
+  // freed (else after a few comings and goings the phone got no line: it was
+  // connected but stuck on LEARNING until the rod restarted), the count of
+  // devices is put right, and a line that cannot send is started again.
+  void checkLines(unsigned long nowMs)
+  {
+#if BLE_LINES
+    // sending to all after failures: a minute later, the direct way again
+    // (never while a message to all is on its way: it must end whole)
+    if(broadcast && nowMs - broadcastSince > 60000 && sharedIdle())
+    {
+      broadcast = false;
+      Serial.println("Bluetooth: own line for each device again");
+    }
+
+    int real = (int)srv->getConnectedCount();
+
+    if(real != clients)
+    {
+      Serial.printf("Bluetooth: %d devices really connected (counted %d) - put right\n", real, (int)clients);
+      clients = real;
+      advertiseAgain = true;
+    }
+
+    for(int i = 0; i < MAX_LINES; i++)
+    {
+      Line& L = lines[i];
+
+      if(!L.used)
+        continue;
+
+      if(!connAlive(L.id))
+      {
+        Serial.printf("Bluetooth: device %d is gone - its line freed\n", L.id);
+        portENTER_CRITICAL(&bleLock);
+        L.used = false;
+        portEXIT_CRITICAL(&bleLock);
+        continue;
+      }
+
+      // something to send, but nothing went out for 3 s: start its pace again
+      if(L.outPos < L.out.length() && nowMs - L.sentAt > 3000)
+      {
+        Serial.printf("Bluetooth: device %d's line stuck - started again\n", L.id);
+        L.gapUs = PIECE_GAP_US;
+        L.congested = false;
+        L.blockedSince = 0;
+        L.ignoreFullUntil = nowMs + 10000;
+        L.sentAt = nowMs;
+      }
+    }
+
+    if(lineHealed)
+    {
+      lineHealed = false;
+      Serial.println("Bluetooth: a connected device had no line - it has one now");
+    }
+#endif
+  }
+
+  bool sharedIdle()
+  {
+    for(int i = 0; i < MAX_LINES; i++)
+      if(lines[i].used && lines[i].outPos > 0 && lines[i].outPos < lines[i].out.length())
+        return false;
+
+    return true;
+  }
+
+  bool connAlive(uint16_t id)
+  {
+#if BLE_LINES && !BLE_BD
+    ble_gap_conn_desc d;
+    return ble_gap_conn_find(id, &d) == 0;
+#elif BLE_LINES
+    return srv->getPeerDevices(false).count(id) > 0;
+#else
+    return true;
+#endif
+  }
+
   // Called from loop(): each line gets its waiting question answered, then
   // the live message, and its answer sent in pieces at its own pace
   void handleClient()
@@ -266,6 +355,12 @@ public:
     }
 
     unsigned long nowMs = millis();
+
+    if(nowMs - checkedAt >= 2000)
+    {
+      checkedAt = nowMs;
+      checkLines(nowMs);
+    }
 
     // a line just opened, or closed: start it clean (here, not in the Bluetooth task)
     for(int i = 0; i < MAX_LINES; i++)
@@ -425,6 +520,7 @@ private:
     unsigned long ignoreFullUntil; // the stack's "full" got stuck: pace by time only until then (millis)
     unsigned long itvlUs;       // NimBLE: the time its link needs per piece (0 = not known)
     unsigned long itvlAt;       // millis() when that was looked up
+    unsigned long sentAt;       // millis() of its last piece (or when it opened)
   };
 
   Line lines[MAX_LINES] = {};
@@ -449,6 +545,9 @@ private:
   unsigned long dropsSaid = 0;
   unsigned long lastShared = 0;   // micros() of the last piece to anyone (sending to all)
   int sharedOwner = -1;           // sending to all: the line whose message is on its way
+  volatile bool lineHealed = false; // a device wrote without a line: it got one
+  unsigned long broadcastSince = 0; // when sending to all started (after failures)
+  unsigned long checkedAt = 0;      // the last look at which connections really exist
   uint16_t gattsIf = 0xFFFF;
 
   String argNames[MAX_ARGS];
@@ -477,6 +576,17 @@ private:
   void lineOpened(uint16_t id)
   {
     portENTER_CRITICAL(&bleLock);
+    openLine(id);
+    portEXIT_CRITICAL(&bleLock);
+  }
+
+  // (the lock held) a line for this connection; false = no room
+  Line* openLine(uint16_t id)
+  {
+    Line* had = lineFor(id);
+
+    if(had != nullptr)
+      return had;                       // (already there)
 
     for(int i = 0; i < MAX_LINES; i++)
     {
@@ -501,11 +611,12 @@ private:
         L.ignoreFullUntil = 0;
         L.itvlUs = 0;
         L.itvlAt = 0;
-        break;
+        L.sentAt = millis();
+        return &L;
       }
     }
 
-    portEXIT_CRITICAL(&bleLock);
+    return nullptr;
   }
 
   void lineClosed(uint16_t id)
@@ -562,15 +673,16 @@ private:
     }
 
 #if BLE_LINES && !BLE_BD
-    // NimBLE has no "this link is full" signal: no faster than the link takes
-    // them, about 4 pieces per connection event (the phone's 15 ms: one every
-    // 4 ms; a watch on its calm 110 ms link: one every 27 ms)
+    // NimBLE has no "this link is full" signal, and one pool of buffers for
+    // all links: no faster than the link takes them, 3 pieces per connection
+    // event (the phone's 15 ms: one every 5 ms; a watch on its calm 110 ms
+    // link: one every 37 ms), so a slow link never fills the pool for the others
     if(nowMs - L.itvlAt >= 1000)
     {
       ble_gap_conn_desc d;
 
       if(ble_gap_conn_find(L.id, &d) == 0)
-        L.itvlUs = (unsigned long)d.conn_itvl * 1250UL / 4;
+        L.itvlUs = (unsigned long)d.conn_itvl * 1250UL / 3;
 
       L.itvlAt = nowMs;
     }
@@ -691,6 +803,7 @@ private:
 
     L.outPos += n;
     L.lastPiece = micros();
+    L.sentAt = nowMs;
     lastShared = L.lastPiece;
     sharedOwner = me_i;
 
@@ -703,18 +816,31 @@ private:
     return true;
   }
 
-  // sending to one device failed: after 3 in a row, send to all (the old way)
+  // sending to one device failed. The device is gone: free its line (that
+  // is not the direct sending failing). Else after 3 in a row: send to all
+  // (the old way) for a minute, then try the direct way again.
   void sendFailed(Line& L, int rc)
   {
+    L.lastPiece = micros();
+
+    if(!connAlive(L.id))
+    {
+      Serial.printf("Bluetooth: device %d is gone - its line freed\n", L.id);
+      portENTER_CRITICAL(&bleLock);
+      L.used = false;
+      portEXIT_CRITICAL(&bleLock);
+      return;
+    }
+
     Serial.printf("Bluetooth: sending to device %d failed (error %d)\n", L.id, rc);
 
     if(++sendFails >= 3)
     {
       broadcast = true;
-      Serial.println("Bluetooth: sending to all devices from now on");
+      broadcastSince = millis();
+      sendFails = 0;
+      Serial.println("Bluetooth: sending to all devices for a minute");
     }
-
-    L.lastPiece = micros();
   }
 
 #if BLE_BD
@@ -852,6 +978,14 @@ private:
     portENTER_CRITICAL(&bleLock);
 
     Line* L = lineFor(id);
+
+#if BLE_LINES
+    if(L == nullptr)
+    {
+      L = openLine(id);                 // it wrote, so it is connected: give it a line
+      lineHealed = true;
+    }
+#endif
 
     if(L != nullptr)
     {
@@ -2791,6 +2925,10 @@ void startStrike(String type)
   startWatchRecording();
   fightOnStrike();
 
+#if defined(ESP32)
+  server.pushLive();                    // phone + watch hear it now, not at the next tick
+#endif
+
   loraOnStrike();
 
   Serial.println();
@@ -3228,6 +3366,9 @@ float sharpLevel()
 
 void onKnock(bool settlingMode)
 {
+#if defined(ESP32)
+  server.pushLive();                    // the knock shows at once on phone + watch
+#endif
   const SeaProfile& p = profile();
 
   if(settlingMode)
@@ -5426,14 +5567,14 @@ LEARNING
 function setLink(ready, rssi)
 {
   var n = ready && rssi ? (rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1) : 0;
-  var c = n >= 3 ? '#3ddc84' : n == 2 ? '#ffba52' : '#ff4d5e';
+  var c = '#3ddc84';                    // Bluetooth bars: green (how many = how strong)
   var b = document.querySelectorAll('#sigBars i');
 
   for(var i = 0; i < b.length; i++)
     b[i].style.background = i < n ? c : '';
 
   document.getElementById('linkName').textContent = ready ? 'Bluetooth' : 'Reconnecting\u2026';
-  document.getElementById('linkName').style.color = ready ? '' : '#ffba52';
+  document.getElementById('linkName').style.color = ready ? '#22a8ff' : '#ffba52';
   document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm' : '';
 }
 </script>
@@ -5453,7 +5594,8 @@ function showWatch(d)
   }
 
   var lora = d.wlink == 'lora', bt = d.wlink == 'bt';
-  var c = bt ? '#22a8ff' : lora ? '#ffc928' : '#6b7790';     // blue Bluetooth, yellow LoRa, grey none
+  var c = bt ? '#3ddc84' : lora ? '#ffc928' : '#6b7790';     // bars: green Bluetooth, yellow LoRa, grey none
+  var word = bt ? '#22a8ff' : lora ? '#ffc928' : '#6b7790';  // the word: blue Bluetooth, yellow LoRa
   var b = document.querySelectorAll('#wBars i');
 
   for(var i = 0; i < b.length; i++)
@@ -5461,14 +5603,15 @@ function showWatch(d)
 
   var via = document.getElementById('watchVia');
   var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
-  via.textContent = bt ? 'connected \u00b7 via Bluetooth' : lora ? 'connected \u00b7 via LoRa \u00b7 ' + (d.lchan > 0 ? '1 km' : '500 m') +
-    (d.lqual !== undefined && d.lqual >= 2 ? ' \u00b7 ' + QUAL[d.lqual] : '') : 'not connected';
+  via.innerHTML = bt ? 'connected &middot; <b style="color:#22a8ff">Bluetooth</b>' :
+    lora ? 'connected &middot; <b style="color:#ffc928">LoRa</b> &middot; ' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined && d.lqual >= 2 ? ' &middot; ' + QUAL[d.lqual] : '') : 'not connected';
 
   // many rods on the channel: Bluetooth gives the fastest alerts
   var tip = document.getElementById('crowdTip');
   tip.style.display = lora && d.lqual == 3 ? '' : 'none';
   tip.textContent = 'Many devices nearby (' + (d.lrods || 0) + ' rods). For the fastest alerts use Bluetooth only (Settings).';
-  via.style.color = c;
+  via.style.color = bt || lora ? '#eaf3ff' : word;
   document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
   box.className = 'show';
 }
@@ -11692,7 +11835,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.9 (instant link + channel changes, link colours) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.0 (lines self-heal, link colours, instant alerts) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

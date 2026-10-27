@@ -612,6 +612,33 @@ int main()
     logBegin();
   }
 
+  // ---- devices that vanish without the rod being told (the app stuck on LEARNING) ----
+  printf("\n=== LINES LEFT BEHIND ===\n");
+  {
+    Answer b;
+    srv->mockDisconnect(PHONE);
+    srv->mockDisconnect(WATCH);
+    step(0.5);
+    // 4 connections the library forgot to report as closed: all lines taken
+    for (uint16_t id = 4; id < 8; id++) {
+      mockLinks()[id].up = true;
+      srv->mockConnect(id, 247, false);
+      mockLinks()[id].up = false;            // gone, no word to the rod
+    }
+    step(0.2);
+    srv->mockConnect(PHONE, 247, false);     // the phone comes back
+    seen[PHONE] = 0; inbox[PHONE].clear();
+    unsigned long t0 = simMillis;
+    bool got = false;
+    for (int k = 0; k < 40 && !got; k++)     // the app asks again and again
+      got = ask(810000 + k, "/data", b, 0.2) && b.body.back() == '}';
+    printf("        phone answered after %.1f s\n", (simMillis - t0) / 1000.0);
+    check(got && simMillis - t0 < 3500, "lines left by vanished devices: freed, the phone gets its data within 3.5 s (no rod restart)");
+    srv->mockConnect(WATCH, 247, true);
+    seen[WATCH] = 0; inbox[WATCH].clear();
+    check(ask(510000, "/watch", b, 3) && b.body.back() == '}', "... and the watch too");
+  }
+
   // ---- safety nets (if the real Bluetooth stack behaves differently) ----
   printf("\n=== SAFETY NETS ===\n");
   {
@@ -624,6 +651,7 @@ int main()
     check(ok1 && ok2 && simMillis - t0 < 1500, "stack stuck on 'full': the rod stops believing it, answers still come");
     t0 = simMillis;
     ok1 = ask(800951, "/data", b, 5);
+    printf("        then: %lu ms\n", simMillis - t0);
     check(ok1 && simMillis - t0 < 100, "...and then at full speed again");
     mockAlwaysFull() = false;
 
@@ -639,6 +667,13 @@ int main()
     printf("        direct send refused: phone %d, watch %d (whole %d) %.60s ... %.60s\n", ok1, ok2, whole, b.body.c_str(), b.body.size() > 60 ? b.body.c_str() + b.body.size() - 60 : "");
     ok2 = whole;
     check(ok1 && ok2, "direct send refused: the rod sends to all (the old way), phone and watch still answered");
+    step(65);                                  // a minute later: own lines again
+    readNotifications();
+    wrongLine = 0;
+    ok1 = ask(800960, "/data", b, 5) && b.body.back() == '}';
+    ok2 = ask(500960, "/watch", b, 5) && b.body.back() == '}';
+    readNotifications();
+    check(ok1 && ok2 && wrongLine == 0, "a minute later: own line for each device again (answers reach only the asker)");
   }
 
   printf("\n%d checks, %d failed\n", checks, failed);

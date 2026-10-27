@@ -122,7 +122,7 @@ void lcd_set_brightness(uint8_t level);   // lcd_bsp.c
 #define COL_CARD    lv_color_hex(0x141924)    // list cells, round buttons
 #define COL_LINE    lv_color_hex(0x232a3a)    // thin borders
 #define COL_OFF     lv_color_hex(0x262b36)    // empty bars
-#define COL_BT      lv_color_hex(0x22a8ff)    // link bars: Bluetooth (blue)
+#define COL_BT      lv_color_hex(0x3ddc84)    // link bars: Bluetooth (green)
 #define COL_LORA    lv_color_hex(0xffc928)    // link bars: LoRa (yellow)
 #define COL_GREEN   lv_color_hex(0x3ddc84)
 

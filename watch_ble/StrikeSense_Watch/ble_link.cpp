@@ -744,23 +744,24 @@ static void askLinkTiming(bool fast)
 {
 #if defined(CONFIG_NIMBLE_ENABLED)
   ble_gap_upd_params p = {};
-  p.itvl_min = fast ? 6 : 72;          // x 1.25 ms
-  p.itvl_max = fast ? 12 : 88;
+  p.itvl_min = fast ? 6 : 24;          // x 1.25 ms
+  p.itvl_max = fast ? 12 : 40;
   p.latency = 0;
   p.supervision_timeout = 400;         // x 10 ms
   ble_gap_update_params(client->getConnId(), &p);
 #elif defined(CONFIG_BLUEDROID_ENABLED)
   esp_ble_conn_update_params_t p = {};
   memcpy(p.bda, *client->getPeerAddress().getNative(), sizeof(esp_bd_addr_t));
-  p.min_int = fast ? 6 : 72;           // x 1.25 ms
-  p.max_int = fast ? 12 : 88;
+  p.min_int = fast ? 6 : 24;           // x 1.25 ms
+  p.max_int = fast ? 12 : 40;
   p.latency = 0;
   p.timeout = 400;                     // x 10 ms
   esp_ble_gap_update_conn_params(&p);
 #endif
 }
 
-// fast: 7.5-15 ms; calm: 90-110 ms (the live message comes every 100 ms anyway)
+// fast: 7.5-15 ms; calm: 30-50 ms (was 90-110: a strike then reached the
+// watch up to ~0.2 s after the phone; now both hear it together)
 static void setLinkFast(bool fast)
 {
   if(fast == linkFast || client == nullptr)
