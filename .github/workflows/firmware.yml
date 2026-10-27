@@ -32,6 +32,9 @@ jobs:
           cd sim
           g++ -O2 -std=c++17 -Imock_ble -Imock -o ble_test ble_test.cpp
           ./ble_test
+          echo "=== the same with the NimBLE library (newer ESP32 cores on the S3) ==="
+          g++ -O2 -std=c++17 -DMOCK_NIMBLE -Imock_ble -Imock -o ble_test_nimble ble_test.cpp
+          ./ble_test_nimble
 
       - uses: arduino/setup-arduino-cli@v2
 

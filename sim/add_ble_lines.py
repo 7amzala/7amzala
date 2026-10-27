@@ -30,5 +30,41 @@ if 'BLE_LINES' in s:
     sys.exit(f"{path}: already applied")
 
 s = s[:a] + new + s[b + len('BleServer server;\n'):]
+
+
+def rep(old, new_):
+    global s
+    if s.count(old) != 1:
+        sys.exit(f"{path}: expected 1 x {old[:70]!r}, found {s.count(old)}")
+    s = s.replace(old, new_)
+
+
+# paired devices with NimBLE too (newer ESP32 cores on the S3): before, the
+# rod counted 0 there, so it never hid and "Forget my devices" did nothing
+rep('''#if defined(CONFIG_BLUEDROID_ENABLED)
+  return esp_ble_get_bond_device_num();
+#else
+  return 0;
+#endif''', '''#if defined(CONFIG_BLUEDROID_ENABLED)
+  return esp_ble_get_bond_device_num();
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  int n = 0;
+  ble_store_util_count(BLE_STORE_OBJ_TYPE_OUR_SEC, &n);
+  return n;
+#else
+  return 0;
+#endif''')
+
+rep('''    free(list);
+  }
+#endif
+
+  Serial.println("Bluetooth: all paired devices forgotten - pairing open");''', '''    free(list);
+  }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  ble_store_clear();
+#endif
+
+  Serial.println("Bluetooth: all paired devices forgotten - pairing open");''')
 open(path, 'w').write(s)
 print(f"{path}: Bluetooth lines per device")

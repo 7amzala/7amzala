@@ -80,8 +80,8 @@ void readInbox(int c)
     if (sscanf(inbox.c_str() + start + 1, "%d %d %d", &id, &code, &len) != 3) { inbox.erase(0, nl + 1); continue; }
     if (inbox.size() - (nl + 1) < (size_t)len) { inbox.erase(0, start); return; }
 
-    if (lineOf(id) != c) wrongLine++;
-    answers[id] = { code, inbox.substr(nl + 1, len) };
+    if (lineOf(id) != c) wrongLine++;            // (like the app / watch: not ours, ignored)
+    else answers[id] = { code, inbox.substr(nl + 1, len) };
     inbox.erase(0, nl + 1 + len);
   }
 }
@@ -91,12 +91,9 @@ void write(int id, const std::string& path)
 {
   std::string line = std::to_string(id) + "|" + path + "\n";
 
-  esp_ble_gatts_cb_param_t p;
-  p.write.conn_id = lineOf(id);
-
   for (size_t i = 0; i < line.size(); i += 20) {
     rxc->value = line.substr(i, 20);
-    rxc->cb->onWrite(rxc, &p);
+    mockWrite(rxc, rxc->cb, lineOf(id));
   }
 }
 
@@ -637,8 +634,10 @@ int main()
     step(0.5);
     printf("        after refusal: phone +%zu pieces, watch +%zu, drops %d/%d\n", mockLinks()[PHONE].pieces.size() - p0, mockLinks()[WATCH].pieces.size() - w0, mockLinks()[PHONE].drops, mockLinks()[WATCH].drops);
     ok1 = ask(800952, "/data", b, 5) && b.body.back() == '}';
-    ok2 = ask(500952, "/watch", b, 5) && b.body.back() == '}';
-    printf("        direct send refused: phone %d, watch %d\n", ok1, ok2);
+    ok2 = ask(500952, "/watch", b, 5);
+    bool whole = ok2 && b.body.back() == '}';
+    printf("        direct send refused: phone %d, watch %d (whole %d) %.60s ... %.60s\n", ok1, ok2, whole, b.body.c_str(), b.body.size() > 60 ? b.body.c_str() + b.body.size() - 60 : "");
+    ok2 = whole;
     check(ok1 && ok2, "direct send refused: the rod sends to all (the old way), phone and watch still answered");
   }
 

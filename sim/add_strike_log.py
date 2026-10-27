@@ -28,7 +28,8 @@ def rep(old, new, count=1):
 
 rep('#include <Preferences.h>\n', '#include <Preferences.h>\n#include <LittleFS.h>\n')
 
-rep('''  static const int MAX_ROUTES = 32;''', '''  static const int MAX_ROUTES = 40;''')
+if '  static const int MAX_ROUTES = 32;' in s:
+    rep('''  static const int MAX_ROUTES = 32;''', '''  static const int MAX_ROUTES = 40;''')
 
 rep('''struct StrikeSummary
 {

@@ -13,8 +13,23 @@ typedef int portMUX_TYPE;
 class BLEServer;
 class BLECharacteristic;
 
-// ---- Bluedroid's per-connection view (what the rod's "lines" use) ----
+// Build with -DMOCK_NIMBLE to play the NimBLE library (newer ESP32 cores
+// on the S3), else Bluedroid. The rod's "lines" have code for both.
+#ifdef MOCK_NIMBLE
+#define CONFIG_NIMBLE_ENABLED 1
+#define BLE_MOCK_NIMBLE 1
+struct ble_gap_conn_desc { uint16_t conn_handle; uint16_t conn_itvl; };
+struct os_mbuf { std::string d; };
+#define BLE_HS_ENOMEM 6
+#define BLE_HS_EBUSY 15
+#define BLE_STORE_OBJ_TYPE_OUR_SEC 1
+inline int& mockBonds() { static int n = 0; return n; }
+inline int ble_store_util_count(int, int* n) { *n = mockBonds(); return 0; }
+inline int ble_store_clear() { mockBonds() = 0; return 0; }
+#else
+// ---- Bluedroid's per-connection view ----
 #define BLE_MOCK_LINES 1
+#endif
 typedef int esp_err_t;
 #define ESP_OK 0
 typedef uint8_t esp_gatt_if_t;
@@ -38,15 +53,24 @@ struct BLEServerCallbacks
   virtual ~BLEServerCallbacks() {}
   virtual void onConnect(BLEServer*) {}
   virtual void onDisconnect(BLEServer*) {}
+#ifdef MOCK_NIMBLE
+  virtual void onConnect(BLEServer*, ble_gap_conn_desc*) {}
+  virtual void onDisconnect(BLEServer*, ble_gap_conn_desc*) {}
+#else
   virtual void onConnect(BLEServer*, esp_ble_gatts_cb_param_t*) {}
   virtual void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t*) {}
+#endif
 };
 
 struct BLECharacteristicCallbacks
 {
   virtual ~BLECharacteristicCallbacks() {}
   virtual void onWrite(BLECharacteristic*) {}
+#ifdef MOCK_NIMBLE
+  virtual void onWrite(BLECharacteristic* c, ble_gap_conn_desc*) { onWrite(c); }
+#else
   virtual void onWrite(BLECharacteristic* c, esp_ble_gatts_cb_param_t*) { onWrite(c); }
+#endif
 };
 
 // One phone / watch connection as the Bluetooth chip sees it: a small
@@ -122,6 +146,40 @@ inline esp_err_t esp_ble_gatts_send_indicate(esp_gatt_if_t, uint16_t conn_id, ui
   mockDeliver(conn_id, data, len);
   return ESP_OK;
 }
+
+#ifdef MOCK_NIMBLE
+// NimBLE: one pool of 20 buffers for all links; a piece waiting for its link
+// holds one. Pool (or that link's queue) full: ENOMEM, nothing sent.
+inline int mockPoolUsed()
+{
+  int n = 0;
+  for(int i = 0; i < 4; i++) if(mockLinks()[i].up) { mockDrain(i); n += mockLinks()[i].queued; }
+  return n;
+}
+inline os_mbuf* ble_hs_mbuf_from_flat(const void* d, uint16_t n)
+{
+  if(mockPoolUsed() >= 20) return nullptr;
+  os_mbuf* m = new os_mbuf(); m->d.assign((const char*)d, n); return m;
+}
+inline int ble_gatts_notify_custom(uint16_t conn, uint16_t, os_mbuf* om)
+{
+  std::string d = om->d; delete om;
+  if(mockSendRefused()) return 7;                                  // BLE_HS_ENOTCONN
+  if(conn >= 4 || !mockLinks()[conn].up) return 7;
+  if((int)d.size() > mockLinks()[conn].mtu - 3) return 3;         // BLE_HS_EINVAL
+  mockDrain(conn);
+  if(mockPoolUsed() >= 20 || mockLinks()[conn].queued >= 12) return BLE_HS_ENOMEM;
+  mockDeliver(conn, (const uint8_t*)d.data(), d.size());
+  return 0;
+}
+inline int ble_gap_conn_find(uint16_t conn, ble_gap_conn_desc* d)
+{
+  if(conn >= 4 || !mockLinks()[conn].up) return 2;
+  d->conn_handle = conn;
+  d->conn_itvl = (uint16_t)(mockLinks()[conn].drainMs * 4 / 5);   // x 1.25 ms
+  return 0;
+}
+#endif
 
 inline uint16_t esp_ble_get_cur_sendable_packets_num(uint16_t conn_id)
 {
@@ -201,7 +259,12 @@ public:
     esp_ble_gatts_cb_param_t p; p.connect.conn_id = id;
     mockGattsFire(ESP_GATTS_CONNECT_EVT, &p);
     cb->onConnect(this);
+#ifdef MOCK_NIMBLE
+    ble_gap_conn_desc dsc = { id, 0 };
+    cb->onConnect(this, &dsc);
+#else
     cb->onConnect(this, &p);
+#endif
     if(mtu > 23)                         // the MTU exchange follows
     {
       L.mtu = mtu;
@@ -216,7 +279,12 @@ public:
     esp_ble_gatts_cb_param_t p; p.disconnect.conn_id = id;
     mockGattsFire(ESP_GATTS_DISCONNECT_EVT, &p);
     cb->onDisconnect(this);
+#ifdef MOCK_NIMBLE
+    ble_gap_conn_desc dsc = { id, 0 };
+    cb->onDisconnect(this, &dsc);
+#else
     cb->onDisconnect(this, &p);
+#endif
   }
 };
 
@@ -263,3 +331,16 @@ struct BLEDevice
   static void startAdvertising() { adv().started++; }
   static void setCustomGattsHandler(gatts_event_handler h) { mockGattsHandler() = h; }
 };
+
+// the test writes a request piece as phone / watch number "conn"
+inline void mockWrite(BLECharacteristic* rx, BLECharacteristicCallbacks* cb, uint16_t conn)
+{
+#ifdef MOCK_NIMBLE
+  ble_gap_conn_desc d = { conn, 0 };
+  cb->onWrite(rx, &d);
+#else
+  esp_ble_gatts_cb_param_t p;
+  p.write.conn_id = conn;
+  cb->onWrite(rx, &p);
+#endif
+}

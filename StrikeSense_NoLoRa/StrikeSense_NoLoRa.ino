@@ -68,15 +68,23 @@ class PairCallbacks : public BLESecurityCallbacks
 static portMUX_TYPE bleLock = portMUX_INITIALIZER_UNLOCKED;   // phone writes vs loop()
 
 // One line per phone / watch: each gets only its own answers, in pieces of
-// its own size, at the speed its own link takes them (Bluedroid, the ESP32-S3).
-// Before, every answer went to both, in pieces as small as the smaller MTU,
-// as slow as the slower link: the phone's live graph lagged and the watch
-// waited for answers behind the phone's.
+// its own size, at the speed its own link takes them. Before, every answer
+// went to both, in pieces as small as the smaller MTU, as slow as the slower
+// link: the phone's live graph lagged and the watch waited for answers
+// behind the phone's. Works with both Bluetooth libraries of the ESP32 core:
+// Bluedroid (BLE_BD) and NimBLE (newer cores on the ESP32-S3).
 #if defined(CONFIG_BLUEDROID_ENABLED) || defined(BLE_MOCK_LINES)
 #define BLE_LINES 1
+#define BLE_BD 1
 #include <esp_gatt_common_api.h>        // esp_ble_get_cur_sendable_packets_num
+#elif defined(CONFIG_NIMBLE_ENABLED)
+#define BLE_LINES 1
+#define BLE_BD 0
+#include "host/ble_hs.h"                // ble_gatts_notify_custom, ble_gap_conn_find
+#include "host/ble_store.h"             // paired devices (bondedDevices, forgetPairedDevices)
 #else
 #define BLE_LINES 0
+#define BLE_BD 0
 #endif
 
 class BleServer
@@ -119,7 +127,7 @@ public:
     srv = BLEDevice::createServer();
     srv->setCallbacks(new Callbacks(this));
 
-#if BLE_LINES
+#if BLE_BD
     me = this;
     BLEDevice::setCustomGattsHandler(gattsEvent);            // congestion + which pieces got lost
 #endif
@@ -288,9 +296,15 @@ public:
       }
     }
 
-    // pieces: each line at its own pace
-    for(int i = 0; i < MAX_LINES; i++)
-      sendPiece(lines[i], nowMs);
+    // pieces: each line at its own pace (taking turns: sending to all, only
+    // one piece goes at a time and the first line must not always win)
+    for(int k = 0; k < MAX_LINES; k++)
+    {
+      int i = (sendTurn + k) % MAX_LINES;
+
+      if(sendPiece(lines[i], nowMs))
+        sendTurn = (i + 1) % MAX_LINES;
+    }
   }
 
   String arg(const char* name)
@@ -379,10 +393,13 @@ private:
     volatile bool congested;    // the Bluetooth stack says: full, wait
     unsigned long blockedSince; // millis(), 0 = not waiting
     unsigned long ignoreFullUntil; // the stack's "full" got stuck: pace by time only until then (millis)
+    unsigned long itvlUs;       // NimBLE: the time its link needs per piece (0 = not known)
+    unsigned long itvlAt;       // millis() when that was looked up
   };
 
   Line lines[MAX_LINES] = {};
   int turn = 0;
+  int sendTurn = 0;
   int replyLine = -1;           // the line the answer being built is for
 
   BLEServer* srv = nullptr;
@@ -401,6 +418,7 @@ private:
   volatile unsigned long drops = 0;
   unsigned long dropsSaid = 0;
   unsigned long lastShared = 0;   // micros() of the last piece to anyone (sending to all)
+  int sharedOwner = -1;           // sending to all: the line whose message is on its way
   uint16_t gattsIf = 0xFFFF;
 
   String argNames[MAX_ARGS];
@@ -451,6 +469,8 @@ private:
         L.congested = false;
         L.blockedSince = 0;
         L.ignoreFullUntil = 0;
+        L.itvlUs = 0;
+        L.itvlAt = 0;
         break;
       }
     }
@@ -502,24 +522,51 @@ private:
     return m > 512 ? 512 : m;
   }
 
-  void sendPiece(Line& L, unsigned long nowMs)
+  // true = a piece went out
+  bool sendPiece(Line& L, unsigned long nowMs)
   {
     if(!L.used || L.outPos >= L.out.length())
     {
       L.blockedSince = 0;
-      return;
+      return false;
     }
 
+#if BLE_LINES && !BLE_BD
+    // NimBLE has no "this link is full" signal: no faster than the link takes
+    // them, about 4 pieces per connection event (the phone's 15 ms: one every
+    // 4 ms; a watch on its calm 110 ms link: one every 27 ms)
+    if(nowMs - L.itvlAt >= 1000)
+    {
+      ble_gap_conn_desc d;
+
+      if(ble_gap_conn_find(L.id, &d) == 0)
+        L.itvlUs = (unsigned long)d.conn_itvl * 1250UL / 4;
+
+      L.itvlAt = nowMs;
+    }
+#endif
+
     // sending to all: one pace for everyone, the slowest line's
-    unsigned long gap = L.gapUs;
+    unsigned long gap = L.gapUs > L.itvlUs ? L.gapUs : L.itvlUs;
 
     if(broadcast)
       for(int i = 0; i < MAX_LINES; i++)
-        if(lines[i].used && lines[i].gapUs > gap)
-          gap = lines[i].gapUs;
+        if(lines[i].used)
+        {
+          if(lines[i].gapUs > gap) gap = lines[i].gapUs;
+          if(lines[i].itvlUs > gap) gap = lines[i].itvlUs;
+        }
 
     if(micros() - (broadcast ? lastShared : L.lastPiece) < gap)
-      return;
+      return false;
+
+    // sending to all: everyone gets every piece, so one message at a time
+    // (pieces of two messages mixed would scramble both)
+    int me_i = (int)(&L - lines);
+
+    if(broadcast && sharedOwner >= 0 && sharedOwner != me_i && lines[sharedOwner].used &&
+       lines[sharedOwner].outPos > 0 && lines[sharedOwner].outPos < lines[sharedOwner].out.length())
+      return false;
 
     // all well for 2 s: a bit faster again
     if(L.gapUs > PIECE_GAP_US && nowMs - L.calmSince > 2000)
@@ -528,7 +575,7 @@ private:
       L.calmSince = nowMs;
     }
 
-#if BLE_LINES
+#if BLE_BD
     // its link is full: wait (else the stack throws the piece away). If the
     // stack seems stuck saying "full" (500 ms), stop believing it for this line.
     // Sending to all: every piece goes to every device, so wait for the fullest.
@@ -551,7 +598,7 @@ private:
         L.blockedSince = nowMs;
 
       if(nowMs - L.blockedSince < 500)
-        return;
+        return false;
 
       stuck->ignoreFullUntil = nowMs + 10000;    // try believing it again in 10 s
       Serial.printf("Bluetooth: device %d stuck 'full' - sending by time only for 10 s\n", stuck->id);
@@ -573,23 +620,39 @@ private:
       tx->setValue((uint8_t*)data, n);
       tx->notify();
     }
-#if BLE_LINES
+#if BLE_BD
     else
     {
       esp_err_t rc = esp_ble_gatts_send_indicate(gattsIf, L.id, tx->getHandle(), n, (uint8_t*)data, false);
 
       if(rc != ESP_OK)
       {
-        Serial.printf("Bluetooth: sending to device %d failed (error %d)\n", L.id, (int)rc);
+        sendFailed(L, (int)rc);
+        return false;                  // the same piece again next time
+      }
 
-        if(++sendFails >= 3)
-        {
-          broadcast = true;            // the old way: to everyone (it worked before)
-          Serial.println("Bluetooth: sending to all devices from now on");
-        }
+      sendFails = 0;
+    }
+#elif BLE_LINES
+    else
+    {
+      os_mbuf* om = ble_hs_mbuf_from_flat(data, n);
+      int rc = om != nullptr ? ble_gatts_notify_custom(L.id, tx->getHandle(), om) : BLE_HS_ENOMEM;
 
+      if(rc == BLE_HS_ENOMEM || rc == BLE_HS_EBUSY)
+      {
+        // the stack's memory is full (a slow link holds it): the same piece
+        // again soon, this line a bit slower
+        L.gapUs = L.gapUs * 2 < PIECE_GAP_MAX_US ? L.gapUs * 2 : PIECE_GAP_MAX_US;
+        L.calmSince = nowMs;
         L.lastPiece = micros();
-        return;                        // the same piece again next time
+        return false;
+      }
+
+      if(rc != 0)
+      {
+        sendFailed(L, rc);
+        return false;                  // the same piece again next time
       }
 
       sendFails = 0;
@@ -599,15 +662,32 @@ private:
     L.outPos += n;
     L.lastPiece = micros();
     lastShared = L.lastPiece;
+    sharedOwner = me_i;
 
     if(L.outPos >= L.out.length())
     {
       L.out = "";
       L.outPos = 0;
     }
+
+    return true;
   }
 
-#if BLE_LINES
+  // sending to one device failed: after 3 in a row, send to all (the old way)
+  void sendFailed(Line& L, int rc)
+  {
+    Serial.printf("Bluetooth: sending to device %d failed (error %d)\n", L.id, rc);
+
+    if(++sendFails >= 3)
+    {
+      broadcast = true;
+      Serial.println("Bluetooth: sending to all devices from now on");
+    }
+
+    L.lastPiece = micros();
+  }
+
+#if BLE_BD
   static BleServer* me;
 
   // (Bluetooth task) the stack's own news about each connection
@@ -656,7 +736,8 @@ private:
       Serial.printf("Bluetooth: connected (%d)\n", (int)owner->clients);
 
 #if !BLE_LINES
-      owner->lineOpened(0);            // (no connection numbers: one shared line)
+      if(owner->clients == 1)
+        owner->lineOpened(0);          // (no connection numbers: one shared line for all)
 #endif
     }
 
@@ -674,7 +755,7 @@ private:
 #endif
     }
 
-#if BLE_LINES
+#if BLE_BD
     // (the library calls both onConnect versions)
     void onConnect(BLEServer*, esp_ble_gatts_cb_param_t* p) override
     {
@@ -684,6 +765,16 @@ private:
     void onDisconnect(BLEServer*, esp_ble_gatts_cb_param_t* p) override
     {
       owner->lineClosed(p->disconnect.conn_id);
+    }
+#elif BLE_LINES
+    void onConnect(BLEServer*, ble_gap_conn_desc* d) override
+    {
+      owner->lineOpened(d->conn_handle);
+    }
+
+    void onDisconnect(BLEServer*, ble_gap_conn_desc* d) override
+    {
+      owner->lineClosed(d->conn_handle);
     }
 #endif
 
@@ -701,11 +792,16 @@ private:
       write(c, 0);
     }
 
-#if BLE_LINES
+#if BLE_BD
     // only a paired (encrypted) device can write: this one is ours
     void onWrite(BLECharacteristic* c, esp_ble_gatts_cb_param_t* p) override
     {
       write(c, p->write.conn_id);
+    }
+#elif BLE_LINES
+    void onWrite(BLECharacteristic* c, ble_gap_conn_desc* d) override
+    {
+      write(c, d != nullptr ? d->conn_handle : 0);
     }
 #endif
 
@@ -868,7 +964,7 @@ private:
   }
 };
 
-#if BLE_LINES
+#if BLE_BD
 BleServer* BleServer::me = nullptr;
 #endif
 
@@ -9504,6 +9600,10 @@ int bondedDevices()
 {
 #if defined(CONFIG_BLUEDROID_ENABLED)
   return esp_ble_get_bond_device_num();
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  int n = 0;
+  ble_store_util_count(BLE_STORE_OBJ_TYPE_OUR_SEC, &n);
+  return n;
 #else
   return 0;
 #endif
@@ -9558,6 +9658,8 @@ void forgetPairedDevices()
 
     free(list);
   }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  ble_store_clear();
 #endif
 
   Serial.println("Bluetooth: all paired devices forgotten - pairing open");
@@ -10382,7 +10484,7 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.6 (no LoRa; own Bluetooth lines, strikes saved in flash) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 2.7 (no LoRa; own Bluetooth lines, strikes saved in flash) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

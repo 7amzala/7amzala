@@ -5,6 +5,8 @@
 #include <BLESecurity.h>
 #include <Preferences.h>
 #include <string>
+#include <functional>
+#include <esp_task_wdt.h>
 
 #include "ble_link.h"
 #include "link_merge.h"
@@ -737,6 +739,75 @@ static void setLinkFast(bool fast)
   Serial.printf("[BLE] link %s\n", fast ? "fast (something moves, or weak signal)" : "calm (saves power)");
 }
 
+// A Bluetooth library call that waits for the rod (encryption, finding its
+// service) can wait forever when the rod does not answer: the watchdog then
+// restarted the watch, again and again. So it runs in a helper task: we wait
+// (telling the watchdog we're alive), and after 'ms' drop the link, which
+// ends the call. Still stuck 5 s later (never seen): restart the watch.
+struct BleJob
+{
+  std::function<bool()> fn;
+  volatile int result;                  // -1 running, 0 failed, 1 ok
+};
+
+static void bleJobTask(void *arg)
+{
+  BleJob *j = (BleJob *)arg;
+  j->result = j->fn() ? 1 : 0;
+  vTaskDelete(NULL);
+}
+
+static bool jobTimedOut = false;        // the last runWithDeadline gave up waiting
+
+static bool runWithDeadline(std::function<bool()> fn, uint32_t ms, const char *what)
+{
+  jobTimedOut = false;
+
+  BleJob *j = new BleJob{ fn, -1 };
+
+  if(xTaskCreate(bleJobTask, "ble_job", 6144, j, 2, nullptr) != pdPASS)
+  {
+    delete j;
+    return fn();                        // (no memory for a task: the old way)
+  }
+
+  uint32_t t0 = millis();
+
+  while(j->result < 0 && millis() - t0 < ms)
+  {
+    esp_task_wdt_reset();
+    delay(20);
+  }
+
+  if(j->result < 0)
+  {
+    Serial.printf("[BLE] %s: no answer from the rod in %lu s - dropping the link\n", what, (unsigned long)(ms / 1000));
+    jobTimedOut = true;
+
+    if(client != nullptr)
+      client->disconnect();
+
+    t0 = millis();
+
+    while(j->result < 0 && millis() - t0 < 5000)
+    {
+      esp_task_wdt_reset();
+      delay(20);
+    }
+
+    if(j->result < 0)
+    {
+      Serial.println("[BLE] Bluetooth stuck - restarting the watch");
+      delay(100);
+      ESP.restart();
+    }
+  }
+
+  bool ok = j->result == 1;
+  delete j;
+  return ok;
+}
+
 static void connectToRodAt(BLEAddress addr)
 {
   setPhase(BLE_LINK_CONNECTING);
@@ -748,7 +819,9 @@ static void connectToRodAt(BLEAddress addr)
   Serial.printf("[BLE] rod %s, connecting...\n", addr.toString().c_str());
   setNote(pairState == PAIR_WORKING ? "pairing - checking the PIN..." : "rod found - connecting...");
 
-  bool ok = client->connect(addr);
+  esp_task_wdt_reset();
+  bool ok = client->connect(addr, 0xFF, 10000);   // 10 s at most (the library's own: 30 s)
+  esp_task_wdt_reset();
 
   if(!ok)
   {
@@ -762,12 +835,32 @@ static void connectToRodAt(BLEAddress addr)
   authDone = false;
   authOk = false;
   BLESecurity::resetSecurity();
-  client->secureConnection();
+
+  BLEClient *c = client;
+  bool secured = runWithDeadline([c]() { return c->secureConnection(); }, 15000, "encryption");
 
   uint32_t waitAuth = millis();
 
-  while(!authDone && millis() - waitAuth < 20000)
+  while(!authDone && client->isConnected() && millis() - waitAuth < 3000)
+  {
+    esp_task_wdt_reset();
     delay(20);
+  }
+
+  if(secured && !authDone)
+    authOk = true;                      // (the library said yes; its callback did not come)
+
+  if(!authOk && jobTimedOut)
+  {
+    // the rod did not answer (busy, too far): try again, NOT a refused PIN
+    lost();
+
+    if(pairState == PAIR_WORKING)
+      pairState = PAIR_FAILED;          // the pairing screen: TRY AGAIN
+
+    setNote("rod not answering - trying again");
+    return;
+  }
 
   if(!authOk)
   {
@@ -792,7 +885,8 @@ static void connectToRodAt(BLEAddress addr)
 
   authFails = 0;
 
-  BLERemoteService *service = client->getService(SERVICE_UUID);
+  BLERemoteService *service = nullptr;
+  runWithDeadline([c, &service]() { service = c->getService(SERVICE_UUID); return service != nullptr; }, 10000, "finding the rod's service");
   BLERemoteCharacteristic *tx = service != nullptr ? service->getCharacteristic(TX_UUID) : nullptr;
 
   rx = service != nullptr ? service->getCharacteristic(RX_UUID) : nullptr;
