@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 13
-        versionName "3.1 (fight timer, catch photos)"
+        versionCode 14
+        versionName "3.2 (catch photos: camera only)"
     }
 
     // Alarm sounds are read straight from the app (RodService): not compressed

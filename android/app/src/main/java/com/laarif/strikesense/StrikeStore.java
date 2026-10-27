@@ -295,8 +295,9 @@ final class StrikeStore
         save();
     }
 
-    // A photo was taken / chosen (already made small): goes online with the next sync
-    synchronized void photoSaved(String uid, String slot)
+    // A photo was taken (camera only, already made small): goes online with the
+    // next sync, with when and where it was taken (the sheet shows it)
+    synchronized void photoSaved(String uid, String slot, long takenMs)
     {
         JSONObject s = byUid(uid);
 
@@ -314,6 +315,27 @@ final class StrikeStore
             }
 
             ph.put(slot, "");                // "" = on the phone, not online yet
+
+            JSONObject info = s.optJSONObject("photoinfo");
+
+            if(info == null)
+            {
+                info = new JSONObject();
+                s.put("photoinfo", info);
+            }
+
+            JSONObject one = new JSONObject();
+            one.put("at", takenMs);
+            one.put("local", new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.UK).format(new java.util.Date(takenMs)));
+            Location l = bestFix();
+
+            if(l != null && Math.abs(takenMs - l.getTime()) < 15 * 60000L)
+            {
+                one.put("lat", Math.round(l.getLatitude() * 1e5) / 1e5);
+                one.put("lon", Math.round(l.getLongitude() * 1e5) / 1e5);
+            }
+
+            info.put(slot, one);
             if(s.optString("result").isEmpty())
                 s.put("result", "fish");
             s.put("synced", false);
@@ -798,6 +820,15 @@ final class StrikeStore
                 body.put("token", token());
                 body.put("uid", p[0]);
                 body.put("slot", p[1]);
+
+                synchronized(this)
+                {
+                    JSONObject s = byUid(p[0]);
+                    JSONObject info = s == null || s.optJSONObject("photoinfo") == null ? null : s.optJSONObject("photoinfo").optJSONObject(p[1]);
+
+                    if(info != null)
+                        body.put("taken", info);
+                }
                 body.put("data", android.util.Base64.encodeToString(jpg, android.util.Base64.NO_WRAP));
 
                 JSONObject answer = new JSONObject(http(url, body.toString()));

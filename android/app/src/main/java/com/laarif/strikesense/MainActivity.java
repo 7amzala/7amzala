@@ -65,9 +65,10 @@ public class MainActivity extends Activity
     private static final int REQ_BLUETOOTH_ON = 2;
     private static final int REQ_PHOTO = 3;
 
-    // the catch photo being taken / chosen
+    // the catch photo being taken (camera only: a real photo, taken now)
     private String photoUid = "", photoSlot = "";
-    private boolean photoCamera = false;
+    private long photoAskedAt = 0;
+    private static final long PHOTO_MAX_AGE_MS = 10 * 60000L;   // the camera's own time stamp: at most 10 min off
 
     static volatile boolean visible = false;
 
@@ -223,40 +224,65 @@ public class MainActivity extends Activity
 
     // ---------- catch photos (hook in the mouth, weight, length) ----------
 
-    private void takePhoto(String uid, String slot, boolean camera)
+    // Camera only (no gallery): the photo is taken now, so it is real
+    private void takePhoto(String uid, String slot)
     {
         photoUid = uid;
         photoSlot = slot;
-        photoCamera = camera;
+        photoAskedAt = System.currentTimeMillis();
 
         // the phone may close the app while the camera is open: remember which photo it was
         getSharedPreferences("app", MODE_PRIVATE).edit().putString("photoUid", uid).putString("photoSlot", slot)
-            .putBoolean("photoCamera", camera).apply();
+            .putLong("photoAskedAt", photoAskedAt).apply();
 
         try
         {
-            if(camera)
+            PhotoProvider.cameraFile(this).delete();
+            Uri out = PhotoProvider.cameraUri();
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, out);
+            i.setClipData(ClipData.newRawUri("", out));
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(i, REQ_PHOTO);
+        }
+        catch(Exception e)
+        {
+            photoDone(false, "No camera app on this phone");
+        }
+    }
+
+    // A real photo, taken now: the camera wrote our file after we opened it,
+    // and the camera's own time stamp (when it has one) is now
+    private String notNew(File f, long askedAt)
+    {
+        if(f.lastModified() < askedAt - 5000)
+            return "This photo is not new. Take the photo now.";
+
+        try
+        {
+            FileInputStream in = new FileInputStream(f);
+            ExifInterface ex = new ExifInterface(in);
+            in.close();
+
+            String t = ex.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL);
+
+            if(t == null)
+                t = ex.getAttribute(ExifInterface.TAG_DATETIME);
+
+            if(t != null && t.length() >= 19)
             {
-                PhotoProvider.cameraFile(this).delete();
-                Uri out = PhotoProvider.cameraUri();
-                Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                i.putExtra(MediaStore.EXTRA_OUTPUT, out);
-                i.setClipData(ClipData.newRawUri("", out));
-                i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivityForResult(i, REQ_PHOTO);
-            }
-            else
-            {
-                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
-                i.setType("image/*");
-                i.addCategory(Intent.CATEGORY_OPENABLE);
-                startActivityForResult(i, REQ_PHOTO);
+                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US);
+                long at = fmt.parse(t.substring(0, 19)).getTime();      // the phone's local time
+
+                if(Math.abs(at - System.currentTimeMillis()) > PHOTO_MAX_AGE_MS)
+                    return "This photo is not new (taken " + t.substring(0, 16).replace(':', '-').replaceFirst("-(\\d\\d)$", ":$1") + "). Take the photo now.";
             }
         }
         catch(Exception e)
         {
-            photoDone(false, camera ? "No camera app on this phone" : "No gallery app on this phone");
         }
+
+        return "";
     }
 
     private void gotPhoto(final boolean ok, final Intent data)
@@ -266,11 +292,11 @@ public class MainActivity extends Activity
             SharedPreferences p = getSharedPreferences("app", MODE_PRIVATE);
             photoUid = p.getString("photoUid", "");
             photoSlot = p.getString("photoSlot", "");
-            photoCamera = p.getBoolean("photoCamera", false);
+            photoAskedAt = p.getLong("photoAskedAt", 0);
         }
 
         final String uid = photoUid, slot = photoSlot;
-        final boolean camera = photoCamera;
+        final long askedAt = photoAskedAt;
 
         if(!ok || uid.isEmpty())
         {
@@ -285,16 +311,20 @@ public class MainActivity extends Activity
             {
                 StrikeStore st = StrikeStore.get(MainActivity.this);
                 boolean saved = false;
+                String why = "Could not read that photo";
 
                 try
                 {
-                    Uri src = !camera && data != null ? data.getData() : null;
                     File camFile = PhotoProvider.cameraFile(MainActivity.this);
 
-                    if(src == null && !camFile.exists())
+                    if(!camFile.exists() || camFile.length() == 0)
                         throw new Exception("no photo");
 
-                    saved = smallJpeg(src, camFile, st.photoFile(uid, slot));
+                    why = notNew(camFile, askedAt);
+
+                    if(why.isEmpty())
+                        saved = smallJpeg(null, camFile, st.photoFile(uid, slot));
+
                     camFile.delete();
                 }
                 catch(Exception e)
@@ -303,16 +333,17 @@ public class MainActivity extends Activity
                 }
 
                 if(saved)
-                    st.photoSaved(uid, slot);
+                    st.photoSaved(uid, slot, System.currentTimeMillis());
 
                 final boolean done = saved;
+                final String note = why.isEmpty() ? "Could not read that photo" : why;
 
                 handler.post(new Runnable()
                 {
                     @Override
                     public void run()
                     {
-                        photoDone(done, done ? "" : "Could not read that photo");
+                        photoDone(done, done ? "" : note);
                     }
                 });
 
@@ -879,16 +910,16 @@ public class MainActivity extends Activity
             return StrikeStore.get(MainActivity.this).photoFile(uid, slot).exists();
         }
 
-        // camera = true: take one now; false: choose from the gallery
+        // take the photo now with the camera (no gallery: a real photo)
         @JavascriptInterface
-        public void photo(final String uid, final String slot, final boolean camera)
+        public void photo(final String uid, final String slot)
         {
             handler.post(new Runnable()
             {
                 @Override
                 public void run()
                 {
-                    takePhoto(uid, slot, camera);
+                    takePhoto(uid, slot);
                 }
             });
         }

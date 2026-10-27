@@ -52,8 +52,6 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
 .fields label{flex:1;background:#060c1a;border:1px solid #24324f;border-radius:11px;padding:7px 10px}
 .fields small{display:block;font-size:11px;color:#8ea6c8;margin-bottom:2px}
 .fields input{width:100%;background:none;border:0;color:#eaf3ff;font-size:20px;font-weight:800;outline:none;padding:0}
-.sheet{position:fixed;left:0;right:0;bottom:0;background:#0b1428;border-top:1px solid #24324f;border-radius:16px 16px 0 0;padding:14px 14px 22px;display:none;z-index:2000}
-.sheet.on{display:block}
 .save{width:100%;padding:15px;font-size:17px;margin:12px 0 0}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#0b1428;color:#eaf3ff;border:1px solid #24324f}
 .leaflet-container a.leaflet-popup-close-button{color:#8ea6c8}
@@ -126,13 +124,13 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
   <div class="title" id="cTitle">Fish out! &#127881;</div><div class="sp"></div>
  </div>
  <div class="meta" id="cMeta" style="margin:-4px 0 10px"></div>
- <div class="lbl" style="margin-bottom:7px">PHOTOS (tap: camera or gallery)</div>
+ <div class="lbl" style="margin-bottom:7px">PHOTOS (tap: take it now with the camera)</div>
  <div class="photos">
   <div class="slot" id="slot_hook" onclick="askPhoto('hook')"></div>
   <div class="slot" id="slot_weight" onclick="askPhoto('weight')"></div>
   <div class="slot" id="slot_length" onclick="askPhoto('length')"></div>
  </div>
- <div class="meta" id="cPhotoNote" style="margin-top:6px"></div>
+ <div class="meta" id="cPhotoNote" style="margin-top:6px">Camera only: each photo is taken now, with its time and place.</div>
  <div class="lbl" style="margin:14px 0 7px">NUMBERS (optional)</div>
  <div class="fields">
   <label><small>Weight (kg)</small><input id="cKg" type="number" inputmode="decimal" step="0.1" min="0" placeholder="&ndash;"></label>
@@ -143,13 +141,6 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
  <input type="text" id="cOther" placeholder="Other fish: type its name" style="display:none;margin-bottom:6px">
  <button class="btn save" onclick="saveCatch()">SAVE &#10004;</button>
  <div class="meta" style="text-align:center;margin-top:8px">Later is fine: it waits in My strikes as <b style="color:#ffc928">+ PHOTOS</b></div>
-</div>
-
-<div class="sheet" id="photoSheet">
- <div class="lbl" id="sheetTitle" style="margin-bottom:10px"></div>
- <button class="btn save" onclick="photoFrom(true)">&#128247; Camera</button>
- <button class="btn ghost save" onclick="photoFrom(false)">&#128444; Gallery</button>
- <button class="btn ghost save" onclick="$('photoSheet').classList.remove('on')">Cancel</button>
 </div>
 
 <script src="leaflet.js"></script>
@@ -203,7 +194,6 @@ function appBack()
 {
   const on = document.querySelector('.page.on').id;
   if(on == 'pList') return false;
-  if($('photoSheet').classList.contains('on')) { $('photoSheet').classList.remove('on'); return true; }
   if(on == 'pCatch') { catchBack(); return true; }
   show('pList');
   return true;
@@ -346,7 +336,7 @@ function catchTag(s)
 // ---------- catch: fish, weight, length, 3 photos ----------
 const FISH = ['Sea bass','Gilthead bream','White bream','Mullet','Sole','Ray','Mackerel','Dogfish','Other'];
 const SLOTS = { hook: ['&#129693;', 'Hook in<br>the mouth'], weight: ['&#9878;&#65039;', 'Weight<br>(scale)'], length: ['&#128207;', 'Length<br>(tape)'] };
-let cat = null, catFish = '', sheetSlot = '', catBackTo = 'pList';
+let cat = null, catFish = '', catBackTo = 'pList';
 
 function photoUrl(uid, slot) { return '/photo/' + uid.replace(/[^A-Za-z0-9_-]/g, '') + '_' + slot + '.jpg?t=' + Date.now(); }
 function hasPhoto(s, slot) { return APP && APP.hasPhoto ? APP.hasPhoto(s.uid, slot) : false; }
@@ -402,24 +392,18 @@ function drawSlots()
     const el = $('slot_' + k), have = hasPhoto(cat, k);
     el.className = 'slot' + (have ? ' done' : '');
     el.style.backgroundImage = have ? `url('${photoUrl(cat.uid, k)}')` : '';
-    el.innerHTML = have ? `<span class="ok">&#10004;</span><span>${SLOTS[k][1].replace('<br>', ' ')}</span>`
+    const at = cat.photoinfo && cat.photoinfo[k] ? cat.photoinfo[k].local.slice(11) : '';
+    el.innerHTML = have ? `<span class="ok">&#10004;</span><span>${SLOTS[k][1].replace('<br>', ' ')}${at ? '<br>&#128247; ' + at : ''}</span>`
                         : `<span class="ic">${SLOTS[k][0]}</span>${SLOTS[k][1]}`;
   });
 }
 
+// camera only: a real photo, taken now (no gallery)
 function askPhoto(slot)
 {
-  sheetSlot = slot;
-  $('sheetTitle').innerHTML = SLOTS[slot][1].replace('<br>', ' ').toUpperCase();
-  $('photoSheet').classList.add('on');
-}
-
-function photoFrom(camera)
-{
-  $('photoSheet').classList.remove('on');
   if(!APP || !APP.photo) { $('cPhotoNote').textContent = 'Photos work in the app.'; return; }
-  $('cPhotoNote').textContent = camera ? 'Taking the photo…' : 'Choose a photo…';
-  APP.photo(cat.uid, sheetSlot, camera);
+  $('cPhotoNote').textContent = 'Taking the photo…';
+  APP.photo(cat.uid, slot);
 }
 
 // from the app when the photo is kept (made small)

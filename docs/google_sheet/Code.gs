@@ -17,6 +17,8 @@
 //             (hook in the mouth, weight, length)
 //
 // Photos: Google Drive folder "StrikeSense photos", one folder per tester.
+// Camera only (no gallery): the app checks each photo is new; the cell and
+// the Drive file say when (and where) it was taken.
 //   Users   - every registered tester (passwords are never stored,
 //             only a scrambled check value)
 // =====================================================
@@ -141,9 +143,12 @@ function addStrikes_(req) {
     if (s.lat !== undefined && s.lat !== '')
       sh.getRange(r, 6).setFormula('=HYPERLINK("https://www.google.com/maps?q=' + s.lat + ',' + s.lon + '","📍 open map")');
     // the photos: tap to open
+    // the label: when the photo was taken (camera only, in the app)
     PHOTO_SLOTS.forEach((k, i) => {
       const url = s.photos && s.photos[k];
-      if (url) sh.getRange(r, 24 + i).setFormula('=HYPERLINK("' + String(url).replace(/"/g, '') + '","📷 ' + k + '")');
+      const info = s.photoinfo && s.photoinfo[k];
+      const at = info && info.local ? String(info.local).slice(11, 16) : k;
+      if (url) sh.getRange(r, 24 + i).setFormula('=HYPERLINK("' + String(url).replace(/"/g, '') + '","📷 ' + at.replace(/"/g, '') + '")');
     });
     sh.getRange(r, 14).setFormulaR1C1('=IF(R[0]C[1]="","",SPARKLINE(SPLIT(R[0]C[1],","),{"color","#1e7bff";"linewidth",2}))');
   });
@@ -209,6 +214,10 @@ function addPhoto_(req) {
 
   const blob = Utilities.newBlob(Utilities.base64Decode(req.data), 'image/jpeg', name);
   const file = folder.createFile(blob);
+  // when and where it was taken (camera only, checked by the app)
+  const t = req.taken || {};
+  file.setDescription('StrikeSense ' + user.name + ' · ' + slot + ' · taken ' + (t.local || '?') +
+                      (t.lat !== undefined ? ' · ' + t.lat + ',' + t.lon : ''));
   return { ok: true, url: file.getUrl() };
 }
 

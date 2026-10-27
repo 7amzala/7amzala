@@ -40,7 +40,7 @@ Folder.prototype = {
   getFilesByName(n) { const list = drive.files.filter(f => f.dir == this.p && f.name == n && !f.trashed); let i = 0;
     return { hasNext: () => i < list.length, next: () => { const f = list[i++]; return { setTrashed(t) { f.trashed = t; } }; } }; },
   createFile(b) { const f = { dir: this.p, name: b.name, bytes: b.bytes.length, id: drive.files.length + 1 }; drive.files.push(f);
-    return { getUrl: () => 'https://drive.google.com/file/d/F' + f.id + '/view' }; }
+    return { getUrl: () => 'https://drive.google.com/file/d/F' + f.id + '/view', setDescription(d) { f.desc = d; } }; }
 };
 const g = {
   SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: n => (sheets[n] = new Sheet(n)) }) },
@@ -82,16 +82,19 @@ check(row[16] == strike.uid && row[18] == 'FISH OUT' && row[19] == '4:12' && row
 const jpg = Buffer.alloc(250000, 7).toString('base64');
 const p1 = post({ action: 'photo', ...u, uid: strike.uid, slot: 'hook', data: jpg });
 check(p1.ok && /^https:\/\/drive/.test(p1.url), 'photo: hook saved in Drive, link back');
-const p2 = post({ action: 'photo', ...u, uid: strike.uid, slot: 'hook', data: jpg });
+const taken = { at: 1761556000000, local: '2026-10-27 06:52', lat: 37.82, lon: -0.78 };
+const p2 = post({ action: 'photo', ...u, uid: strike.uid, slot: 'hook', data: jpg, taken });
+check(/taken 2026-10-27 06:52 · 37.82,-0.78/.test(drive.files[drive.files.length - 1].desc || ''), 'Drive photo says when and where it was taken');
 check(drive.files.filter(f => !f.trashed).length == 1, 'the same photo again: replaces the old one');
 check(drive.folders['/StrikeSense photos/ali'] === true, 'in Drive: StrikeSense photos / ali');
 check(!post({ action: 'photo', ...u, uid: strike.uid, slot: 'selfie', data: jpg }).ok, 'unknown photo name refused');
 check(!post({ action: 'photo', username: 'ali', token: 'bad', uid: strike.uid, slot: 'hook', data: jpg }).ok, 'wrong token refused');
 
 strike.photos = { hook: p2.url, weight: '' };
+strike.photoinfo = { hook: taken };
 check(post({ action: 'add', ...u, strikes: [strike] }).ok, 'strike sent again with the photo link');
 check(old.cells.length == 3, 'same row updated (no second row)');
-check(/HYPERLINK\(".*drive.*","📷 hook"\)/.test(old.formulas['3,24'] || ''), 'Photo: hook column = a link to the photo');
+check(/HYPERLINK\(".*drive.*","📷 06:52"\)/.test(old.formulas['3,24'] || ''), 'Photo: hook column = a link to the photo, shows when it was taken');
 check(!old.formulas['3,25'], 'no weight photo online yet: empty');
 
 const back = post({ action: 'list', ...u });
