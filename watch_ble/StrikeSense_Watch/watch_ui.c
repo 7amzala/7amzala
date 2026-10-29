@@ -210,7 +210,6 @@ static lv_obj_t *cell_sub[CELLS];
 static lv_obj_t *cell_arrow[CELLS];
 
 // the link / LoRa channel choice just tapped (shown until the rod confirms)
-static int want_link = -1, want_chm = -1;
 static uint32_t want_at = 0;
 
 // pages: left/right: -1 relearn, 0 main, 1 sea state
@@ -503,30 +502,11 @@ static void button_clicked(lv_event_t *e)
     return;
   }
 
+  // WATCH LINK / LoRa CHANNEL: chosen in the phone app only (SAVE SETTINGS);
+  // the watch shows them - a tap just says where to change them
   if(path != NULL && (strcmp(path, "#link") == 0 || strcmp(path, "#chan") == 0) && !swiped)
   {
-    ble_link_status_t s;
-    ble_link_get(&s, false);
-    bool link = path[1] == 'l';
-    static const char *links[3] = { "auto", "bt", "lora" };
-    static const char *chans[4] = { "auto", "fast", "long1", "long2" };
-    char cmd[32];
-
-    if(link)
-    {
-      int now_m = want_link >= 0 && lv_tick_get() - want_at < 3000 ? want_link : s.lmode;
-      want_link = ((now_m < 0 ? 0 : now_m) + 1) % 3;
-      snprintf(cmd, sizeof(cmd), "/linkmode?m=%s", links[want_link]);
-    }
-    else
-    {
-      int now_c = want_chm >= 0 && lv_tick_get() - want_at < 3000 ? want_chm : s.chm;
-      want_chm = ((now_c < 0 ? 0 : now_c) + 1) % 4;
-      snprintf(cmd, sizeof(cmd), "/lorachan?m=%s", chans[want_chm]);
-    }
-
-    want_at = lv_tick_get();
-    ble_link_command(cmd);
+    want_at = lv_tick_get();              // (shows "change it in the phone app" for 3 s)
     buzz_play(BUZZ_TAP);
     return;
   }
@@ -1375,15 +1355,15 @@ static void relearn_page(const ble_link_status_t *s, uint32_t now)
   cell_set(1, "hold 2 s", hold_btn == cell[1] ? f : 0, false);
   cell_set(2, "tap", 0, false);
 
-  // the choice just tapped until the rod has it, then what the rod says
-  bool fresh = now - want_at < 3000;
-  int lm = fresh && want_link >= 0 ? want_link : s->lmode;
-  int cm = fresh && want_chm >= 0 ? want_chm : s->chm;
-  static const char *link_names[3] = { "Auto  (tap to change)", "Bluetooth only", "LoRa only" };
+  // what the rod uses (chosen in the phone app); just tapped: where to change it
+  bool tapped = want_at != 0 && now - want_at < 3000;
+  int lm = s->lmode;
+  int cm = s->chm;
+  static const char *link_names[3] = { "Auto", "Bluetooth only", "LoRa only" };
   static const char *chan_names[4] = { "Auto: 500 m, then 1 km", "500 m fast", "1 km - A", "1 km - B" };
 
-  cell_set(3, lm >= 0 && lm <= 2 ? link_names[lm] : "-", 0, false);
-  cell_set(4, cm >= 0 && cm <= 3 ? chan_names[cm] : "-", 0, false);
+  cell_set(3, tapped ? "change it in the phone app" : lm >= 0 && lm <= 2 ? link_names[lm] : "-", 0, false);
+  cell_set(4, tapped ? "change it in the phone app" : cm >= 0 && cm <= 3 ? chan_names[cm] : "-", 0, false);
 }
 
 // ---------- STRIKE screen ----------

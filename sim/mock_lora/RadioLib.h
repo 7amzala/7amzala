@@ -63,7 +63,8 @@ struct SX1262 {
   int16_t standby() { listening = false; return 0; }
   int16_t finishTransmit() { return 0; }
   size_t getPacketLength(bool = true) { return rxData.size(); }
-  int16_t readData(uint8_t* d, size_t len) { memcpy(d, rxData.data(), len); return 0; }
+  // reading a packet takes a few ms on the real chip (SPI): the clock moves on
+  int16_t readData(uint8_t* d, size_t len) { memcpy(d, rxData.data(), len); simMillis += 3; return 0; }
   float getRSSI() { return lastRssi; }
   float getSNR() { return lastSnr; }
 

@@ -197,7 +197,7 @@ int main()
   step(0.1);
   check(BLEDevice::adv().started == advBefore, "phone + watch connected: full, the rod stops advertising");
 
-  check(ask(500001, "/mtu?v=200", a) && a.code == 200, "watch says its MTU");
+  check(ask(500001, "/mtu?v=240", a) && a.code == 200, "watch says its MTU (240: its piece limit)");
   check(ask(25, "/data", a) && a.body.front() == '{' && a.body.back() == '}', "phone /data still complete with both connected");
   printf("        biggest piece now %zu bytes (each device its own MTU)\n", biggestPiece);
 
@@ -302,7 +302,7 @@ int main()
     bool got = ask(700020, "/strike", b, 6);
     int dropped = mockLinks()[PHONE].drops + mockLinks()[WATCH].drops - dropsBefore;
     printf("        /strike = %zu bytes in %.2f s (code %d)\n", b.body.size(), (simMillis - t0) / 1000.0, b.code);
-    printf("        pieces dropped on the way: %d\n", dropped);
+    printf("        pieces dropped on the way: %d (phone %d, watch %d)\n", dropped, mockLinks()[PHONE].drops, mockLinks()[WATCH].drops);
     check(got && b.code == 200 && b.body.find("\"e\":[") != std::string::npos && b.body.back() == '}' && dropped == 0,
           "/strike (phone LAST STRIKE) arrives whole within 6 s, also with the watch on its slow link");
   }
@@ -696,6 +696,29 @@ int main()
     ask(500503, "/iam?d=watch", b);
   }
 #endif
+
+  // ---- the watch's library keeps only ~270 bytes of a longer message ----
+  printf("\n=== WATCH: PIECES OF AT MOST 240 BYTES ===\n");
+  {
+    Answer b;
+    srv->mockDisconnect(WATCH);
+    step(0.5);
+    srv->mockConnect(WATCH, 517, true);         // a big link (MTU 517), like the real watch
+    seen[WATCH] = 0; inbox[WATCH].clear();
+    step(0.5);
+    check(ask(500600, "/mtu?v=240", b) && b.code == 200, "the watch: 'pieces of at most 240 bytes, please'");
+    mockLinks()[WATCH].biggest = 0;
+    step(3);                                    // live messages (~350 bytes) go out
+    check(ask(500601, "/watch", b) && b.body.back() == '}' && b.body.find("\"land\":") != std::string::npos,
+          "the watch gets whole answers, the fight ('land') at the end included");
+    printf("        biggest piece to the watch: %zu bytes (its link could take 514)\n", mockLinks()[WATCH].biggest);
+    check(mockLinks()[WATCH].biggest <= 240 && mockLinks()[WATCH].biggest >= 200, "no piece to the watch over 240 bytes (longer messages split)");
+    srv->mockDisconnect(WATCH);
+    step(0.5);
+    srv->mockConnect(WATCH, 247, true);
+    seen[WATCH] = 0; inbox[WATCH].clear();
+    step(0.5);
+  }
 
   // ---- a new sketch uploaded: a fresh rod (not after a plain restart) ----
   printf("\n=== NEW SKETCH = FRESH ROD ===\n");

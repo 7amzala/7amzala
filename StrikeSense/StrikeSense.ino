@@ -769,6 +769,11 @@ private:
     if(m == 0)
       m = L.mtuSaid > 0 ? L.mtuSaid : 20;
 
+    // the device asked for smaller pieces (the watch: its library keeps only
+    // the first ~270 bytes of a longer message): its word counts
+    if(L.mtuSaid > 0 && L.mtuSaid < m)
+      m = L.mtuSaid;
+
     return m > 512 ? 512 : m;
   }
 
@@ -5739,6 +5744,14 @@ LEARNING
 <span id="linkInfo"><span class="whoName"><svg class="who" viewBox="0 0 24 24"><path d="M3 21 L19 4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="7" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19 4 Q22 9 21 15 q1 3 -1.5 3" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>Rod</span><span id="linkName">Bluetooth</span><span class="sigBars" id="sigBars"><i></i><i></i><i></i><i></i></span><span class="sigDbm" id="sigDbm"></span></span>
 <script>
 // Called by the phone app every second: ready = linked to the rod, rssi = dBm (0 = unknown)
+// signal as a percentage: Bluetooth -30 dBm (very close) = 100 %, -95 = 0 %;
+// LoRa -40 dBm = 100 %, -125 (its limit) = 0 %
+function sigPct(dbm, lora)
+{
+  var p = lora ? (dbm + 125) / 85 : (dbm + 95) / 65;
+  return Math.round(Math.max(0, Math.min(1, p)) * 100);
+}
+
 function setLink(ready, rssi)
 {
   var n = ready && rssi ? (rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1) : 0;
@@ -5750,11 +5763,11 @@ function setLink(ready, rssi)
 
   document.getElementById('linkName').textContent = ready ? 'Bluetooth' : 'Reconnecting\u2026';
   document.getElementById('linkName').style.color = ready ? '#22a8ff' : '#ffba52';
-  document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm' : '';
+  document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm · ' + sigPct(rssi, false) + '%' : '';
 }
 </script>
 <br>
-<span id="watchInfo"><span class="whoName" id="watchWho"><svg class="who" viewBox="0 0 24 24"><rect x="8" y="1.5" width="8" height="4" rx="1" fill="currentColor"/><rect x="8" y="18.5" width="8" height="4" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 8.5 V12 L14.5 13.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
+<span id="watchInfo"><span class="whoName" id="watchWho"><svg class="who" viewBox="0 0 24 24"><rect x="8" y="1.5" width="8" height="4" rx="1" fill="currentColor"/><rect x="8" y="18.5" width="8" height="4" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 8.5 V12 L14.5 13.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span><span class="sigDbm" id="wDbm"></span></span>
 <div id="crowdTip" style="display:none;margin:5px auto 0;max-width:330px;color:#ffba52;font-size:11px;font-weight:700"></div>
 <script>
 // How the watch is connected to the rod (rod 2.3+: "wlink" in /data)
@@ -5789,6 +5802,7 @@ function showWatch(d)
   via.style.color = bt || lora ? '#eaf3ff' : word;
   document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
   box.className = bt || lora ? 'show' : 'show off';
+  document.getElementById('wDbm').textContent = (bt || lora) && d.wdbm ? d.wdbm + ' dBm · ' + sigPct(d.wdbm, lora) + '%' : '';
 }
 </script>
 
@@ -8877,6 +8891,9 @@ async function settingsCall(url)
 
 function openSettings()
 {
+  lmWanted = '';                        // a choice not saved last time is forgotten
+  chWanted = -1;
+  window.chTouched = false;
   el("drawer").classList.add("open");
   showAccount();
   settingsCall("/settings");
@@ -9013,6 +9030,20 @@ function toggle(k)
 // SAVE: the rod keeps the settings, a short "Saved", the panel closes
 async function saveSettings()
 {
+  // the watch link and LoRa channel chosen above go to the rod now
+  try
+  {
+    if(lmWanted) await fetch('/linkmode?m=' + lmWanted);
+    if(chWanted >= 0 && window.chTouched) await fetch('/lorachan?m=' + ['auto', 'fast', 'long1', 'long2'][chWanted]);
+  }
+  catch(e)
+  {
+  }
+
+  lmWanted = '';
+  chWanted = -1;
+  window.chTouched = false;
+
   await settingsCall("/savesettings");
 
   const t = el("savedToast");
@@ -9508,31 +9539,25 @@ function showChan(d)
   if(!show)
     return;
 
-  var m = chWanted >= 0 && Date.now() - chWantedAt < 3000 ? chWanted : d.lchm;
+  var m = chWanted >= 0 ? chWanted : d.lchm;   // chosen, not saved yet: shown until SAVE
 
   for(var k = 0; k < 4; k++)
     el('ch_' + k).className = k == m ? 'on' : '';
 
   var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
-  el('chHelp').innerText = CH_HELP[m] + '  Now: ' + (d.lchan > 0 ? '1 km' : '500 m') +
+  el('chHelp').innerText = (window.chTouched && chWanted != d.lchm ? 'Tap SAVE SETTINGS to apply. ' : '') + CH_HELP[m] + '  Now: ' + (d.lchan > 0 ? '1 km' : '500 m') +
     (d.lqual !== undefined ? ' · ' + QUAL[d.lqual] : '') + (d.lrods ? ' (' + d.lrods + ' rods near)' : '');
 }
 
-async function setChan(k)
+// chosen here, sent to the rod with SAVE SETTINGS
+function setChan(k)
 {
   chWanted = k;
   chWantedAt = Date.now();
+  window.chTouched = true;
 
   for(var i = 0; i < 4; i++)
     el('ch_' + i).className = i == k ? 'on' : '';
-
-  try
-  {
-    await fetch('/lorachan?m=' + ['auto', 'fast', 'long1', 'long2'][k]);
-  }
-  catch(e)
-  {
-  }
 }
 </script>
 
@@ -9554,7 +9579,7 @@ function showLinkMode(d)
     return;
 
   // just tapped: show the choice until the rod confirms it
-  var m = lmWanted && Date.now() - lmWantedAt < 3000 ? lmWanted : d.lmode;
+  var m = lmWanted ? lmWanted : d.lmode;   // chosen, not saved yet: shown until SAVE
 
   ['auto', 'bt', 'lora'].forEach(function(k)
   {
@@ -9564,24 +9589,17 @@ function showLinkMode(d)
     b.style.opacity = b.disabled ? .35 : 1;
   });
 
-  el('lmHelp').innerText = d.haslora ? LM_HELP[m] || ''
+  el('lmHelp').innerText = d.haslora ? (lmWanted && lmWanted != d.lmode ? 'Tap SAVE SETTINGS to apply. ' : '') + (LM_HELP[m] || '')
     : 'This rod has no LoRa (the rod sketch without LoRa): the watch uses Bluetooth.';
 }
 
-async function setLinkMode(m)
+// chosen here, sent to the rod with SAVE SETTINGS
+function setLinkMode(m)
 {
   lmWanted = m;
   lmWantedAt = Date.now();
-  el('lmHelp').innerText = LM_HELP[m];
+  el('lmHelp').innerText = 'Tap SAVE SETTINGS to apply. ' + LM_HELP[m];
   ['auto', 'bt', 'lora'].forEach(function(k) { el('lm_' + k).className = k == m ? 'on' : ''; });
-
-  try
-  {
-    await fetch('/linkmode?m=' + m);
-  }
-  catch(e)
-  {
-  }
 }
 </script>
 
@@ -10528,6 +10546,12 @@ void addWatchLink(String& json)
 
   addField(json, "wbars", (long)(bt ? rssiBars(watchSignal()) : loraBarsNow));
   addField(json, "wlora", lora);
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  extern float watchRssi;               // (LoRa: how strong the rod hears the watch)
+  addField(json, "wdbm", (long)(bt ? watchSignal() : lora ? (long)watchRssi : 0L));
+#else
+  addField(json, "wdbm", (long)(bt ? watchSignal() : 0L));
+#endif
 }
 
 // ---------- The last strikes, for the phone ----------
@@ -11880,7 +11904,7 @@ void autoChannel(unsigned long now)
 
   bool fresh = watchReportAt != 0 && now - watchReportAt < 12000 && watchReportAt > chanSince;
   unsigned long heard = max(watchLastSeen, chanSince);
-  unsigned long quiet = now - heard;
+  unsigned long quiet = heard > now ? 0 : now - heard;     // (heard after "now": not quiet)
 
   if(curChan == CH_FAST)
   {
@@ -12253,7 +12277,7 @@ void loraPoll()
     return;
   }
 
-  autoChannel(now);
+  autoChannel(millis());                // (not "now": a packet read since then is newer)
 }
 
 bool loraRadioOk()
@@ -12410,7 +12434,7 @@ void setup()
   freshAfterUpload();
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.4 (one phone + one watch; reliable watch link) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.5 (LoRa answers fixed, watch gets whole messages) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);

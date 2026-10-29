@@ -68,6 +68,7 @@ static char cmdSending[32] = "";
 
 static long lastId = -1;              // "/laststrike" in flight
 static long keyId = -1;               // "/lorakey" in flight (our rod's LoRa key)
+static const size_t NOTIFY_MAX = 240;  // biggest piece the rod may send us (see /mtu)
 static long iamId = -1;               // "/iam?d=watch" in flight (one watch per rod)
 static volatile bool notOurs = false; // the rod already has another watch
 static uint32_t lastAskedAt = 0;
@@ -1056,9 +1057,12 @@ static void connectToRodAt(BLEAddress addr)
   if(piece > 512)
     piece = 512;
 
-  // Tell the rod how big a piece may be (it uses the smallest of phone/watch)
+  // Tell the rod how big a piece may be. At most 240: the ESP32 library
+  // hands the watch only the first ~270 bytes of a longer Bluetooth
+  // message (the rest was lost - the fight, the link choice... never
+  // arrived over Bluetooth)
   char path[24];
-  snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
+  snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)(piece > NOTIFY_MAX ? NOTIFY_MAX : piece));
   send(newId(), path);
 
   // one watch per rod: "I am the watch"

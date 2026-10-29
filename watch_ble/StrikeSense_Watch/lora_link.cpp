@@ -615,6 +615,12 @@ void lora_link_poll(void)
     radio.startReceive();
   }
 
+  // the time again: reading a packet takes a few ms, and "last heard the
+  // rod" was set after the time above - now minus it went below zero, read
+  // as "not heard for ages": the watch kept "searching", sent no answers
+  // and hopped channels while hearing the rod fine
+  now = millis();
+
   if(txBusy && now - txStart > 2000)
   {
     txBusy = false;
@@ -671,7 +677,7 @@ void lora_link_poll(void)
     Serial.printf("[LoRa] got our rod's key (tag %04X)\n", rodTag);
   }
 
-  uint32_t silent = status.last_hb_ms == 0 ? now : now - status.last_hb_ms;
+  uint32_t silent = status.last_hb_ms == 0 ? now : (int32_t)(now - status.last_hb_ms) < 0 ? 0 : now - status.last_hb_ms;
   uint32_t lostAfter = rodGapMs * 3 + 1500 > 6000 ? rodGapMs * 3 + 1500 : 6000;
 
   LOCK();

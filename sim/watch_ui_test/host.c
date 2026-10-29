@@ -706,7 +706,7 @@ int main(void)
   sent_n = sent_before_hist;                    // (WATCHING taps, /settime)
   printf("%s: history, %d wrong\n", hfail ? "FAIL" : "PASS", hfail);
 
-  // SETUP: WATCH LINK and LoRa CHANNEL, synced with the app through the rod
+  // SETUP: WATCH LINK and LoRa CHANNEL, shown (chosen in the phone app)
   {
     int before = sent_n;
     scene = 1; run_ms(1500);
@@ -719,9 +719,11 @@ int main(void)
     lv_obj_get_coords(cell[4], &a);
     press((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2); run_ms(300);
     save("w20_setup_changed");
-    int good = shown && sent_n == before + 2 && strcmp(sent[before], "/linkmode?m=bt") == 0 && strcmp(sent[before + 1], "/lorachan?m=fast") == 0 &&
-               strcmp(lv_label_get_text(cell_sub[3]), "Bluetooth only") == 0 && strcmp(lv_label_get_text(cell_sub[4]), "500 m fast") == 0;
-    printf("%s: SETUP watch link + LoRa channel: tap -> %s, %s (shows: %s / %s)\n", good ? "PASS" : "FAIL",
+    // chosen in the phone app only: a tap sends nothing and says where to change it
+    int good = shown && sent_n == before && strcmp(lv_label_get_text(cell_sub[3]), "change it in the phone app") == 0;
+    run_ms(3500);
+    good = good && strcmp(lv_label_get_text(cell_sub[3]), "Auto") == 0;
+    printf("%s: SETUP watch link + LoRa channel shown only (changed in the app): tap -> %s, %s (shows: %s / %s)\n", good ? "PASS" : "FAIL",
            sent_n > before ? sent[before] : "-", sent_n > before + 1 ? sent[before + 1] : "-",
            lv_label_get_text(cell_sub[3]), lv_label_get_text(cell_sub[4]));
     sent_n = before;

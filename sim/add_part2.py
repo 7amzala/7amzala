@@ -188,4 +188,121 @@ rep('''  if(server.hasArg("r"))
     Serial.printf("Bluetooth: watch signal %d dBm (watch says), %d dBm (rod measures)\\n", watchBtRssi, server.connRssi(watchBtConn));
   }''')
 
+# ---------- LoRa: the time after reading packets (a watch heard just now was "silent for ages") ----------
+if 'void autoChannel(unsigned long now)' in s:
+    rep('''  autoChannel(now);''', '''  autoChannel(millis());                // (not "now": a packet read since then is newer)''')
+    rep('''  unsigned long quiet = now - heard;''', '''  unsigned long quiet = heard > now ? 0 : now - heard;     // (heard after "now": not quiet)''')
+
+# ---------- link + channel: chosen in the app, applied with SAVE SETTINGS ----------
+rep('''async function saveSettings()
+{
+  await settingsCall("/savesettings");''', '''async function saveSettings()
+{
+  // the watch link and LoRa channel chosen above go to the rod now
+  try
+  {
+    if(lmWanted) await fetch('/linkmode?m=' + lmWanted);
+    if(chWanted >= 0 && window.chTouched) await fetch('/lorachan?m=' + ['auto', 'fast', 'long1', 'long2'][chWanted]);
+  }
+  catch(e)
+  {
+  }
+
+  lmWanted = '';
+  chWanted = -1;
+  window.chTouched = false;
+
+  await settingsCall("/savesettings");''')
+rep('''function openSettings()
+{
+  el("drawer").classList.add("open");''', '''function openSettings()
+{
+  lmWanted = '';                        // a choice not saved last time is forgotten
+  chWanted = -1;
+  window.chTouched = false;
+  el("drawer").classList.add("open");''')
+rep('''  var m = chWanted >= 0 && Date.now() - chWantedAt < 3000 ? chWanted : d.lchm;''',
+    '''  var m = chWanted >= 0 ? chWanted : d.lchm;   // chosen, not saved yet: shown until SAVE''')
+rep('''  el('chHelp').innerText = CH_HELP[m] + '  Now: ' + (d.lchan > 0 ? '1 km' : '500 m') +''',
+    '''  el('chHelp').innerText = (window.chTouched && chWanted != d.lchm ? 'Tap SAVE SETTINGS to apply. ' : '') + CH_HELP[m] + '  Now: ' + (d.lchan > 0 ? '1 km' : '500 m') +''')
+rep('''async function setChan(k)
+{
+  chWanted = k;
+  chWantedAt = Date.now();
+
+  for(var i = 0; i < 4; i++)
+    el('ch_' + i).className = i == k ? 'on' : '';
+
+  try
+  {
+    await fetch('/lorachan?m=' + ['auto', 'fast', 'long1', 'long2'][k]);
+  }
+  catch(e)
+  {
+  }
+}''', '''// chosen here, sent to the rod with SAVE SETTINGS
+function setChan(k)
+{
+  chWanted = k;
+  chWantedAt = Date.now();
+  window.chTouched = true;
+
+  for(var i = 0; i < 4; i++)
+    el('ch_' + i).className = i == k ? 'on' : '';
+}''')
+rep('''  var m = lmWanted && Date.now() - lmWantedAt < 3000 ? lmWanted : d.lmode;''',
+    '''  var m = lmWanted ? lmWanted : d.lmode;   // chosen, not saved yet: shown until SAVE''')
+rep("  el('lmHelp').innerText = d.haslora ? LM_HELP[m] || ''\n",
+    "  el('lmHelp').innerText = d.haslora ? (lmWanted && lmWanted != d.lmode ? 'Tap SAVE SETTINGS to apply. ' : '') + (LM_HELP[m] || '')\n")
+rep('''async function setLinkMode(m)
+{
+  lmWanted = m;
+  lmWantedAt = Date.now();
+  el('lmHelp').innerText = LM_HELP[m];
+  ['auto', 'bt', 'lora'].forEach(function(k) { el('lm_' + k).className = k == m ? 'on' : ''; });
+
+  try
+  {
+    await fetch('/linkmode?m=' + m);
+  }
+  catch(e)
+  {
+  }
+}''', '''// chosen here, sent to the rod with SAVE SETTINGS
+function setLinkMode(m)
+{
+  lmWanted = m;
+  lmWantedAt = Date.now();
+  el('lmHelp').innerText = 'Tap SAVE SETTINGS to apply. ' + LM_HELP[m];
+  ['auto', 'bt', 'lora'].forEach(function(k) { el('lm_' + k).className = k == m ? 'on' : ''; });
+}''')
+
+# ---------- dBm + % for the rod and the watch lines ----------
+rep('''  addField(json, "wlora", lora);''', '''  addField(json, "wlora", lora);
+#if defined(ENABLE_LORA) && ENABLE_LORA
+  extern float watchRssi;               // (LoRa: how strong the rod hears the watch)
+  addField(json, "wdbm", (long)(bt ? watchSignal() : lora ? (long)watchRssi : 0L));
+#else
+  addField(json, "wdbm", (long)(bt ? watchSignal() : 0L));
+#endif''')
+rep('''<span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>''',
+    '''<span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span><span class="sigDbm" id="wDbm"></span></span>''')
+rep('''  document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm' : '';''',
+    '''  document.getElementById('sigDbm').textContent = ready && rssi ? rssi + ' dBm · ' + sigPct(rssi, false) + '%' : '';''')
+rep('''function setLink(ready, rssi)
+{''', '''// signal as a percentage: Bluetooth -30 dBm (very close) = 100 %, -95 = 0 %;
+// LoRa -40 dBm = 100 %, -125 (its limit) = 0 %
+function sigPct(dbm, lora)
+{
+  var p = lora ? (dbm + 125) / 85 : (dbm + 95) / 65;
+  return Math.round(Math.max(0, Math.min(1, p)) * 100);
+}
+
+function setLink(ready, rssi)
+{''')
+rep('''  box.className = bt || lora ? 'show' : 'show off';
+}''', '''  box.className = bt || lora ? 'show' : 'show off';
+  document.getElementById('wDbm').textContent = (bt || lora) && d.wdbm ? d.wdbm + ' dBm · ' + sigPct(d.wdbm, lora) + '%' : '';
+}''')
+
 open(path, 'w').write(s)

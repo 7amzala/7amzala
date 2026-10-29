@@ -233,6 +233,7 @@ final class RodLink
                 pairIdWanted = id;
                 pairPin = pin;
                 pairState = PairState.WORKING;
+                pairTries = 0;
                 stopScan();
                 listenForBonding();
 
@@ -241,10 +242,17 @@ final class RodLink
                     BluetoothDevice d = adapter.getRemoteDevice(address);
 
                     if(d.getBondState() == BluetoothDevice.BOND_BONDED)
-                        removeBond(d);         // an old pairing: start fresh with the PIN
-
-                    if(!d.createBond())
-                        pairState = PairState.FAILED;
+                    {
+                        // an old pairing (e.g. the rod got new software): remove it,
+                        // and give Android a moment before pairing again (asking at
+                        // once failed the first time: "wrong PIN", then the 2nd tap worked)
+                        removeBond(d);
+                        h.postDelayed(bondNow, 1500);
+                    }
+                    else
+                    {
+                        bondNow.run();
+                    }
                 }
                 catch(Exception e)
                 {
@@ -330,6 +338,29 @@ final class RodLink
     }
 
     // Android asks for the PIN: give the one typed in the app; the result of the pairing
+    // pair with the rod chosen (tried twice before "not paired")
+    private int pairTries = 0;
+
+    private final Runnable bondNow = new Runnable()
+    {
+        @SuppressLint("MissingPermission")
+        @Override
+        public void run()
+        {
+            try
+            {
+                pairTries++;
+
+                if(!adapter.getRemoteDevice(pairAddress).createBond())
+                    pairState = PairState.FAILED;
+            }
+            catch(Exception e)
+            {
+                pairState = PairState.FAILED;
+            }
+        }
+    };
+
     private final BroadcastReceiver bonding = new BroadcastReceiver()
     {
         @SuppressLint("MissingPermission")
@@ -366,7 +397,10 @@ final class RodLink
             }
             else if(now == BluetoothDevice.BOND_NONE && before == BluetoothDevice.BOND_BONDING)
             {
-                pairState = PairState.FAILED;      // wrong PIN, or the rod's 3 minutes are over
+                if(pairState == PairState.WORKING && pairTries < 2)
+                    h.postDelayed(bondNow, 1200);  // once more by itself (the first try often fails)
+                else
+                    pairState = PairState.FAILED;  // wrong PIN, or the rod's 3 minutes are over
             }
         }
     };

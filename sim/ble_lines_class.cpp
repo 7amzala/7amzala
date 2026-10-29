@@ -679,6 +679,11 @@ private:
     if(m == 0)
       m = L.mtuSaid > 0 ? L.mtuSaid : 20;
 
+    // the device asked for smaller pieces (the watch: its library keeps only
+    // the first ~270 bytes of a longer message): its word counts
+    if(L.mtuSaid > 0 && L.mtuSaid < m)
+      m = L.mtuSaid;
+
     return m > 512 ? 512 : m;
   }
 
