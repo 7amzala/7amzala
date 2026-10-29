@@ -29,6 +29,7 @@
 #include "strike_sd.h"
 #include <esp_task_wdt.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 #include "esp_app_desc.h"
 
 // Watchdog: if the screen task, the Bluetooth loop or the LoRa task is ever stuck for
@@ -147,6 +148,19 @@ void setup()
 void loop()
 {
   esp_task_wdt_reset();     // "still alive"
+
+  // memory, every 30 s (Bluetooth needs fast internal memory: if it runs
+  // low, Bluetooth data is lost and the watch can crash)
+  static uint32_t memSaidAt = 0;
+
+  if(millis() - memSaidAt >= 30000)
+  {
+    memSaidAt = millis();
+    Serial.printf("[WATCH] memory: internal %u KB free (biggest block %u KB), PSRAM %u KB free\n",
+                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                  (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+  }
 
   ble_link_poll();          // find/connect the rod, live data, buttons
   watch_bat_poll();

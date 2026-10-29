@@ -173,4 +173,19 @@ rep('''  el("fishOutButton").style.display = land === 1 ? "block" : "none";
   el("lostButton").style.display = land === 1 ? "flex" : "none";
   el("noFishButton").style.display = land === 1 ? "flex" : "none";''')
 
+# ---------- watch bars: keep the last real signal (a 0 = "don't know" no longer wipes it) ----------
+rep('''  if(server.hasArg("r"))
+    watchBtRssi = server.arg("r").toInt();''', '''  int r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+
+  if(r != 0)
+    watchBtRssi = r;                    // (0 = the watch did not know: the last real one stays)
+
+  static unsigned long saidAt = 0;
+
+  if(millis() - saidAt > 30000)
+  {
+    saidAt = millis();
+    Serial.printf("Bluetooth: watch signal %d dBm (watch says), %d dBm (rod measures)\\n", watchBtRssi, server.connRssi(watchBtConn));
+  }''')
+
 open(path, 'w').write(s)

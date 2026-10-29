@@ -882,8 +882,16 @@ static bool runWithDeadline(std::function<bool()> fn, uint32_t ms, const char *w
 
   if(xTaskCreate(bleJobTask, "ble_job", 6144, j, 2, nullptr) != pdPASS)
   {
+    // no memory for the helper: NOT the call without a time limit (that
+    // froze the watch until the watchdog restarted it) - try again later
     delete j;
-    return fn();                        // (no memory for a task: the old way)
+    Serial.printf("[BLE] %s: memory low - trying again in a moment\n", what);
+    jobTimedOut = true;
+
+    if(client != nullptr)
+      client->disconnect();
+
+    return false;
   }
 
   uint32_t t0 = millis();
@@ -1003,19 +1011,32 @@ static void connectToRodAt(BLEAddress addr)
 
   BLERemoteService *service = nullptr;
   runWithDeadline([c, &service]() { service = c->getService(SERVICE_UUID); return service != nullptr; }, 10000, "finding the rod's service");
-  BLERemoteCharacteristic *tx = service != nullptr ? service->getCharacteristic(TX_UUID) : nullptr;
-
-  rx = service != nullptr ? service->getCharacteristic(RX_UUID) : nullptr;
-
-  if(rx == nullptr || tx == nullptr || !tx->canNotify())
+  // Finding the two channels and switching on the rod's messages both wait
+  // for the rod's answer with no time limit in the library: a rod that did
+  // not answer froze the watch until the watchdog restarted it (task_wdt).
+  BLERemoteCharacteristic *tx = nullptr;
+  BLERemoteCharacteristic *rxc = nullptr;
+  bool subscribed = service != nullptr && runWithDeadline([service, &tx, &rxc]()
   {
-    Serial.println("[BLE] connected, but no StrikeSense service (old rod sketch?)");
+    tx = service->getCharacteristic(TX_UUID);
+    rxc = service->getCharacteristic(RX_UUID);
+
+    if(rxc == nullptr || tx == nullptr || !tx->canNotify())
+      return false;
+
+    tx->registerForNotify(onNotify);
+    return true;
+  }, 8000, "switching on the rod's messages");
+
+  rx = subscribed ? rxc : nullptr;
+
+  if(!subscribed)
+  {
+    Serial.println(jobTimedOut ? "[BLE] the rod did not answer - trying again" : "[BLE] connected, but no StrikeSense service (old rod sketch?)");
     lost();
-    setNote("no StrikeSense service on rod");
+    setNote(jobTimedOut ? "rod did not answer - trying again" : "no StrikeSense service on rod");
     return;
   }
-
-  tx->registerForNotify(onNotify);
 
   linkFast = true;
   calmSince = 0;
@@ -1226,6 +1247,9 @@ void ble_link_poll(void)
     }
 
     seenCount = 0;
+    // paired: the rod is known by its address, so a light (passive) scan is
+    // enough - less work for Bluetooth where many devices are around
+    BLEDevice::getScan()->setActiveScan(pairedAddr.length() == 0);
     BLEDevice::getScan()->start(pairedAddr.length() > 0 ? 3 : 2, false);   // up to 3 s, stops early when found
     BLEDevice::getScan()->clearResults();
     scans++;

@@ -10181,8 +10181,18 @@ void noteWatchHere()
 #if defined(ESP32)
   watchBtConn = server.askerConn();
 
-  if(server.hasArg("r"))
-    watchBtRssi = server.arg("r").toInt();
+  int r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+
+  if(r != 0)
+    watchBtRssi = r;                    // (0 = the watch did not know: the last real one stays)
+
+  static unsigned long saidAt = 0;
+
+  if(millis() - saidAt > 30000)
+  {
+    saidAt = millis();
+    Serial.printf("Bluetooth: watch signal %d dBm (watch says), %d dBm (rod measures)\n", watchBtRssi, server.connRssi(watchBtConn));
+  }
 #else
   watchBtRssi = server.arg("r").toInt();
 #endif

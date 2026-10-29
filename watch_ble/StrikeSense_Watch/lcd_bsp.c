@@ -103,7 +103,9 @@ void lcd_lvgl_Init(void)
   // Drawing buffers in fast (DMA) memory. Bluetooth needs some of that
   // memory too, so use smaller buffers than the demo (1/8 of the screen,
   // about 54 KB each) and step down instead of crashing if memory is short.
-  static const int heights[] = { EXAMPLE_LCD_V_RES / 8 & ~1, EXAMPLE_LCD_V_RES / 16 & ~1, EXAMPLE_LCD_V_RES / 32 & ~1 };
+  // (1/16 of the screen each: 1/8 left Bluetooth too little memory -
+  // "BLE_INIT: Malloc failed", lost Bluetooth data and a crash)
+  static const int heights[] = { EXAMPLE_LCD_V_RES / 16 & ~1, EXAMPLE_LCD_V_RES / 32 & ~1, EXAMPLE_LCD_V_RES / 64 & ~1 };
   lv_color_t *buf1 = NULL;
   lv_color_t *buf2 = NULL;
   int lines = 0;

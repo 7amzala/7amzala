@@ -320,13 +320,8 @@ int main()
     check(b.body.find("\"wlink\":\"bt\"") != NO && b.body.find("\"wbars\":3") != NO, "watch on Bluetooth at -66 dBm: phone shows 'Watch Bluetooth', 3 bars");
     check(ask(500031, "/watch", b) && ask(800031, "/data", b) && b.body.find("\"wbars\":3") != NO,
           "a /watch question without the signal does not reset the bars");
-#if BLE_BD
-    check(ask(500032, "/wping?r=0", b) && ask(800032, "/data", b) && b.body.find("\"wbars\":0") != NO,
-          "(Bluedroid) the watch does not know its signal: no bars (the rod can measure it only with NimBLE)");
-#else
-    check(ask(500032, "/wping?r=0", b) && ask(800032, "/data", b) && b.body.find("\"wbars\":4") != NO,
-          "the watch does not know its signal (0): the rod measures the watch's link itself (-58 dBm: 4 bars)");
-#endif
+    check(ask(500032, "/wping?r=0", b) && ask(800032, "/data", b) && b.body.find("\"wbars\":3") != NO,
+          "the watch does not know its signal for a moment (0): the bars keep the last real one (no grey flicker)");
     ask(500033, "/wping?r=-66", b);
     srv->mockDisconnect(WATCH);
     step(7);
