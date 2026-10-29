@@ -128,6 +128,10 @@ public:
       routes[routeCount].handler = h;
       routeCount++;
     }
+    else
+    {
+      Serial.printf("Bluetooth: TOO MANY REQUESTS - %s not added (make MAX_ROUTES bigger)\n", path);
+    }
   }
 
   void begin()
@@ -344,6 +348,16 @@ public:
       checkLines(nowMs);
     }
 
+#if BLE_LINES && !BLE_BD
+    if(dropConn >= 0 && (long)(millis() - dropAt) >= 0)
+    {
+      ble_gap_terminate((uint16_t)dropConn, BLE_ERR_REM_USER_CONN_TERM);
+      ble_store_util_delete_peer(&dropAddr);
+      Serial.println("Bluetooth: a device this rod does not accept was sent away (pairing deleted)");
+      dropConn = -1;
+    }
+#endif
+
     if(directDue && sharedIdle())
     {
       directDue = false;
@@ -440,6 +454,42 @@ public:
     return replyLine >= 0 ? (int)lines[replyLine].id : -1;
   }
 
+  // The asking device's own address (NimBLE: the same after every
+  // reconnect, even with a changing radio address). "" = not known.
+  String askerAddr()
+  {
+#if BLE_LINES && !BLE_BD
+    ble_gap_conn_desc d;
+    int id = askerConn();
+
+    if(id >= 0 && ble_gap_conn_find((uint16_t)id, &d) == 0)
+    {
+      char a[18];
+      const uint8_t* v = d.peer_id_addr.val;
+      snprintf(a, sizeof(a), "%02X:%02X:%02X:%02X:%02X:%02X", v[5], v[4], v[3], v[2], v[1], v[0]);
+      return String(a);
+    }
+#endif
+    return "";
+  }
+
+  // Send the asking device away once its answer is out: its pairing is
+  // deleted and its link closed (a second phone, refused)
+  void dropAsker()
+  {
+#if BLE_LINES && !BLE_BD
+    ble_gap_conn_desc d;
+    int id = askerConn();
+
+    if(id >= 0 && ble_gap_conn_find((uint16_t)id, &d) == 0)
+    {
+      dropAddr = d.peer_id_addr;
+      dropConn = id;
+      dropAt = millis() + 1500;
+    }
+#endif
+  }
+
   // that Bluetooth connection is still up (-1: no)
   bool connUp(int id)
   {
@@ -501,7 +551,7 @@ public:
   }
 
 private:
-  static const int MAX_ROUTES = 40;
+  static const int MAX_ROUTES = 64;     // (40 was full: the last requests were silently not known)
   static const int MAX_ARGS = 6;
   static const int REQ_QUEUE = 6;           // per line
   static const int REQ_MAX = 200;
@@ -581,6 +631,11 @@ private:
   volatile bool lineHealed = false; // a device wrote without a line: it got one
   unsigned long broadcastSince = 0; // when sending to all started (after failures)
   bool directDue = false;               // a minute is over: own lines again when nothing is half sent
+  int dropConn = -1;                    // a device to send away (after its answer)
+  unsigned long dropAt = 0;
+#if BLE_LINES && !BLE_BD
+  ble_addr_t dropAddr = {};
+#endif
   unsigned long checkedAt = 0;      // the last look at which connections really exist
   uint16_t gattsIf = 0xFFFF;
 
@@ -4861,6 +4916,26 @@ button.action {
   color:#ff8a94 !important;
 }
 
+button.bigsym {
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  min-height:150px;
+  font-size:18px;
+  font-weight:900;
+}
+
+button.bigsym svg { width:100%; max-width:110px; height:auto; }
+button.bigsym small { font-size:12px; font-weight:700; opacity:.8; }
+
+/* phone: the timer on its own row, the three buttons side by side under it */
+@media (max-width:600px) {
+  #landCard { flex-basis:100%; }
+  button.bigsym { flex:1 1 0; min-width:0; min-height:130px; font-size:15px; }
+}
+
 .nofish {
   background:transparent !important;
   border:2px solid #6b7790 !important;
@@ -5263,6 +5338,13 @@ body.strikeFlash {
   font-weight:800;
 }
 
+/* rod / watch lines: symbol + name, always one line */
+#linkInfo, #watchInfo { white-space:nowrap; }
+.whoName { display:inline-flex; align-items:center; gap:4px; font-weight:900; color:#eaf3ff; }
+.whoName svg.who { width:15px; height:15px; }
+#watchInfo.off .whoName { color:#8fa0bf; }
+.viaDim { color:#8fa6c9; font-weight:700; font-size:11px; }
+
 .appOnly {
   display:none !important;
 }
@@ -5472,7 +5554,7 @@ LEARNING
 
 <span class="connected" id="connState">&#9679; CONNECTED</span>
 <br>
-<span id="linkInfo"><span id="linkName">Bluetooth</span><span class="sigBars" id="sigBars"><i></i><i></i><i></i><i></i></span><span class="sigDbm" id="sigDbm"></span></span>
+<span id="linkInfo"><span class="whoName"><svg class="who" viewBox="0 0 24 24"><path d="M3 21 L19 4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="7" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19 4 Q22 9 21 15 q1 3 -1.5 3" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>Rod</span><span id="linkName">Bluetooth</span><span class="sigBars" id="sigBars"><i></i><i></i><i></i><i></i></span><span class="sigDbm" id="sigDbm"></span></span>
 <script>
 // Called by the phone app every second: ready = linked to the rod, rssi = dBm (0 = unknown)
 function setLink(ready, rssi)
@@ -5490,7 +5572,7 @@ function setLink(ready, rssi)
 }
 </script>
 <br>
-<span id="watchInfo"><span>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
+<span id="watchInfo"><span class="whoName" id="watchWho"><svg class="who" viewBox="0 0 24 24"><rect x="8" y="1.5" width="8" height="4" rx="1" fill="currentColor"/><rect x="8" y="18.5" width="8" height="4" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 8.5 V12 L14.5 13.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Watch</span><span id="watchVia">&ndash;</span><span class="sigBars" id="wBars"><i></i><i></i><i></i><i></i></span></span>
 <div id="crowdTip" style="display:none;margin:5px auto 0;max-width:330px;color:#ffba52;font-size:11px;font-weight:700"></div>
 <script>
 // How the watch is connected to the rod (rod 2.3+: "wlink" in /data)
@@ -5514,9 +5596,9 @@ function showWatch(d)
 
   var via = document.getElementById('watchVia');
   var QUAL = ['Clear', 'Good', 'Busy', 'Congested'];
-  via.innerHTML = bt ? 'connected &middot; <b style="color:#22a8ff">Bluetooth</b>' :
-    lora ? 'connected &middot; <b style="color:#ffc928">LoRa</b> &middot; ' + (d.lchan > 0 ? '1 km' : '500 m') +
-    (d.lqual !== undefined && d.lqual >= 2 ? ' &middot; ' + QUAL[d.lqual] : '') : 'not connected';
+  via.innerHTML = bt ? '<b style="color:#22a8ff">Bluetooth</b>' :
+    lora ? '<b style="color:#ffc928">LoRa</b> <span class="viaDim">' + (d.lchan > 0 ? '1 km' : '500 m') +
+    (d.lqual !== undefined && d.lqual >= 2 ? ' &middot; ' + QUAL[d.lqual] : '') + '</span>' : 'not connected';
 
   // many rods on the channel: Bluetooth gives the fastest alerts
   var tip = document.getElementById('crowdTip');
@@ -5524,7 +5606,7 @@ function showWatch(d)
   tip.textContent = 'Many devices nearby (' + (d.lrods || 0) + ' rods). For the fastest alerts use Bluetooth only (Settings).';
   via.style.color = bt || lora ? '#eaf3ff' : word;
   document.getElementById('wBars').style.display = bt || lora ? '' : 'none';
-  box.className = 'show';
+  box.className = bt || lora ? 'show' : 'show off';
 }
 </script>
 
@@ -5743,9 +5825,9 @@ function setWatchOnlyView(only, info)
 <div class="landSub" id="landSub">from REEL IN</div>
 <button id="landPhotos" class="action fishout" onclick="addPhotos()" style="display:none;margin-top:10px">&#128247; ADD PHOTOS</button>
 </div>
-<button id="fishOutButton" class="action fishout" onclick="fishOut()" style="display:none">&#127907; FISH OUT</button>
-<button id="lostButton" class="action lost" onclick="lostFish()" style="display:none">Lost it (it got off)</button>
-<button id="noFishButton" class="action nofish" onclick="noFish()" style="display:none">No fish (false alarm / new bait)</button>
+<button id="fishOutButton" class="action fishout bigsym" onclick="fishOut()" style="display:none"><svg viewBox="0 0 120 80"><path d="M10 40 Q40 8 78 26 L100 12 L94 40 L100 68 L78 54 Q40 72 10 40 Z" fill="#05210f" opacity=".9"/><circle cx="28" cy="36" r="4" fill="#3ddc84"/><circle cx="92" cy="22" r="17" fill="#05210f" stroke="#3ddc84" stroke-width="3"/><path d="M84 22 l6 6 l11 -12" stroke="#3ddc84" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>FISH OUT</span><small>caught it</small></button>
+<button id="lostButton" class="action lost bigsym" onclick="lostFish()" style="display:none"><svg viewBox="0 0 120 80"><path d="M58 4 L58 30" stroke="#ff8a94" stroke-width="3"/><path d="M58 36 L58 44" stroke="#ff8a94" stroke-width="3" stroke-dasharray="3 3"/><path d="M52 31 l12 4 M52 37 l12 -4" stroke="#ff5d6c" stroke-width="3" stroke-linecap="round"/><path d="M16 62 Q38 44 62 56 L76 48 L72 62 L76 76 L62 68 Q38 80 16 62 Z" fill="none" stroke="#ff8a94" stroke-width="3"/><path d="M84 52 q8 -4 14 0 M84 62 q10 0 16 4" stroke="#ff8a94" stroke-width="2" fill="none" stroke-linecap="round"/></svg><span>LOST IT</span><small>it got off</small></button>
+<button id="noFishButton" class="action nofish bigsym" onclick="noFish()" style="display:none"><svg viewBox="0 0 120 80"><path d="M60 4 L60 44 Q60 62 46 62 Q34 62 34 50" stroke="#a9bbd6" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M34 50 l-5 6" stroke="#a9bbd6" stroke-width="4" stroke-linecap="round"/><circle cx="86" cy="44" r="16" fill="none" stroke="#a9bbd6" stroke-width="3"/><path d="M75 55 L97 33" stroke="#a9bbd6" stroke-width="3"/></svg><span>NO FISH</span><small>false alarm</small></button>
 <button id="readyButton" class="action ready" onclick="ready()" style="display:none">READY</button>
 <button id="skipButton" class="action skip" onclick="skipPull()" style="display:none">SKIP</button>
 </div>
@@ -8333,9 +8415,9 @@ function showLand(d)
   var card = el("landCard");
 
   card.style.display = land ? "block" : "none";
-  el("fishOutButton").style.display = land === 1 ? "block" : "none";
-  el("lostButton").style.display = land === 1 ? "block" : "none";
-  el("noFishButton").style.display = land === 1 ? "block" : "none";
+  el("fishOutButton").style.display = land === 1 ? "flex" : "none";
+  el("lostButton").style.display = land === 1 ? "flex" : "none";
+  el("noFishButton").style.display = land === 1 ? "flex" : "none";
 
   if(!land)
     return;
@@ -9948,8 +10030,57 @@ void privacyBegin()
   Serial.printf("==== %s   PIN %06lu   (write both on the rod box) ====\n", rodId.c_str(), (unsigned long)rodPin);
 }
 
+// "I am the phone" / "I am the watch": the rod keeps one of each
+void handleIam()
+{
+#if defined(ESP32)
+  String d = server.arg("d");
+  String addr = server.askerAddr();
+
+  if(addr.length() == 0 || (!(d == "phone") && !(d == "watch")))
+  {
+    server.send(200, "text/plain", "OK");     // (address not known: as before)
+    return;
+  }
+
+  const char* key = d == "phone" ? "phoneAddr" : "watchAddr";
+  Preferences p;
+  p.begin("strikesense", false);
+  String mine = p.getString(key, "");
+
+  if(mine.length() == 0)
+  {
+    p.putString(key, addr);
+    p.end();
+    Serial.printf("Bluetooth: this rod's %s is %s\n", d.c_str(), addr.c_str());
+    server.send(200, "text/plain", "OK");
+    return;
+  }
+
+  p.end();
+
+  if(mine == addr)
+  {
+    server.send(200, "text/plain", "OK");
+    return;
+  }
+
+  Serial.printf("Bluetooth: a second %s (%s) refused - this rod already has one (%s)\n", d.c_str(), addr.c_str(), mine.c_str());
+  server.send(403, "text/plain", "TAKEN");
+  server.dropAsker();
+#else
+  server.send(200, "text/plain", "OK");
+#endif
+}
+
 void forgetPairedDevices()
 {
+  Preferences fp;
+  fp.begin("strikesense", false);
+  fp.remove("phoneAddr");
+  fp.remove("watchAddr");
+  fp.end();
+
 #if defined(CONFIG_BLUEDROID_ENABLED)
   int n = esp_ble_get_bond_device_num();
 
@@ -11043,7 +11174,7 @@ void setup()
   freshAfterUpload();
 
   Serial.println();
-  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.3 (no LoRa; fight after a real strike) ===");
+  Serial.println("=== LAARIF STRIKESENSE ROD - version 3.4 (no LoRa; one phone + one watch) ===");
 
   Wire.begin();
   Wire.setClock(SENSOR_I2C_HZ);
@@ -11091,6 +11222,7 @@ void setup()
   server.on("/watching", handleWatching);
   server.on("/reelin", handleReelIn);
   server.on("/ready", handleReady);
+  server.on("/iam", handleIam);
   server.on("/fishout", handleFishOut);
   server.on("/lostfish", handleLostFish);
   server.on("/nofish", handleNoFish);

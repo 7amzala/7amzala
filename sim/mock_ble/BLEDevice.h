@@ -19,7 +19,9 @@ class BLECharacteristic;
 #ifdef MOCK_NIMBLE
 #define CONFIG_NIMBLE_ENABLED 1
 #define BLE_MOCK_NIMBLE 1
-struct ble_gap_conn_desc { uint16_t conn_handle; uint16_t conn_itvl; };
+struct ble_addr_t { uint8_t type; uint8_t val[6]; };
+struct ble_gap_conn_desc { uint16_t conn_handle; uint16_t conn_itvl; ble_addr_t peer_id_addr; };
+#define BLE_ERR_REM_USER_CONN_TERM 0x13
 struct os_mbuf { std::string d; };
 #define BLE_HS_ENOMEM 6
 #define BLE_HS_EBUSY 15
@@ -27,6 +29,8 @@ struct os_mbuf { std::string d; };
 inline int& mockBonds() { static int n = 0; return n; }
 inline int ble_store_util_count(int, int* n) { *n = mockBonds(); return 0; }
 inline int ble_store_clear() { mockBonds() = 0; return 0; }
+inline int& mockDeletedPeers() { static int n = 0; return n; }
+inline int ble_store_util_delete_peer(const ble_addr_t*) { if(mockBonds() > 0) mockBonds()--; mockDeletedPeers()++; return 0; }
 #else
 // ---- Bluedroid's per-connection view ----
 #define BLE_MOCK_LINES 1
@@ -92,6 +96,7 @@ struct MockLink
   size_t biggest = 0;
   std::vector<std::string> pieces;     // what reached the phone / watch
   int rssi = -58;                      // how strong the rod hears it
+  uint8_t addr = 0;                    // the device's own address (last byte; 0 = connection number)
 };
 inline MockLink* mockLinks() { static MockLink l[8]; return l; }
 inline gatts_event_handler& mockGattsHandler() { static gatts_event_handler h = nullptr; return h; }
@@ -185,8 +190,12 @@ inline int ble_gap_conn_find(uint16_t conn, ble_gap_conn_desc* d)
   if(conn >= 8 || !mockLinks()[conn].up) return 2;
   d->conn_handle = conn;
   d->conn_itvl = (uint16_t)(mockLinks()[conn].drainMs * 4 / 5);   // x 1.25 ms
+  d->peer_id_addr.type = 0;
+  for(int i = 0; i < 6; i++) d->peer_id_addr.val[i] = (uint8_t)(i == 0 ? (mockLinks()[conn].addr ? mockLinks()[conn].addr : 0x10 + conn) : 0xA0 + i);
   return 0;
 }
+inline int& mockTerminated() { static int n = 0; return n; }
+inline int ble_gap_terminate(uint16_t conn, uint8_t) { if(conn < 8) { mockLinks()[conn].up = false; mockTerminated()++; } return 0; }
 #endif
 
 inline uint16_t esp_ble_get_cur_sendable_packets_num(uint16_t conn_id)

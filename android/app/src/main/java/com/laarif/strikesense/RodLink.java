@@ -57,7 +57,7 @@ final class RodLink
     private static final long RETRY_MS = 1500;
 
     enum State { NO_PERMISSION, BLUETOOTH_OFF, NOT_PAIRED, SEARCHING, CONNECTING, CONNECTED }
-    enum PairState { IDLE, WORKING, OK, FAILED }
+    enum PairState { IDLE, WORKING, OK, FAILED, TAKEN }   // TAKEN: the rod already has another phone
 
     // ---------- pairing: this app talks only to its own rod ----------
     //
@@ -279,6 +279,33 @@ final class RodLink
                 closeGatt();
                 stopScan();
                 pairState = PairState.IDLE;
+                connectOrScan();
+            }
+        });
+    }
+
+    // The rod already has its phone: this one is not kept (its pairing is
+    // deleted on both sides). The pair page says why.
+    private void refusedByRod()
+    {
+        h.post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    if(!pairedAddress.isEmpty())
+                        removeBond(adapter.getRemoteDevice(pairedAddress));
+                }
+                catch(Exception e)
+                {
+                }
+
+                savePairing("", "");
+                closeGatt();
+                stopScan();
+                pairState = PairState.TAKEN;
                 connectOrScan();
             }
         });
@@ -880,6 +907,16 @@ final class RodLink
                         public void run()
                         {
                             request("/mtu?v=" + n, 3000);
+
+                            // one phone per rod: "I am the phone". Another phone
+                            // already belongs to this rod: 403 TAKEN
+                            Response me = request("/iam?d=phone", 3000);
+
+                            if(me != null && me.code == 403)
+                            {
+                                refusedByRod();
+                                return;
+                            }
 
                             // the time and date (with summer / winter time):
                             // the rod passes them on to the watch

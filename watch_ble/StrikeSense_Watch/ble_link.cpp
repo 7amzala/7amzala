@@ -68,6 +68,8 @@ static char cmdSending[32] = "";
 
 static long lastId = -1;              // "/laststrike" in flight
 static long keyId = -1;               // "/lorakey" in flight (our rod's LoRa key)
+static long iamId = -1;               // "/iam?d=watch" in flight (one watch per rod)
+static volatile bool notOurs = false; // the rod already has another watch
 static uint32_t lastAskedAt = 0;
 static volatile bool wantLast = false;
 static ble_last_strike_t lastStrike;   // guarded by mux
@@ -307,10 +309,35 @@ static bool send(long id, const char *path)
   char line[64];
   int n = snprintf(line, sizeof(line), "%ld|%s\n", id, path);
 
+  // A send can fail when the Bluetooth buffers are full (the rod streams
+  // live data to the watch 10 times a second). It was dropped without a
+  // word: a button, the "I'm here" ping or the LoRa key request was lost
+  // now and then ("sometimes the watch's buttons do nothing"). Now each
+  // piece is tried again for up to 0.5 s.
   for(int i = 0; i < n; i += piece)
   {
     int len = n - i < (int)piece ? n - i : (int)piece;
-    rx->writeValue((uint8_t *)line + i, len, false);
+    bool ok = false;
+
+    for(int t = 0; t < 25 && !ok; t++)
+    {
+      ok = rx->writeValue((uint8_t *)line + i, len, false);
+
+      if(!ok)
+      {
+        if(client == nullptr || !client->isConnected())
+          return false;
+
+        esp_task_wdt_reset();
+        delay(20);
+      }
+    }
+
+    if(!ok)
+    {
+      Serial.printf("[BLE] could not send %s (Bluetooth busy)\n", path);
+      return false;
+    }
   }
 
   return true;
@@ -489,6 +516,17 @@ static void gotLastStrike(const std::string &j)
 
 static void answer(long id, int code, const std::string &body)
 {
+  // one watch per rod: the rod already has another watch
+  if(id == iamId)
+  {
+    iamId = -1;
+
+    if(code == 403)
+      notOurs = true;
+
+    return;
+  }
+
   // our rod's LoRa key (only over the encrypted pairing): {"id":"ROD-4F2A","tag":20266,"key":"..32 hex.."}
   if(id == keyId)
   {
@@ -1002,6 +1040,10 @@ static void connectToRodAt(BLEAddress addr)
   snprintf(path, sizeof(path), "/mtu?v=%u", (unsigned)piece);
   send(newId(), path);
 
+  // one watch per rod: "I am the watch"
+  iamId = newId();
+  send(iamId, "/iam?d=watch");
+
   // our rod's LoRa key, at every connect: a rod that started fresh (new
   // sketch) has a new key, and an old one here meant no LoRa at all (a rod
   // without LoRa answers 404)
@@ -1209,6 +1251,16 @@ void ble_link_poll(void)
   {
     lost();
     setNote("rod lost - searching again");
+    return;
+  }
+
+  if(notOurs)
+  {
+    notOurs = false;
+    Serial.println("[BLE] this rod already has another watch: not paired");
+    lost();
+    ble_link_forget();
+    pair_restart();                       // the PAIR YOUR ROD screens again
     return;
   }
 

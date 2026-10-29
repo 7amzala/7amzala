@@ -277,7 +277,7 @@ final class StrikeStore
     }
 
     // From the CATCH page: what fish, kg, cm ("" = not given); marks it a fish
-    synchronized void setCatch(String uid, String fish, String kg, String cm, String result)
+    synchronized void setCatch(String uid, String fish, String kg, String cm, String result, String mine)
     {
         JSONObject s = byUid(uid);
 
@@ -287,6 +287,7 @@ final class StrikeStore
         put(s, "fish", fish.trim());
         put(s, "kg", kg.trim());
         put(s, "cm", cm.trim());
+        put(s, "mine", mine.trim());             // the fisher's own name for this fish
 
         if(!result.isEmpty())
             put(s, "result", result);

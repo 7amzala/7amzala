@@ -18,13 +18,13 @@ BLEServer* srv;
 BLECharacteristic* rxc;
 BLECharacteristic* txc;
 // conn ids: the phone and the watch, each its own Bluetooth connection
-const int PHONE = 0, WATCH = 1;
-size_t seen[2] = {0, 0};            // pieces already read, per connection
-std::string inbox[2];
+const int PHONE = 0, WATCH = 1, OTHER = 2;   // OTHER: a second phone (refused)
+size_t seen[3] = {0, 0, 0};         // pieces already read, per connection
+std::string inbox[3];
 int wrongLine = 0;                  // an answer that reached the other device
 
 // requests 500000-599999 are the watch's, the rest the phone's
-int lineOf(int id) { return id >= 500000 && id < 600000 ? WATCH : PHONE; }
+int lineOf(int id) { return id >= 500000 && id < 600000 ? WATCH : id >= 950000 && id < 960000 ? OTHER : PHONE; }
 
 struct Answer { int code; std::string body; };
 std::map<int, Answer> answers;
@@ -55,7 +55,7 @@ void readInbox(int c);
 // Same as RodLink.received() in the app (one per device)
 void readNotifications()
 {
-  for (int c = 0; c < 2; c++) {
+  for (int c = 0; c < 3; c++) {
     std::vector<std::string>& got = mockLinks()[c].pieces;
     if (seen[c] > got.size()) seen[c] = 0;           // a new connection
     for (; seen[c] < got.size(); seen[c]++) {
@@ -670,6 +670,37 @@ int main()
     logReady = false; slistCount = 0;
     logBegin();
   }
+
+  // ---- one phone + one watch per rod ----
+#if !BLE_BD
+  printf("\n=== ONE PHONE + ONE WATCH ===\n");
+  {
+    Answer b;
+    check(ask(700500, "/iam?d=phone", b) && b.code == 200, "the app: 'I am the phone' - the first phone is kept");
+    check(ask(500500, "/iam?d=watch", b) && b.code == 200, "the watch: 'I am the watch' - kept");
+    check(ask(700501, "/iam?d=phone", b) && b.code == 200, "the same phone again (reconnect): OK");
+    mockBonds() = 3;
+    int deleted = mockDeletedPeers();
+    srv->mockConnect(OTHER, 247, false);
+    mockLinks()[OTHER].addr = 0x77;
+    seen[OTHER] = 0; inbox[OTHER].clear();
+    step(0.5);
+    check(ask(950500, "/iam?d=phone", b) && b.code == 403 && b.body == "TAKEN", "a second phone (right PIN): refused - 'this rod already has a phone'");
+    step(2);
+    check(!mockLinks()[OTHER].up && mockDeletedPeers() == deleted + 1, "... its pairing deleted and its link closed");
+    check(mockLinks()[PHONE].up && ask(700502, "/data", b), "the own phone still connected and answered");
+    forgetPairedDevices();                    // "Forget my devices" (or a new sketch)
+    srv->mockConnect(OTHER, 247, false);
+    seen[OTHER] = 0; inbox[OTHER].clear();
+    step(0.5);
+    check(ask(950501, "/iam?d=phone", b) && b.code == 200, "after 'Forget my devices': a new phone is accepted");
+    srv->mockDisconnect(OTHER);
+    step(0.5);
+    forgetPairedDevices();
+    ask(700503, "/iam?d=phone", b);            // the test phone is the rod's phone again
+    ask(500503, "/iam?d=watch", b);
+  }
+#endif
 
   // ---- a new sketch uploaded: a fresh rod (not after a plain restart) ----
   printf("\n=== NEW SKETCH = FRESH ROD ===\n");

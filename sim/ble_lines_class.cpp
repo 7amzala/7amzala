@@ -58,6 +58,10 @@ public:
       routes[routeCount].handler = h;
       routeCount++;
     }
+    else
+    {
+      Serial.printf("Bluetooth: TOO MANY REQUESTS - %s not added (make MAX_ROUTES bigger)\n", path);
+    }
   }
 
   void begin()
@@ -274,6 +278,16 @@ public:
       checkLines(nowMs);
     }
 
+#if BLE_LINES && !BLE_BD
+    if(dropConn >= 0 && (long)(millis() - dropAt) >= 0)
+    {
+      ble_gap_terminate((uint16_t)dropConn, BLE_ERR_REM_USER_CONN_TERM);
+      ble_store_util_delete_peer(&dropAddr);
+      Serial.println("Bluetooth: a device this rod does not accept was sent away (pairing deleted)");
+      dropConn = -1;
+    }
+#endif
+
     if(directDue && sharedIdle())
     {
       directDue = false;
@@ -370,6 +384,42 @@ public:
     return replyLine >= 0 ? (int)lines[replyLine].id : -1;
   }
 
+  // The asking device's own address (NimBLE: the same after every
+  // reconnect, even with a changing radio address). "" = not known.
+  String askerAddr()
+  {
+#if BLE_LINES && !BLE_BD
+    ble_gap_conn_desc d;
+    int id = askerConn();
+
+    if(id >= 0 && ble_gap_conn_find((uint16_t)id, &d) == 0)
+    {
+      char a[18];
+      const uint8_t* v = d.peer_id_addr.val;
+      snprintf(a, sizeof(a), "%02X:%02X:%02X:%02X:%02X:%02X", v[5], v[4], v[3], v[2], v[1], v[0]);
+      return String(a);
+    }
+#endif
+    return "";
+  }
+
+  // Send the asking device away once its answer is out: its pairing is
+  // deleted and its link closed (a second phone, refused)
+  void dropAsker()
+  {
+#if BLE_LINES && !BLE_BD
+    ble_gap_conn_desc d;
+    int id = askerConn();
+
+    if(id >= 0 && ble_gap_conn_find((uint16_t)id, &d) == 0)
+    {
+      dropAddr = d.peer_id_addr;
+      dropConn = id;
+      dropAt = millis() + 1500;
+    }
+#endif
+  }
+
   // that Bluetooth connection is still up (-1: no)
   bool connUp(int id)
   {
@@ -431,7 +481,7 @@ public:
   }
 
 private:
-  static const int MAX_ROUTES = 40;
+  static const int MAX_ROUTES = 64;     // (40 was full: the last requests were silently not known)
   static const int MAX_ARGS = 6;
   static const int REQ_QUEUE = 6;           // per line
   static const int REQ_MAX = 200;
@@ -511,6 +561,11 @@ private:
   volatile bool lineHealed = false; // a device wrote without a line: it got one
   unsigned long broadcastSince = 0; // when sending to all started (after failures)
   bool directDue = false;               // a minute is over: own lines again when nothing is half sent
+  int dropConn = -1;                    // a device to send away (after its answer)
+  unsigned long dropAt = 0;
+#if BLE_LINES && !BLE_BD
+  ble_addr_t dropAddr = {};
+#endif
   unsigned long checkedAt = 0;      // the last look at which connections really exist
   uint16_t gattsIf = 0xFFFF;
 

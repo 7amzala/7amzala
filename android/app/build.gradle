@@ -10,8 +10,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 15
-        versionName "3.3 (fight: fish out / lost / no fish; pair again after new rod software)"
+        versionCode 16
+        versionName "3.4 (one phone per rod, search + sort, profile picture)"
     }
 
     // Alarm sounds are read straight from the app (RodService): not compressed

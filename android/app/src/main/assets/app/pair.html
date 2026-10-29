@@ -67,6 +67,14 @@ function refresh()
       : '<div class="wait"><div class="spin"></div>Looking for rods&hellip;<br><small>Not showing? Switch the rod off and on, and keep the phone close.</small></div>';
   }
 
+  // the rod already has another phone (one phone per rod)
+  if(APP && APP.pairState() == 'taken')
+  {
+    working = false;
+    document.getElementById('pairBtn').disabled = false;
+    say('&#128274; This rod already belongs to another phone.<br>On that phone: Settings &rarr; <b>Forget my devices</b>. Or upload new software to the rod (it starts fresh). Then pair this phone.', '#ffba52');
+  }
+
   if(working && APP)
   {
     const st = APP.pairState();

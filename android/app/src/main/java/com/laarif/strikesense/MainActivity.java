@@ -64,6 +64,7 @@ public class MainActivity extends Activity
     private static final int REQ_PERMISSIONS = 1;
     private static final int REQ_BLUETOOTH_ON = 2;
     private static final int REQ_PHOTO = 3;
+    private static final int REQ_PROFILE = 4;
 
     // the catch photo being taken (camera only: a real photo, taken now)
     private String photoUid = "", photoSlot = "";
@@ -219,6 +220,12 @@ public class MainActivity extends Activity
             return;
         }
 
+        if(code == REQ_PROFILE)
+        {
+            gotProfile(result == RESULT_OK, data);
+            return;
+        }
+
         RodLink.get(this).kick();
     }
 
@@ -361,6 +368,11 @@ public class MainActivity extends Activity
     // The photo made small: longest side 1600 px, JPEG ~200-400 KB, turned the right way up
     private boolean smallJpeg(Uri src, File camFile, File out) throws Exception
     {
+        return smallJpeg(src, camFile, out, 1600);
+    }
+
+    private boolean smallJpeg(Uri src, File camFile, File out, int maxSide) throws Exception
+    {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         InputStream in = open(src, camFile);
@@ -373,7 +385,7 @@ public class MainActivity extends Activity
         int side = Math.max(o.outWidth, o.outHeight);
         int sample = 1;
 
-        while(side / (sample * 2) >= 1600)
+        while(side / (sample * 2) >= maxSide)
             sample *= 2;
 
         BitmapFactory.Options d = new BitmapFactory.Options();
@@ -400,7 +412,7 @@ public class MainActivity extends Activity
         {
         }
 
-        float scale = Math.min(1f, 1600f / Math.max(b.getWidth(), b.getHeight()));
+        float scale = Math.min(1f, (float) maxSide / Math.max(b.getWidth(), b.getHeight()));
         Matrix m = new Matrix();
         m.postScale(scale, scale);
         m.postRotate(turn);
@@ -419,6 +431,83 @@ public class MainActivity extends Activity
     private InputStream open(Uri src, File camFile) throws Exception
     {
         return src != null ? getContentResolver().openInputStream(src) : new FileInputStream(camFile);
+    }
+
+    // ---------- profile picture (a selfie, or one from the gallery) ----------
+
+    static File profileFile(android.content.Context c)
+    {
+        return new File(c.getFilesDir(), "profile.jpg");
+    }
+
+    private void pickProfile(boolean camera)
+    {
+        try
+        {
+            if(camera)
+            {
+                PhotoProvider.cameraFile(this).delete();
+                Uri out = PhotoProvider.cameraUri();
+                Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                i.putExtra(MediaStore.EXTRA_OUTPUT, out);
+                i.setClipData(ClipData.newRawUri("", out));
+                i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivityForResult(i, REQ_PROFILE);
+            }
+            else
+            {
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.setType("image/*");
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                startActivityForResult(i, REQ_PROFILE);
+            }
+        }
+        catch(Exception e)
+        {
+        }
+    }
+
+    private void gotProfile(final boolean ok, final Intent data)
+    {
+        if(!ok)
+            return;
+
+        new Thread(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                boolean saved = false;
+
+                try
+                {
+                    Uri src = data != null ? data.getData() : null;
+                    File camFile = PhotoProvider.cameraFile(MainActivity.this);
+
+                    if(src != null || camFile.exists())
+                        saved = smallJpeg(src, camFile, profileFile(MainActivity.this), 512);
+
+                    camFile.delete();
+                }
+                catch(Exception e)
+                {
+                    saved = false;
+                }
+
+                if(saved)
+                {
+                    handler.post(new Runnable()
+                    {
+                        @Override
+                        public void run()
+                        {
+                            strikes.evaluateJavascript("window.profileDone && profileDone()", null);
+                            web.evaluateJavascript("window.profileDone && profileDone()", null);
+                        }
+                    });
+                }
+            }
+        }).start();
     }
 
     // FISH OUT in the app (or ADD PHOTOS): the catch page of the newest strike
@@ -613,6 +702,19 @@ public class MainActivity extends Activity
                     return asset(path.substring(1), path.endsWith(".html") ? "text/html"
                                  : path.endsWith(".js") ? "application/javascript"
                                  : path.endsWith(".css") ? "text/css" : "image/png");
+
+                // the user's profile picture
+                if(path.equals("/photo/profile.jpg"))
+                {
+                    File f = profileFile(MainActivity.this);
+
+                    if(!f.exists())
+                        return answer(404, "text/plain", new byte[0]);
+
+                    Map<String, String> headers = new HashMap<>();
+                    headers.put("Cache-Control", "no-store");
+                    return new WebResourceResponse("image/jpeg", null, 200, "OK", headers, new FileInputStream(f));
+                }
 
                 // a catch photo kept on the phone
                 if(path.matches("/photo/[A-Za-z0-9_-]+_(hook|weight|length)\\.jpg"))
@@ -891,9 +993,9 @@ public class MainActivity extends Activity
         }
 
         @JavascriptInterface
-        public void setCatch(String uid, String fish, String kg, String cm, String result)
+        public void setCatch(String uid, String fish, String kg, String cm, String result, String mine)
         {
-            StrikeStore.get(MainActivity.this).setCatch(uid, fish, kg, cm, result);
+            StrikeStore.get(MainActivity.this).setCatch(uid, fish, kg, cm, result, mine);
 
             new Thread(new Runnable()
             {
@@ -909,6 +1011,26 @@ public class MainActivity extends Activity
         public boolean hasPhoto(String uid, String slot)
         {
             return StrikeStore.get(MainActivity.this).photoFile(uid, slot).exists();
+        }
+
+        // profile picture: camera (selfie) or gallery
+        @JavascriptInterface
+        public void profilePhoto(final boolean camera)
+        {
+            handler.post(new Runnable()
+            {
+                @Override
+                public void run()
+                {
+                    pickProfile(camera);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean hasProfile()
+        {
+            return profileFile(MainActivity.this).exists();
         }
 
         // take the photo now with the camera (no gallery: a real photo)

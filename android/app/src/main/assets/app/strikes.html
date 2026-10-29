@@ -42,6 +42,11 @@ canvas{display:block;width:100%;touch-action:none}
 input[type=text]{width:100%;padding:10px;border-radius:10px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff;font-size:13px}
 ol{padding-left:20px;line-height:1.5;font-size:13px;color:#c3d2ea}
 pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px solid #1d2a44;border-radius:10px;padding:8px;font-size:10.5px;color:#a9bbd6;max-height:180px;overflow:auto}
+.avatar{width:42px;height:42px;border-radius:50%;border:2px solid #22d3ff;background:#0b1428 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;flex:none}
+.pmenu{position:fixed;left:0;right:0;bottom:0;background:#0b1428;border-top:1px solid #24324f;border-radius:16px 16px 0 0;padding:14px 14px 22px;display:none;z-index:2000}
+.pmenu.on{display:block}
+.tagsRow{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.tagsRow .tag{margin-left:0 !important}
 .photos{display:flex;gap:8px}
 .slot{flex:1;height:132px;border-radius:13px;border:2px dashed #3a5182;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12.5px;color:#b9c6df;text-align:center;gap:4px;position:relative;overflow:hidden;cursor:pointer;background:#0b1428 center/cover no-repeat}
 .slot.done{border:2px solid #3ddc84}
@@ -62,10 +67,13 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
 <!-- ============ LIST ============ -->
 <div class="page on" id="pList">
  <div class="top">
+  <div class="avatar" id="avatar" onclick="profileMenu()" title="Your profile picture">&#128100;</div>
   <div class="title">My strikes</div><div class="sp"></div>
   <span class="chip act" onclick="show('pMap')">&#128506; MAP</span>
  </div>
  <div class="meta" id="cloudLine" style="margin:-4px 0 9px">&#9729; &hellip;</div>
+ <input type="text" id="search" placeholder="&#128269; Search: fish, your name for it, place, strike type&hellip;" oninput="drawList()" style="margin-bottom:8px">
+ <div class="chips" id="sortChips"></div>
  <div class="chips" id="countryChips"></div>
  <div class="chips" id="placeChips"></div>
  <div id="recs" class="rec"></div>
@@ -139,8 +147,17 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
  <div class="lbl" style="margin:14px 0 7px">FISH</div>
  <div class="chips" id="cFish"></div>
  <input type="text" id="cOther" placeholder="Other fish: type its name" style="display:none;margin-bottom:6px">
+ <div class="lbl" style="margin:12px 0 7px">YOUR NAME FOR IT (optional)</div>
+ <input type="text" id="cMine" maxlength="40" placeholder="e.g. Big Mama, my first bass&hellip;">
  <button class="btn save" onclick="saveCatch()">SAVE &#10004;</button>
  <div class="meta" style="text-align:center;margin-top:8px">Later is fine: it waits in My strikes as <b style="color:#ffc928">+ PHOTOS</b></div>
+</div>
+
+<div class="pmenu" id="pmenu">
+ <div class="lbl" style="margin-bottom:10px">YOUR PROFILE PICTURE</div>
+ <button class="btn save" onclick="profileFrom(true)">&#128247; Take a selfie</button>
+ <button class="btn ghost save" onclick="profileFrom(false)">&#128444; From the gallery</button>
+ <button class="btn ghost save" onclick="$('pmenu').classList.remove('on')">Cancel</button>
 </div>
 
 <script src="leaflet.js"></script>
@@ -193,6 +210,7 @@ function show(id)
 function appBack()
 {
   const on = document.querySelector('.page.on').id;
+  if($('pmenu').classList.contains('on')) { $('pmenu').classList.remove('on'); return true; }
   if(on == 'pList') return false;
   if(on == 'pCatch') { catchBack(); return true; }
   show('pList');
@@ -211,6 +229,48 @@ function filtered()
   return all.filter(s => (country == 'All' || countryOf(s) == country) &&
                          (place == 'All' || placeOf(s) == place) && s.time >= from);
 }
+
+// ---------- search + sort ----------
+const SORTS = [['new','Newest'],['kg','Heaviest'],['cm','Longest'],['pull','Strongest pull'],['fight','Longest fight'],['type','Strike type'],['country','Country']];
+let sortBy = 'new';
+
+const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return isNaN(n) ? -1 : n; };
+
+// what a strike is called: your name for it, the fish picked, the AI's name
+function fishNames(s)
+{
+  return [s.mine, s.fish, s.ai_fish].filter(Boolean);
+}
+
+function searched(list)
+{
+  const q = (($('search') || {}).value || '').trim().toLowerCase();
+  if(!q) return list;
+  return list.filter(s => [s.type, s.mine, s.fish, s.ai_fish, s.place, s.country, s.result == 'fish' ? 'fish out caught' : s.result == 'lost' ? 'lost' : '']
+    .filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0);
+}
+
+function sorted(list)
+{
+  const by = {
+    new: (a, b) => b.time - a.time,
+    kg: (a, b) => num(b.kg) - num(a.kg) || b.time - a.time,
+    cm: (a, b) => num(b.cm) - num(a.cm) || b.time - a.time,
+    pull: (a, b) => (b.peak || 0) - (a.peak || 0),
+    fight: (a, b) => (b.land || b.fight || 0) - (a.land || a.fight || 0),
+    type: (a, b) => String(a.type).localeCompare(b.type) || b.time - a.time,
+    country: (a, b) => countryOf(a).localeCompare(countryOf(b)) || placeOf(a).localeCompare(placeOf(b)) || b.time - a.time
+  }[sortBy];
+  return list.slice().sort(by);
+}
+
+function drawSort()
+{
+  $('sortChips').innerHTML = '<span class="meta" style="align-self:center">Sort:</span>' +
+    SORTS.map(x => chip(x[1], sortBy == x[0], `setSort('${x[0]}')`)).join('');
+}
+
+function setSort(k) { sortBy = k; drawList(); }
 
 function chip(text, on, fn) { return `<span class="chip${on ? ' on' : ''}" onclick="${fn}">${esc(text)}</span>`; }
 
@@ -270,7 +330,9 @@ function drawList()
   drawChips();
   cloudLine();
 
-  const list = filtered();
+  drawSort();
+  drawAvatar();
+  const list = sorted(searched(filtered()));
   const r = records(list);
 
   if(!all.length)
@@ -308,10 +370,31 @@ function drawList()
     const p = placeOf(s) ? placeOf(s) + (country == 'All' && s.country ? ', ' + s.country : '') : countryOf(s);
     return `<div class="item" onclick="openStrike('${s.uid}')"><span class="tag" style="background:${c}22;color:${c};border-color:${c}">${esc(s.type)}</span>
       <div class="txt"><div style="font-size:13px;font-weight:700">${s.peak !== undefined ? s.peak.toFixed(1) + '&deg;' : ''} &middot; ${s.done ? mmss(s.fight) : 'fighting&hellip;'}${s.graph ? ' &nbsp;&#128200;' : ''}</div>
-      <div class="meta">${s.notime ? 'time unknown' : when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}${s.later ? ' &middot; <span title="saved on the rod while the phone was away">saved on rod</span>' : ''}</div></div>
-      ${catchTag(s)}${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
+      <div class="meta">${s.notime ? 'time unknown' : when(s.time, new Date(s.time).getFullYear() != new Date().getFullYear())} &middot; ${esc(p)}${s.later ? ' &middot; <span title="saved on the rod while the phone was away">saved on rod</span>' : ''}</div>
+      ${catchTag(s) ? `<div class="tagsRow">${catchTag(s)}</div>` : ''}</div>
+      ${s.synced ? '' : '<span class="meta" title="not online yet">&#8635;</span>'}</div>`;
   }).join('') : '<div class="empty">No strikes for this choice.</div>';
 }
+
+// ---------- profile picture ----------
+function drawAvatar()
+{
+  const a = $('avatar');
+  const have = APP && APP.hasProfile && APP.hasProfile();
+  a.style.backgroundImage = have ? `url('/photo/profile.jpg?t=${Date.now()}')` : '';
+  a.innerHTML = have ? '' : '&#128100;';
+}
+
+function profileMenu() { $('pmenu').classList.add('on'); }
+
+function profileFrom(camera)
+{
+  $('pmenu').classList.remove('on');
+  if(APP && APP.profilePhoto) APP.profilePhoto(camera);
+}
+
+// from the app when the new picture is saved
+function profileDone() { drawAvatar(); }
 
 function cloudLine()
 {
@@ -331,6 +414,8 @@ function catchTag(s)
   const n = s.photos ? Object.keys(s.photos).length : 0;
   const name = (s.fish || 'Fish') + (s.kg ? ' ' + s.kg + ' kg' : '');
   return `<span class="tag" style="color:#3ddc84;border-color:#3ddc84">&#127907; ${esc(name)}</span>` +
+         (s.mine ? `<span class="tag" style="color:#eaf3ff;border-color:#3a4a66;margin-left:4px">&ldquo;${esc(s.mine)}&rdquo;</span>` : '') +
+         (s.ai_fish && s.ai_fish != s.fish ? `<span class="tag" style="color:#b39dff;border-color:#6a5acd;margin-left:4px" title="named by AI">AI: ${esc(s.ai_fish)}</span>` : '') +
          (n < 3 ? `<span class="tag" style="color:#ffc928;border-color:#ffc928;margin-left:4px" onclick="event.stopPropagation();openCatch('${s.uid}')">+ PHOTOS</span>` : '');
 }
 
@@ -373,6 +458,7 @@ function openCatch(uid)
   $('cCm').value = cat.cm || '';
   catFish = cat.fish || '';
   $('cOther').value = catFish && FISH.indexOf(catFish) < 0 ? catFish : '';
+  $('cMine').value = cat.mine || '';
   drawFish();
   drawSlots();
 }
@@ -418,7 +504,7 @@ function saveCatch()
 {
   if(!cat) return;
   const fish = catFish == 'Other' || (catFish && FISH.indexOf(catFish) < 0) ? $('cOther').value.trim() : catFish;
-  if(APP && APP.setCatch) APP.setCatch(cat.uid, fish, $('cKg').value, $('cCm').value, cat.result == 'lost' ? '' : 'fish');
+  if(APP && APP.setCatch) APP.setCatch(cat.uid, fish, $('cKg').value, $('cCm').value, cat.result == 'lost' ? '' : 'fish', $('cMine').value);
   catBackTo == 'pStrike' ? openStrike(cat.uid) : show('pList');
 }
 
@@ -499,7 +585,9 @@ function openStrike(uid)
   $('sCatch').innerHTML = cur.result == 'lost' ? '<span class="meta">&#10060; Lost it (the fish got off)</span>' :
     cur.result == 'nofish' ? '<span class="meta">No fish (false alarm or new bait)</span>' :
     `<button class="btn" onclick="openCatch('${cur.uid}')">&#127907; ${cur.result == 'fish' ? 'Catch &amp; photos' : 'It was a fish: add the catch'}</button>` +
-    (cur.fish ? ` <span class="meta">${esc(cur.fish)}</span>` : '') + photoThumbs(cur);
+    (cur.fish ? ` <span class="meta">${esc(cur.fish)}</span>` : '') +
+    (cur.mine ? ` <span class="meta">&middot; &ldquo;${esc(cur.mine)}&rdquo;</span>` : '') +
+    (cur.ai_fish ? ` <span class="meta" style="color:#b39dff">&middot; AI: ${esc(cur.ai_fish)}</span>` : '') + photoThumbs(cur);
 
   build(cur.graphdata);
 }
