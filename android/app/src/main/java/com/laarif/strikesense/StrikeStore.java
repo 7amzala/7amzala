@@ -496,8 +496,15 @@ final class StrikeStore
         if(s == null)
             return;
 
-        if(json != null)
-            write(new File(graphs, uid + "_" + what + ".json"), json);
+        try
+        {
+            if(json != null)
+                write(new File(graphs, uid + "_" + what + ".json"), json);
+        }
+        catch(Exception e)
+        {
+            return;                         // (phone storage full: try again later)
+        }
 
         put(s, json != null ? "has" + what : "no" + what, true);
         save();
