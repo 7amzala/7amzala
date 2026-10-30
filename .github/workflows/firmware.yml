@@ -37,6 +37,15 @@ jobs:
           g++ -O2 -std=c++17 -DMOCK_NIMBLE -Imock_ble -Imock -o ble_test_nimble ble_test.cpp
           ./ble_test_nimble
 
+      - name: Strike replay - a recorded strike played back through the real detection (PC)
+        run: |
+          cd sim
+          g++ -O2 -std=c++17 -Imock -o replay replay.cpp
+          ./replay make fish.json && ./replay fish.json
+          echo "=== a false alarm, played back: must give no alarm ==="
+          ./replay make-false false.json
+          ./replay false.json | tee out.txt; grep -q "replay: NO ALARM" out.txt
+
       - name: Google Sheet script test - the catch and its photos (PC, fake sheet + Drive)
         run: node sim/sheet_test/run.js
 

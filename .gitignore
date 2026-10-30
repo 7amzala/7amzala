@@ -18,3 +18,6 @@ sim/rod_sim
 sim/rod_sim_shake
 sim/watch_ui_test/host_pair
 sim/ble_test_nimble
+sim/replay
+sim/*.json
+sim/out.txt

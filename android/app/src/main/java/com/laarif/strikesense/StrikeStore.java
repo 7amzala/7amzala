@@ -228,6 +228,19 @@ final class StrikeStore
             if(landing(s, r))
                 changed = true;
 
+            // the rod's strike record (raw sensor) and fight record: to collect
+            if(r.optBoolean("detail") && !s.optBoolean("rdetail"))
+            {
+                put(s, "rdetail", true);
+                changed = true;
+            }
+
+            if(r.optBoolean("fightrec") && !s.optBoolean("rfight"))
+            {
+                put(s, "rfight", true);
+                changed = true;
+            }
+
             if(!r.optBoolean("graph") && !s.optBoolean("graph") && !s.optBoolean("nograph"))
             {
                 put(s, "nograph", true);         // the rod had no graph for it
@@ -444,6 +457,64 @@ final class StrikeStore
         }
 
         return null;
+    }
+
+    // ---------- strike + fight records (for better alarms, real simulations) ----------
+
+    // The newest strike whose strike or fight record is still on the rod only;
+    // "what" is set to "detail" or "fight". null = none.
+    synchronized JSONObject needsRecord(String[] what)
+    {
+        for(int i = list.length() - 1; i >= 0 && i >= list.length() - 60; i--)
+        {
+            JSONObject s = list.optJSONObject(i);
+
+            if(s == null || !s.has("rseq"))
+                continue;
+
+            if(s.optBoolean("rdetail") && !s.optBoolean("hasdetail") && !s.optBoolean("nodetail"))
+            {
+                what[0] = "detail";
+                return s;
+            }
+
+            if(s.optBoolean("rfight") && !s.optBoolean("hasfight") && !s.optBoolean("nofight"))
+            {
+                what[0] = "fight";
+                return s;
+            }
+        }
+
+        return null;
+    }
+
+    // kept next to the strike's graph (big: not in the list, not in the sheet)
+    synchronized void setRecord(String uid, String what, String json)
+    {
+        JSONObject s = byUid(uid);
+
+        if(s == null)
+            return;
+
+        if(json != null)
+            write(new File(graphs, uid + "_" + what + ".json"), json);
+
+        put(s, json != null ? "has" + what : "no" + what, true);
+        save();
+    }
+
+    synchronized String record(String uid, String what)
+    {
+        File f = new File(graphs, uid + "_" + what + ".json");
+
+        try
+        {
+            return f.exists() ? read(f) : "null";
+        }
+        catch(Exception e)
+        {
+            return "null";
+        }
     }
 
     // The rod's /laststrike for this strike (k/t 5 a second, zk/zt 50 a second)
@@ -1025,6 +1096,8 @@ final class StrikeStore
             {
                 list.remove(i);
                 new File(graphs, uid + ".json").delete();
+                new File(graphs, uid + "_detail.json").delete();
+                new File(graphs, uid + "_fight.json").delete();
 
                 for(String slot : PHOTO_SLOTS)
                     photoFile(uid, slot).delete();

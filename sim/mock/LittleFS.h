@@ -9,7 +9,8 @@ struct MockFs
 {
   std::map<std::string, std::string> files;
   bool works = true;
-  int writes = 0;                       // files written (wear check)
+  int writes = 0;                       // strike log files written (wear check)
+  int allWrites = 0;                    // every file written
   size_t total = 1536 * 1024;           // storage size
 };
 
@@ -35,7 +36,15 @@ public:
     return n;
   }
   size_t size() { return mockFs().files[path].size(); }
-  void close() { if(ok && writing) mockFs().writes++; ok = false; }
+  void close()
+  {
+    if(ok && writing)
+    {
+      mockFs().allWrites++;
+      if(path.rfind("/sl/", 0) == 0) mockFs().writes++;
+    }
+    ok = false;
+  }
 private:
   std::string path;
   bool ok = false;

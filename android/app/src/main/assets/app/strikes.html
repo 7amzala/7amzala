@@ -122,6 +122,12 @@ pre{white-space:pre-wrap;word-break:break-all;background:#060c1a;border:1px soli
   <div class="story" id="story"></div>
   <div class="meta" id="storyText" style="margin-top:5px"></div>
  </div>
+ <div class="card" id="fightCard" style="display:none">
+  <div class="lbl">THE FIGHT</div>
+  <canvas id="fg" height="150" style="margin-top:6px"></canvas>
+  <div class="meta" id="fightText" style="margin-top:5px"></div>
+ </div>
+ <div class="meta" id="recNote" style="margin:0 2px 8px"></div>
  <button class="btn red" onclick="deleteStrike()">Delete this strike</button>
 </div>
 
@@ -590,6 +596,49 @@ function openStrike(uid)
     (cur.ai_fish ? ` <span class="meta" style="color:#b39dff">&middot; AI: ${esc(cur.ai_fish)}</span>` : '') + photoThumbs(cur);
 
   build(cur.graphdata);
+  drawFight();
+  $('recNote').innerHTML = cur.hasdetail ? '&#10004; Strike record saved (raw sensor, 20 s) &ndash; helps make the alarm better' : '';
+}
+
+// the whole fight: tilt (line) and knocks (bars), 10 a second, REEL IN marked
+function drawFight()
+{
+  let f = null;
+  try { f = cur.hasfight && APP && APP.fight ? JSON.parse(APP.fight(cur.uid)) : null; } catch(e) {}
+  $('fightCard').style.display = f && f.k && f.k.length ? '' : 'none';
+  if(!f || !f.k || !f.k.length) return;
+
+  const cv = $('fg'), W = cv.clientWidth || 320, H = 150;
+  cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+  const c = cv.getContext('2d');
+  c.scale(devicePixelRatio, devicePixelRatio);
+  c.clearRect(0, 0, W, H);
+
+  const n = f.k.length, x = i => 4 + i / Math.max(1, n - 1) * (W - 8);
+  const kMax = Math.max(100, ...f.k), tMax = Math.max(10, ...f.t.map(Math.abs));
+
+  // knocks: bars from the bottom
+  c.fillStyle = 'rgba(34,211,255,.55)';
+  f.k.forEach((k, i) => { const h = Math.min(1, k / kMax) * (H * 0.45); if(h > 1) c.fillRect(x(i), H - 14 - h, Math.max(1, (W - 8) / n), h); });
+
+  // tilt: a line (up = toward the water)
+  c.strokeStyle = '#9b8cff'; c.lineWidth = 1.8; c.beginPath();
+  f.t.forEach((t, i) => { const y = H * 0.42 - t / tMax * H * 0.36; i ? c.lineTo(x(i), y) : c.moveTo(x(i), y); });
+  c.stroke();
+
+  // the strike at the start, REEL IN, the end
+  const mark = (i, col, label, ly) => { c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.moveTo(x(i), 4); c.lineTo(x(i), H - 14); c.stroke();
+    c.fillStyle = col; c.font = 'bold 10px Arial'; c.fillText(label, Math.min(W - 60, x(i) + 3), ly || 12); };
+  mark(0, '#ff4d5e', 'STRIKE');
+  if(f.reel >= 0) mark(f.reel, '#ff8a3d', 'REEL IN', 25);
+  const endCol = f.result == 'fish' ? '#3ddc84' : f.result == 'lost' ? '#ff8d98' : '#8ea6c8';
+  const endName = f.result == 'fish' ? 'FISH OUT' : f.result == 'lost' ? 'LOST IT' : 'NO FISH';
+  mark(n - 1, endCol, '');
+  c.fillStyle = endCol; c.font = 'bold 10px Arial'; c.fillText(endName, W - 56, H - 2);
+
+  const sec = i => mmss(Math.round(i / (f.hz || 10)));
+  $('fightText').innerHTML = `Strike &rarr; ${f.reel >= 0 ? 'REEL IN after ' + sec(f.reel) + ' &rarr; ' : ''}<b style="color:${endCol}">${endName}</b> after ${sec(n - 1)} &middot; ` +
+    '<span style="color:#9b8cff">&#9472; tilt</span> &middot; <span style="color:#22d3ff">&#9646; knocks</span>';
 }
 
 function stat(l, v, size) { return `<div><div class="lbl">${l}</div><div class="big"${size ? ` style="font-size:${size}px;padding-top:5px"` : ''}>${v}</div></div>`; }

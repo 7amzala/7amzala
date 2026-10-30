@@ -79,6 +79,7 @@ public class RodService extends Service
     private JSONObject lastData;            // waves / wind for the strikes saved
     private long lastStrikesAt = 0;
     private long lastGraphTry = 0;
+    private long lastRecordTry = 0;     // strike / fight records (collected when calm)
     private long lastLogAt = 0;
     private boolean logMore = false;          // the rod has more saved strikes to give
     private boolean rodHasLog = true;         // false: an older rod (no /log)
@@ -395,6 +396,32 @@ public class RodService extends Service
                 catch(Exception e)
                 {
                 }
+            }
+        }
+
+        // strike + fight records (raw sensor, the whole fight): when calm only -
+        // not during a strike or a fight (the Bluetooth is for the alarm then)
+        boolean fighting = lastData != null && lastData.optInt("land") == 1;
+        String[] what = { "" };
+        JSONObject rec = rodHasLog && !strikeNow && !fighting && now - lastRecordTry > 4000 ? store.needsRecord(what) : null;
+
+        if(rec != null)
+        {
+            lastRecordTry = now;
+            RodLink.Response r = link.request("/log" + what[0] + "?seq=" + rec.optLong("rseq"), 20000);
+
+            try
+            {
+                String body = r != null && r.code == 200 ? new String(r.body, "UTF-8") : null;
+                JSONObject j = body != null ? new JSONObject(body) : null;
+
+                if(j != null && j.optBoolean("have"))
+                    store.setRecord(rec.optString("uid"), what[0], body);
+                else if(j != null && !j.optBoolean("busy"))
+                    store.setRecord(rec.optString("uid"), what[0], null);   // gone from the rod
+            }
+            catch(Exception e)
+            {
             }
         }
 

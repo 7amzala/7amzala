@@ -985,6 +985,19 @@ public class MainActivity extends Activity
             StrikeStore.get(MainActivity.this).delete(uid);
         }
 
+        // the strike's fight record (knock + tilt, strike to the end), "null" = none
+        @JavascriptInterface
+        public String fight(String uid)
+        {
+            return StrikeStore.get(MainActivity.this).record(uid, "fight");
+        }
+
+        @JavascriptInterface
+        public boolean hasDetail(String uid)
+        {
+            return !"null".equals(StrikeStore.get(MainActivity.this).record(uid, "detail"));
+        }
+
         // CATCH page
         @JavascriptInterface
         public String newestUid()

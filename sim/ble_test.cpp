@@ -602,6 +602,27 @@ int main()
       printf("        /log = %.300s\n", b.body.c_str());
       check(ask(700423, "/strikes", b) && b.body.find("\"result\":\"fish\"") != NO, "/strikes: the same");
       check(ask(700424, "/lostfish", b) && b.body == "NO FIGHT", "a second answer is refused (the fight is over)");
+
+      // the strike + fight records (for better alarms, real simulations)
+      step(5);                                  // a calm moment: they go to flash
+      std::string sq = std::to_string(logSeq);
+      check(ask(700440, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("\"detail\":true") != NO &&
+            b.body.find("\"fightrec\":true") != NO, "/log: this strike has its strike record and its fight record");
+      bool gotD = ask(700441, "/logdetail?seq=" + sq, b, 15);
+      int xs = 0; size_t xp = b.body.find("\"x\":[");
+      for (size_t i = xp; xp != NO && i < b.body.find(']', xp); i++) if (b.body[i] == ',') xs++;
+      printf("        strike record: %zu bytes, %d raw points\n", b.body.size(), xs + 1);
+      check(gotD && b.body.find("\"have\":true") != NO && b.body.find("\"hz\":100") != NO && b.body.find("\"pre\":500") != NO &&
+            xs + 1 == 2000 && b.body.find("\"settings\":{") != NO && b.body.find("\"knockthr\":") != NO,
+            "strike record: raw sensor 5 s before + 15 s after (100 a second) + what the rod knew");
+      bool gotF = ask(700442, "/logfight?seq=" + sq, b, 15);
+      int ks = 0; size_t kp = b.body.find("\"k\":[");
+      for (size_t i = kp; kp != NO && i < b.body.find(']', kp); i++) if (b.body[i] == ',') ks++;
+      printf("        fight record: %zu bytes, %d points, %.80s\n", b.body.size(), ks + 1, b.body.c_str());
+      check(gotF && b.body.find("\"have\":true") != NO && b.body.find("\"result\":\"fish\"") != NO &&
+            b.body.find("\"reel\":8") != NO && ks + 1 >= 270 && ks + 1 <= 300,
+            "fight record: from the strike to FISH OUT (10 a second), REEL IN marked at 8 s");
+      check(ask(700443, "/logdetail?seq=99999", b) && b.body.find("\"have\":false") != NO, "no record for an unknown strike: have false");
       logReady = false; slistCount = 0;
       logBegin();
       check(ask(700425, "/log?after=" + std::to_string(logSeq - 1), b) && b.body.find("\"result\":\"fish\"") != NO,
@@ -647,7 +668,7 @@ int main()
     check(ask(700406, "/log?after=0", b) && b.body.find("\"seq\":1,") != NO, "asking from 0: starts at the oldest kept");
 
     // a small storage (10 strikes): the oldest are replaced, the newest 10 all there
-    mockFs().total = 60000;
+    mockFs().total = 105000;              // (the strike log gets 40 % of it)
     logReady = false; slistCount = 0;
     logBegin();
     check(logSlots == 10, "small storage: room for 10");
