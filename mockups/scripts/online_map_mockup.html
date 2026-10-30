@@ -1,0 +1,139 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:34px;background:#dde2ea;font-family:Arial,Helvetica,sans-serif;width:2120px;color:#0b1428}
+h1{font-size:34px;margin:0 0 6px}
+.cap{font-size:19px;color:#38465f;margin-bottom:22px;line-height:1.5}
+.row{display:flex;gap:26px;align-items:flex-start}
+.col{width:400px}
+.step{font-size:20px;font-weight:800;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+.n{display:inline-flex;width:32px;height:32px;border-radius:50%;background:#1e7bff;color:#fff;align-items:center;justify-content:center;font-size:17px}
+.note{font-size:15.5px;color:#38465f;line-height:1.5;margin-top:12px}
+.phone{width:400px;height:800px;border-radius:42px;border:12px solid #05070c;background:#050b18;color:#eaf3ff;position:relative;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.bar{position:absolute;left:0;right:0;top:0;padding:16px 16px 10px;background:linear-gradient(#071433ee,#07143300);z-index:5}
+.ttl{font-size:21px;font-weight:900}
+.sub{font-size:13px;color:#8fa0bf;margin-top:3px}
+.toggle{position:absolute;right:16px;top:16px;background:#3ddc84;color:#05210f;border-radius:20px;padding:7px 12px;font-weight:900;font-size:13px}
+.map{position:absolute;inset:0;background:
+ radial-gradient(ellipse at 70% 80%,#0d3a66 0 30%,transparent 31%),
+ linear-gradient(160deg,#20324d 0 38%,#2b4466 38% 40%,#0f4d7d 40% 100%)}
+.coast{position:absolute;left:0;top:0;width:100%;height:100%}
+.pin{position:absolute;width:46px;height:46px;border-radius:50%;border:3px solid #fff;background:#334 center/cover;box-shadow:0 2px 8px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:20px}
+.fuzz{position:absolute;border-radius:50%;background:rgba(34,211,255,.13);border:1px dashed rgba(34,211,255,.5)}
+.bite{box-shadow:0 0 0 6px rgba(255,138,61,.45),0 0 22px 8px rgba(255,138,61,.6)}
+.me{border-color:#22d3ff}
+.lab{position:absolute;font-size:11px;font-weight:800;background:#0b1428cc;border-radius:8px;padding:2px 6px;white-space:nowrap}
+.legend{position:absolute;left:12px;right:12px;bottom:74px;background:#0b1428e6;border-radius:12px;padding:9px 12px;font-size:12px;line-height:1.7;color:#c9d6ee}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:62px;background:#070c18;display:flex;justify-content:space-around;align-items:center;font-size:12px;color:#5f7799;font-weight:800}
+.tabs .on{color:#22d3ff}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#0b1730;border-radius:22px 22px 0 0;padding:18px;border-top:1px solid #24324f}
+.av{width:74px;height:74px;border-radius:50%;border:3px solid #22d3ff;background:#2c4d6b;display:flex;align-items:center;justify-content:center;font-size:34px}
+.stats{display:flex;gap:8px;margin-top:14px}
+.st{flex:1;background:#0f1c36;border:1px solid #233457;border-radius:12px;padding:9px;text-align:center}
+.st b{display:block;font-size:20px}
+.st small{color:#8fa0bf;font-size:11px}
+.btn{border-radius:14px;padding:14px;text-align:center;font-weight:900;font-size:16px;margin-top:12px}
+.b1{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#001a33}
+.b2{background:transparent;border:1px solid #3a4a66;color:#a9bbd6;font-size:13px;padding:10px}
+.badge{display:inline-block;font-size:11px;font-weight:900;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:2px}
+.msgs{position:absolute;top:84px;left:0;right:0;bottom:80px;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.m{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.35}
+.them{background:#16233f;align-self:flex-start;border-bottom-left-radius:4px}
+.mine{background:#1e7bff;align-self:flex-end;border-bottom-right-radius:4px}
+.who{font-size:11px;color:#8fa0bf;margin-bottom:2px;font-weight:800}
+.inp{position:absolute;left:12px;right:12px;bottom:14px;background:#0f1c36;border:1px solid #24324f;border-radius:22px;padding:12px 16px;color:#5f7799;font-size:14px}
+.req{background:#0f1c36;border:1px solid #ffc928;border-radius:14px;padding:12px;font-size:14px;margin:4px 0}
+.sys{align-self:center;font-size:12px;color:#8fa0bf;background:#0b1428;border-radius:10px;padding:4px 10px}
+.rule{background:#fff;border-radius:14px;padding:14px 18px;font-size:15px;line-height:1.6;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+</style></head><body>
+<h1>Online fishermen: map, profile, chat (mockup, app)</h1>
+<div class="cap">Turn on <b>Go online</b> while fishing: other StrikeSense fishermen in your country see you on the map (around your beach, not your exact spot), tap you to see your profile and rank, and say hi. Off by default, and off again by itself when you stop fishing.</div>
+
+<div class="row">
+ <!-- 1 map -->
+ <div class="col">
+  <div class="step"><span class="n">1</span>Who is fishing now</div>
+  <div class="phone">
+   <div class="map">
+    <svg class="coast" viewBox="0 0 400 800"><path d="M0 300 Q90 280 150 330 T300 360 T400 330" stroke="#e8d7a8" stroke-width="5" fill="none" opacity=".55"/></svg>
+    <div class="fuzz" style="left:60px;top:300px;width:110px;height:110px"></div>
+    <div class="pin" style="left:92px;top:332px">&#129333;</div><div class="lab" style="left:72px;top:384px">Ali &middot; #3</div>
+    <div class="fuzz" style="left:200px;top:330px;width:120px;height:120px"></div>
+    <div class="pin bite" style="left:236px;top:366px">&#128104;</div><div class="lab" style="left:206px;top:418px;color:#ffb070">Marco &middot; biting!</div>
+    <div class="pin me" style="left:170px;top:470px">&#128526;</div><div class="lab" style="left:168px;top:522px;color:#22d3ff">You</div>
+    <div class="pin" style="left:300px;top:250px;opacity:.85">&#128105;</div><div class="lab" style="left:286px;top:302px">Sara</div>
+   </div>
+   <div class="bar"><div class="ttl">Fishing now</div><div class="sub">Spain &middot; 4 online &middot; Pescador beach</div><div class="toggle">&#9679; ONLINE</div></div>
+   <div class="legend">&#9673; circle = around here (not the exact spot)<br><span style="color:#ffb070">&#9679; glow</span> = had a strike in the last 30 min &middot; #3 = rank in Spain</div>
+   <div class="tabs"><span>&#9673;<br>Rod</span><span>&#9776;<br>My strikes</span><span class="on">&#9873;<br>Map</span><span>&#9993;<br>Chat</span></div>
+  </div>
+  <div class="note">You appear only while you are online <b>and</b> fishing (rod connected). Home is never shown.</div>
+ </div>
+
+ <!-- 2 profile -->
+ <div class="col">
+  <div class="step"><span class="n">2</span>Tap a fisherman: profile</div>
+  <div class="phone">
+   <div class="map" style="filter:brightness(.45)"></div>
+   <div class="sheet">
+    <div style="display:flex;gap:14px;align-items:center">
+     <div class="av">&#129333;</div>
+     <div><div style="font-size:21px;font-weight:900">Ali Laarif <span class="badge" style="background:#ffc928;color:#2a1d00">EXPERT</span></div>
+     <div class="sub">Member since March 2026 &middot; Pescador beach</div>
+     <div class="sub">&#127466;&#127480; Spain &middot; fishing for 2 h</div></div>
+    </div>
+    <div class="stats">
+     <div class="st"><b>#3</b><small>in Spain</small></div>
+     <div class="st"><b>47</b><small>catches</small></div>
+     <div class="st"><b>62%</b><small>strikes landed</small></div>
+    </div>
+    <div class="stats">
+     <div class="st" style="text-align:left"><small>BEST FISH</small><br><b style="font-size:16px">Sea bass 3.4 kg &middot; 71 cm</b></div>
+    </div>
+    <div class="btn b1">&#128075; SAY HI</div>
+    <div style="display:flex;gap:8px"><div class="btn b2" style="flex:1">&#128683; Block</div><div class="btn b2" style="flex:1">&#9888; Report</div></div>
+   </div>
+  </div>
+  <div class="note">Rank, catches and best fish come from <b>verified</b> catches only.</div>
+ </div>
+
+ <!-- 3 chat -->
+ <div class="col">
+  <div class="step"><span class="n">3</span>Say hi, then chat</div>
+  <div class="phone">
+   <div class="bar" style="background:#0b1730"><div class="ttl">&#129333; Ali</div><div class="sub">online &middot; Pescador beach</div></div>
+   <div class="msgs">
+    <div class="sys">You said hi &middot; Ali accepted</div>
+    <div class="m them"><div class="who">Ali</div>Hi! Any luck today?</div>
+    <div class="m mine">Two strikes this morning, one sea bass 1.8 kg &#127907;</div>
+    <div class="m them"><div class="who">Ali</div>Nice! What bait are you using?</div>
+    <div class="m mine">Sardine, about 80 m out</div>
+    <div class="req">&#128075; <b>Marco</b> wants to say hi <span style="float:right;color:#3ddc84;font-weight:900">ACCEPT</span></div>
+   </div>
+   <div class="inp">Message&hellip;</div>
+  </div>
+  <div class="note">A stranger first sends <b>"Say hi"</b>; you accept or ignore. Block / report any time.</div>
+ </div>
+
+ <!-- 4 beach chat -->
+ <div class="col">
+  <div class="step"><span class="n">4</span>Beach chat</div>
+  <div class="phone">
+   <div class="bar" style="background:#0b1730"><div class="ttl">&#127958; Pescador beach</div><div class="sub">4 fishing here now</div></div>
+   <div class="msgs">
+    <div class="sys">&#127907; Marco caught a Gilthead bream 1.2 kg &middot; 5 min ago</div>
+    <div class="m them"><div class="who">Marco</div>They are biting at the rocks end!</div>
+    <div class="m them"><div class="who">Sara</div>Wind is changing, careful with the lines</div>
+    <div class="m mine">Thanks, moving my rod there &#128077;</div>
+   </div>
+   <div class="inp">Message to the beach&hellip;</div>
+  </div>
+  <div class="note">Everyone online at the same beach. Catches appear here by themselves.</div>
+ </div>
+</div>
+
+<div class="row" style="margin-top:22px">
+ <div class="rule" style="width:1700px"><b>Safety rules (built in):</b> off by default &middot; approximate place (300&ndash;500 m) + beach name, exact spot only for friends you allow &middot; visible only while online and fishing; offline by itself when the rod is off for 30 min, or after 12 h &middot; only registered users with a verified email &middot; "Say hi" before any chat &middot; Block / Report on every profile and message.</div>
+</div>
+</body></html>
