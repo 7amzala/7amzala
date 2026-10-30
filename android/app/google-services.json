@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "56141507787",
+    "project_id": "strikesense-acdcf",
+    "storage_bucket": "strikesense-acdcf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:56141507787:android:1c4e8fbc7f98ce05843f4e",
+        "android_client_info": {
+          "package_name": "com.laarif.strikesense"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1LYGrZtJ1Y3sC8tmgBVFShoH0vSCUqpU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

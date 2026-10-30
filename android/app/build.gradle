@@ -1,5 +1,6 @@
 plugins {
     id "com.android.application"
+    id "com.google.gms.google-services"
 }
 
 android {
@@ -52,6 +53,15 @@ android {
             assets.srcDirs += [file("$buildDir/generated/dashboard")]
         }
     }
+}
+
+// Firebase (online database): accounts, profiles, map, chat, photos.
+// Project strikesense-acdcf, settings in google-services.json.
+dependencies {
+    implementation platform("com.google.firebase:firebase-bom:33.1.2")
+    implementation "com.google.firebase:firebase-auth"
+    implementation "com.google.firebase:firebase-firestore"
+    implementation "com.google.firebase:firebase-storage"
 }
 
 // The dashboard page is written once, in the rod sketch. Copy it into the
