@@ -1,0 +1,8 @@
+StrikeSense - codes to paste in Firebase
+(Project settings -> General -> Your apps -> com.laarif.strikesense -> Add fingerprint)
+
+Code 1 (SHA-1):
+65:52:DB:3C:D0:FD:8F:F7:FD:FB:01:D8:4F:26:DF:95:83:A0:3C:84
+
+Code 2 (SHA-256):
+04:CE:83:51:A9:71:19:34:B4:1E:7B:49:DF:3A:19:19:3A:5F:D4:96:BC:D6:08:2C:D1:F7:9F:97:FD:1C:04:9C
