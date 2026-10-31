@@ -1,0 +1,63 @@
+rules_version = '2';
+
+// StrikeSense database rules (Firestore). Paste into:
+// Firebase -> Firestore Database -> Rules -> Publish.
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // both checks done: email link tapped and phone confirmed by SMS
+    function verified() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.phone_number != null;
+    }
+
+    function isAdmin() { return signedIn() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
+    function me(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // private: the whole form. Only the owner and the admin.
+    match /users/{uid} {
+      allow read: if me(uid) || isAdmin();
+
+      allow create: if me(uid) && verified()
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.phone == request.auth.token.phone_number
+        && request.resource.data.style == 'surfcasting'
+        && request.resource.data.agree == true;
+
+      // country, email, phone, birth date, sex and the sign-up record are locked:
+      // only the admin changes them
+      allow update: if isAdmin()
+        || (me(uid) && verified()
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['country', 'email', 'phone', 'dob', 'sex', 'reg', 'createdAt', 'style', 'sheetUser']));
+
+      allow delete: if isAdmin();
+    }
+
+    // public: what other surfcasters see (no phone, email, birth date or exact place)
+    match /profiles/{uid} {
+      allow read: if verified() || isAdmin();
+
+      allow create, update: if isAdmin()
+        || (me(uid) && verified()
+            && request.resource.data.country == get(/databases/$(db)/documents/users/$(uid)).data.country
+            && !request.resource.data.keys().hasAny(['phone', 'email', 'dob', 'lat', 'lon']));
+
+      allow delete: if isAdmin();
+    }
+
+    // the admin list: made by hand in the console
+    match /admins/{uid} {
+      allow read: if me(uid);
+      allow write: if false;
+    }
+
+    // everything else: closed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

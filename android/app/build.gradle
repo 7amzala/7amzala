@@ -11,8 +11,8 @@ android {
         applicationId "com.laarif.strikesense"
         minSdk 24
         targetSdk 34
-        versionCode 18
-        versionName "3.6 (strike + fight records, fight graph)"
+        versionCode 19
+        versionName "3.7 (accounts: SMS + email, Firebase)"
     }
 
     // Alarm sounds are read straight from the app (RodService): not compressed

@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// StrikeSense file rules (Storage). Paste into:
+// Firebase -> Storage -> Rules -> Publish.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // profile photos: everyone signed in can see them, only the owner changes them
+    match /profiles/{uid}/{file} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /{all=**} {
+      allow read, write: if false;
+    }
+  }
+}

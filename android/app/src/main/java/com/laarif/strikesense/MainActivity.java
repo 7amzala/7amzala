@@ -59,7 +59,6 @@ public class MainActivity extends Activity
     private static final String ACCOUNT_URL = DASHBOARD_URL + "app/account.html";
     private boolean onPairPage = false;
     private boolean onAccountPage = false;
-    private volatile String accountResult = "";
 
     private static final int REQ_PERMISSIONS = 1;
     private static final int REQ_BLUETOOTH_ON = 2;
@@ -116,6 +115,7 @@ public class MainActivity extends Activity
         s.setTextZoom(100);                              // big system font must not break the layout
 
         web.addJavascriptInterface(new Bridge(), "StrikeApp");
+        Cloud.get(this).setActivity(this);
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new Client());
 
@@ -635,7 +635,7 @@ public class MainActivity extends Activity
         if(accountAsked)
             return true;
 
-        return !StrikeStore.get(this).signedIn() && !getSharedPreferences("app", MODE_PRIVATE).getBoolean("accountLater", false);
+        return !Cloud.get(this).ready() && !getSharedPreferences("app", MODE_PRIVATE).getBoolean("accountLater", false);
     }
 
     private static String helpStatus(RodLink.State s)
@@ -1214,37 +1214,19 @@ public class MainActivity extends Activity
 
         // ---------- REGISTER / LOG IN page ----------
 
-        // register = true: new account; false: log in. The page asks accountResult().
-        @JavascriptInterface
-        public void accountStart(final boolean register, final String user, final String password)
-        {
-            accountResult = "working";
-
-            new Thread(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    StrikeStore st = StrikeStore.get(MainActivity.this);
-                    String err = st.account(register, user == null ? "" : user, password == null ? "" : password);
-
-                    if(err.isEmpty())
-                    {
-                        if(!register)
-                            st.restore();          // a new phone: this tester's strikes come back
-                        st.syncNow(true);
-                    }
-
-                    accountResult = err.isEmpty() ? "ok" : "error:" + err;
-                }
-            }).start();
-        }
-
-        @JavascriptInterface
-        public String accountResult()
-        {
-            return accountResult;
-        }
+        // The account page drives Cloud (Firebase) and asks cloudState() every few hundred ms.
+        @JavascriptInterface public String cloudState() { return Cloud.get(MainActivity.this).state(); }
+        @JavascriptInterface public String cloudCountry() { return Cloud.get(MainActivity.this).country(); }
+        @JavascriptInterface public void cloudRegister(String form, String password, boolean finish) { Cloud.get(MainActivity.this).register(form, password == null ? "" : password, finish); }
+        @JavascriptInterface public void cloudSmsCode(String code) { Cloud.get(MainActivity.this).smsCode(code == null ? "" : code); }
+        @JavascriptInterface public void cloudSmsAgain(String phone) { Cloud.get(MainActivity.this).smsAgain(phone); }
+        @JavascriptInterface public void cloudEmailCheck(boolean quiet) { Cloud.get(MainActivity.this).emailCheck(quiet); }
+        @JavascriptInterface public void cloudEmailAgain() { Cloud.get(MainActivity.this).emailAgain(); }
+        @JavascriptInterface public void cloudEmailChange(String email) { Cloud.get(MainActivity.this).emailChange(email == null ? "" : email); }
+        @JavascriptInterface public void cloudLoginEmail(String email, String password) { Cloud.get(MainActivity.this).loginEmail(email == null ? "" : email, password == null ? "" : password); }
+        @JavascriptInterface public void cloudLoginPhone(String phone) { Cloud.get(MainActivity.this).loginPhone(phone == null ? "" : phone); }
+        @JavascriptInterface public void cloudCancel() { Cloud.get(MainActivity.this).cancel(); }
+        @JavascriptInterface public void cloudForgot(String email) { Cloud.get(MainActivity.this).forgotPassword(email == null ? "" : email); }
 
         // the page says OK (or "later"): go on to the rod
         @JavascriptInterface
@@ -1265,7 +1247,6 @@ public class MainActivity extends Activity
                 @Override
                 public void run()
                 {
-                    accountResult = "";
                     accountAsked = true;
                     showTab(TAB_ROD);
                 }
@@ -1275,13 +1256,13 @@ public class MainActivity extends Activity
         @JavascriptInterface
         public String accountName()
         {
-            return StrikeStore.get(MainActivity.this).username();
+            return Cloud.get(MainActivity.this).name();
         }
 
         @JavascriptInterface
         public void logOut()
         {
-            StrikeStore.get(MainActivity.this).logOut();
+            Cloud.get(MainActivity.this).logOut();
             openAccount();
         }
 

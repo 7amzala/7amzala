@@ -6,113 +6,376 @@
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
-body{font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%) fixed;padding:22px 18px;-webkit-tap-highlight-color:transparent}
-.logo{width:76px;height:76px;border-radius:50%;margin:10px auto 12px;display:block;box-shadow:0 0 18px rgba(30,150,255,.55)}
-h1{font-size:24px;margin:0 0 4px;text-align:center}
+body{font-family:Arial,Helvetica,sans-serif;color:#eaf3ff;background:radial-gradient(circle at 40% -20%,#0d2a5c 0,#040b1c 42%,#000206 100%) fixed;padding:18px 16px 30px;-webkit-tap-highlight-color:transparent}
+.logo{width:58px;height:58px;border-radius:50%;margin:4px auto 8px;display:block;box-shadow:0 0 18px rgba(30,150,255,.55)}
+h1{font-size:22px;margin:0 0 2px;text-align:center}
 h1 b{color:#22d3ff}
-.sub{color:#8ea6c8;font-size:14px;text-align:center;margin-bottom:20px;line-height:1.45}
-.tabs{display:flex;background:#0b1428;border:1px solid #24324f;border-radius:12px;padding:3px;margin-bottom:14px}
-.tabs div{flex:1;text-align:center;padding:10px;border-radius:9px;font-weight:800;font-size:14px;color:#8ea6c8;cursor:pointer}
+.tag{text-align:center;color:#8ea6c8;font-size:12px;letter-spacing:1px;font-weight:800;margin-bottom:14px}
+.tabs,.seg{display:flex;background:#0b1428;border:1px solid #24324f;border-radius:12px;padding:3px;margin-bottom:12px}
+.tabs div,.seg div{flex:1;text-align:center;padding:10px 4px;border-radius:9px;font-weight:800;font-size:14px;color:#8ea6c8;cursor:pointer}
 .tabs .on{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a}
-.lbl{font-size:12px;color:#8ea6c8;letter-spacing:.8px;font-weight:800;margin:10px 0 6px}
-input[type=text],input[type=password]{width:100%;font-size:17px;padding:13px;border-radius:12px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff}
+.seg .on{background:#0b2440;color:#22d3ff;box-shadow:inset 0 0 0 1px #22d3ff}
+.lbl{font-size:12px;color:#8ea6c8;font-weight:800;margin:10px 0 5px}
+.lbl i{font-style:normal;color:#5f7799;font-weight:600}
+input,select{width:100%;font-size:16px;padding:12px;border-radius:11px;border:1px solid #24324f;background:#060c1a;color:#eaf3ff;font-family:inherit}
+input[type=date]{color-scheme:dark}
+.two{display:flex;gap:8px}.two>div{flex:1;min-width:0}
+.lock{padding:12px;border-radius:11px;border:1px solid #24324f;background:#0b1428;color:#c3d2ea;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agree{display:flex;gap:10px;align-items:flex-start;margin:14px 0 4px;font-size:13px;color:#c3d2ea;line-height:1.45}
 .agree input{width:22px;height:22px;margin-top:1px;flex:0 0 auto}
-.btn{display:block;width:100%;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border:0;border-radius:12px;padding:15px;font-weight:900;font-size:16px;margin-top:16px;cursor:pointer}
+.btn{display:block;width:100%;text-align:center;background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#04121a;border:0;border-radius:12px;padding:15px;font-weight:900;font-size:16px;margin-top:14px;cursor:pointer;font-family:inherit}
 .btn:disabled{opacity:.4}
+.btn2{display:block;width:100%;text-align:center;background:transparent;border:1px solid #3a4a66;color:#c3d2ea;border-radius:12px;padding:12px;font-weight:800;font-size:14px;margin-top:10px;cursor:pointer;font-family:inherit}
+.link{color:#22d3ff;font-weight:800;cursor:pointer}
 .later{display:block;text-align:center;color:#8ea6c8;font-size:13px;margin-top:16px;text-decoration:underline;cursor:pointer}
-.msg{text-align:center;margin-top:14px;font-size:14px;line-height:1.5;min-height:22px}
-.small{color:#5f7799;font-size:12px;text-align:center;margin-top:18px;line-height:1.5}
+.msg{text-align:center;margin-top:12px;font-size:14px;line-height:1.5;min-height:20px}
+.small{color:#5f7799;font-size:12px;text-align:center;margin-top:14px;line-height:1.5}
+.center{text-align:center}
+.big{font-size:56px;text-align:center;margin:34px 0 6px}
+.title{font-size:21px;font-weight:900;text-align:center}
+.text{text-align:center;color:#c3d2ea;font-size:15px;line-height:1.55;margin-top:8px}
+.text b{color:#22d3ff}
+.code{font-size:30px;letter-spacing:14px;text-align:center;font-weight:900;padding:12px 0 12px 14px;margin-top:16px}
+.pic{width:92px;height:92px;border-radius:50%;border:3px dashed #22d3ff;margin:2px auto 4px;display:flex;align-items:center;justify-content:center;background:#0f1c36 center/cover no-repeat;overflow:hidden}
+.pic svg{width:100%;height:100%}
+.picb{display:flex;gap:8px;justify-content:center;font-size:12px;margin-bottom:4px}
+.picb span{color:#22d3ff;font-weight:800;padding:4px 8px;cursor:pointer}
+.card{background:#0f1c36;border:1px solid #24324f;border-radius:12px;padding:12px;margin-top:12px;font-size:13px;line-height:1.6;color:#c3d2ea}
+.card b{color:#3ddc84}
+.ok{color:#3ddc84;font-weight:900}
+.hide{display:none!important}
+.prof{display:flex;gap:14px;align-items:center;margin-top:16px}
+.prof .pic{margin:0;border-style:solid;flex:none;width:80px;height:80px}
+.prof .n{font-size:21px;font-weight:900}
+.prof .s{color:#8ea6c8;font-size:13px;margin-top:3px}
+.steps{text-align:center;font-size:12px;margin-top:22px;color:#8ea6c8}
 </style>
 </head>
 <body>
-<img class="logo" src="/logo.webp" alt="">
-<h1>Laarif <b>StrikeSense</b></h1>
-<div class="sub">Your strikes and fishing spots are saved online with your name, so we can make the detection better.</div>
 
-<div class="tabs"><div id="tReg" class="on" onclick="mode(true)">REGISTER</div><div id="tLog" onclick="mode(false)">LOG IN</div></div>
+<!-- ===== form: register / log in ===== -->
+<div id="pForm">
+ <img class="logo" src="/logo.webp" alt="">
+ <h1>Laarif <b>StrikeSense</b></h1>
+ <div class="tag">SURFCASTING</div>
 
-<div class="lbl">USERNAME</div>
-<input type="text" id="user" maxlength="20" autocomplete="username" autocapitalize="none" placeholder="e.g. karim_asilah">
-<div class="lbl">PASSWORD</div>
-<input type="password" id="pass" maxlength="40" autocomplete="current-password" placeholder="at least 6 characters">
+ <div class="tabs" id="tabs"><div id="tReg" class="on" onclick="mode(true)">REGISTER</div><div id="tLog" onclick="mode(false)">LOG IN</div></div>
 
-<label class="agree" id="agreeRow"><input type="checkbox" id="agree"><span>I share my strikes and fishing spots (from the phone's GPS) to improve StrikeSense.</span></label>
+ <div id="reg">
+  <div id="finishNote" class="card hide" style="margin:0 0 6px">Your account is not finished. Fill in the form once more: your email and password stay.</div>
+  <div class="pic" id="regPic" onclick="photoAsk()"></div>
+  <div class="picb"><span onclick="photo(true)">&#128247; Camera</span><span onclick="photo(false)">&#128444; Gallery</span><span style="color:#5f7799;font-weight:600">photo optional</span></div>
 
-<button class="btn" id="go" onclick="go()">REGISTER</button>
-<div class="msg" id="msg"></div>
-<a class="later" onclick="later()">Not now (keep the strikes on this phone)</a>
-<div class="small">Username: 3-20 letters, numbers, _ . -<br>The password is never stored: only a scrambled check value.</div>
+  <div class="two"><div><div class="lbl">First name *</div><input id="first" maxlength="30" autocomplete="given-name"></div>
+  <div><div class="lbl">Last name *</div><input id="last" maxlength="30" autocomplete="family-name"></div></div>
+  <div class="lbl">Nickname <i>(what people call you, optional)</i></div><input id="nick" maxlength="24" placeholder="e.g. Ali Asilah">
+
+  <div class="two"><div><div class="lbl">Country &#128205;&#128274;</div><div class="lock" id="country">finding&hellip;</div></div>
+  <div><div class="lbl">City *</div><input id="city" maxlength="40" autocomplete="address-level2"></div></div>
+
+  <div class="two"><div><div class="lbl">Date of birth *</div><input id="dob" type="date"></div>
+  <div><div class="lbl">Sex *</div><div class="seg" id="sex" style="margin:0"><div data-v="m" onclick="setSex('m')">Male</div><div data-v="f" onclick="setSex('f')">Female</div></div></div></div>
+
+  <div class="lbl">Phone *</div>
+  <div class="two"><div style="flex:0 0 112px"><select id="dial"></select></div><div><input id="phone" type="tel" inputmode="tel" maxlength="16" placeholder="7700 900123" autocomplete="tel-national"></div></div>
+
+  <div id="cred">
+   <div class="lbl">Email *</div><input id="email" type="email" maxlength="80" autocomplete="email" autocapitalize="none">
+   <div class="lbl">Password * <i>(at least 8 characters)</i></div><input id="pass" type="password" maxlength="60" autocomplete="new-password">
+   <div class="lbl">Password again *</div><input id="pass2" type="password" maxlength="60" autocomplete="new-password">
+  </div>
+
+  <div class="lbl">Fishing licence number <i>(optional: gives the LICENSED badge)</i></div><input id="licence" maxlength="30">
+
+  <label class="agree"><input type="checkbox" id="agree"><span>I agree to the StrikeSense rules and to share my strikes, catches and approximate fishing place with StrikeSense and, when I go online, with other surfcasters.</span></label>
+  <button class="btn" id="goReg" onclick="register()">REGISTER</button>
+  <div class="small">Next: an SMS code to your phone, then a link to your email. Both are needed.<br>Country and email can't be changed later (only the admin can).</div>
+ </div>
+
+ <div id="log" class="hide">
+  <div class="seg" id="lseg"><div class="on" onclick="logBy(true)">&#9993;&#65039; Email</div><div onclick="logBy(false)">&#128241; Phone</div></div>
+  <div id="logE">
+   <div class="lbl">Email</div><input id="lemail" type="email" maxlength="80" autocomplete="email" autocapitalize="none">
+   <div class="lbl">Password</div><input id="lpass" type="password" maxlength="60" autocomplete="current-password">
+   <button class="btn" id="goLogE" onclick="loginEmail()">LOG IN</button>
+   <div class="small">Forgot your password? <span class="link" onclick="forgot()">Send me a link</span></div>
+  </div>
+  <div id="logP" class="hide">
+   <div class="lbl">Phone</div>
+   <div class="two"><div style="flex:0 0 112px"><select id="ldial"></select></div><div><input id="lphone" type="tel" inputmode="tel" maxlength="16" autocomplete="tel-national"></div></div>
+   <button class="btn" id="goLogP" onclick="loginPhone()">SEND ME A CODE</button>
+  </div>
+  <div class="small">New phone? Log in and all your strikes come back.</div>
+ </div>
+
+ <div class="msg" id="msg"></div>
+ <a class="later" onclick="later()">Not now (the rod works without an account)</a>
+</div>
+
+<!-- ===== SMS code ===== -->
+<div id="pSms" class="hide">
+ <div class="big">&#128241;</div>
+ <div class="title">Check your phone</div>
+ <div class="text">We sent a 6-digit code by SMS to<br><b id="smsTo"></b></div>
+ <input id="code" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" oninput="codeIn()">
+ <button class="btn" id="goCode" onclick="sendCode()">CONFIRM</button>
+ <div class="small" id="again"></div>
+ <div class="small"><span class="link" onclick="show('newNum')">Wrong number? Change it</span></div>
+ <div id="newNum" class="hide">
+  <div class="two" style="margin-top:8px"><div style="flex:0 0 112px"><select id="ndial"></select></div><div><input id="nphone" type="tel" inputmode="tel" maxlength="16"></div></div>
+  <button class="btn2" onclick="newNumber()">SEND TO THIS NUMBER</button>
+ </div>
+ <div class="msg" id="msg2"></div>
+ <div class="steps" id="smsStep"><span class="ok">Step 1 of 2</span> &middot; then your email</div>
+ <a class="later" onclick="backToForm()">Back</a>
+</div>
+
+<!-- ===== email link ===== -->
+<div id="pEmail" class="hide">
+ <div class="big">&#9993;&#65039;</div>
+ <div class="title">Check your email</div>
+ <div class="text">Phone confirmed <span class="ok">&#10003;</span><br><br>Now tap the link we sent to<br><b id="emailTo"></b></div>
+ <button class="btn" onclick="emailCheck()">I TAPPED THE LINK</button>
+ <button class="btn2" onclick="APP && APP.cloudEmailAgain()">Send the email again</button>
+ <button class="btn2" onclick="show('newMail')">Wrong email? Change it</button>
+ <div id="newMail" class="hide"><input id="nemail" type="email" style="margin-top:8px" autocapitalize="none"><button class="btn2" onclick="APP && APP.cloudEmailChange(val('nemail'))">SEND TO THIS EMAIL</button></div>
+ <div class="small">Not there? Look in Spam / Junk.</div>
+ <div class="msg" id="msg3"></div>
+ <div class="steps"><span class="ok">Step 2 of 2</span></div>
+</div>
+
+<!-- ===== done ===== -->
+<div id="pDone" class="hide">
+ <div class="big" style="margin-top:20px">&#9989;</div>
+ <div class="title" id="welcome">Welcome!</div>
+ <div class="prof"><div class="pic" id="donePic"></div><div><div class="n" id="dName"></div><div class="s" id="dSub"></div><div class="s">Surfcaster &middot; member since <span id="dSince"></span></div></div></div>
+ <div class="card"><b>Saved by itself:</b><br>&#128197; <span id="dAt"></span><br>&#128205; <span id="dPlace"></span><br>&#128241; phone verified <span class="ok">&#10003;</span> &middot; &#9993;&#65039; email verified <span class="ok">&#10003;</span></div>
+ <div class="card" style="color:#8ea6c8">&#128274; Country and email can't be changed. Need a change? Contact the admin.</div>
+ <button class="btn" onclick="finished()">START FISHING</button>
+ <div class="small">Change your profile any time: Settings &rarr; Account</div>
+</div>
 
 <script>
 const APP = window.StrikeApp || null;
-let reg = true, busy = false;
+const DIAL = Object.fromEntries('AC:247,AD:376,AE:971,AF:93,AG:1,AI:1,AL:355,AM:374,AO:244,AR:54,AS:1,AT:43,AU:61,AW:297,AX:358,AZ:994,BA:387,BB:1,BD:880,BE:32,BF:226,BG:359,BH:973,BI:257,BJ:229,BL:590,BM:1,BN:673,BO:591,BQ:599,BR:55,BS:1,BT:975,BW:267,BY:375,BZ:501,CA:1,CC:61,CD:243,CF:236,CG:242,CH:41,CI:225,CK:682,CL:56,CM:237,CN:86,CO:57,CR:506,CU:53,CV:238,CW:599,CX:61,CY:357,CZ:420,DE:49,DJ:253,DK:45,DM:1,DO:1,DZ:213,EC:593,EE:372,EG:20,EH:212,ER:291,ES:34,ET:251,FI:358,FJ:679,FK:500,FM:691,FO:298,FR:33,GA:241,GB:44,GD:1,GE:995,GF:594,GG:44,GH:233,GI:350,GL:299,GM:220,GN:224,GP:590,GQ:240,GR:30,GT:502,GU:1,GW:245,GY:592,HK:852,HN:504,HR:385,HT:509,HU:36,ID:62,IE:353,IL:972,IM:44,IN:91,IO:246,IQ:964,IR:98,IS:354,IT:39,JE:44,JM:1,JO:962,JP:81,KE:254,KG:996,KH:855,KI:686,KM:269,KN:1,KP:850,KR:82,KW:965,KY:1,KZ:7,LA:856,LB:961,LC:1,LI:423,LK:94,LR:231,LS:266,LT:370,LU:352,LV:371,LY:218,MA:212,MC:377,MD:373,ME:382,MF:590,MG:261,MH:692,MK:389,ML:223,MM:95,MN:976,MO:853,MP:1,MQ:596,MR:222,MS:1,MT:356,MU:230,MV:960,MW:265,MX:52,MY:60,MZ:258,NA:264,NC:687,NE:227,NF:672,NG:234,NI:505,NL:31,NO:47,NP:977,NR:674,NU:683,NZ:64,OM:968,PA:507,PE:51,PF:689,PG:675,PH:63,PK:92,PL:48,PM:508,PR:1,PS:970,PT:351,PW:680,PY:595,QA:974,RE:262,RO:40,RS:381,RU:7,RW:250,SA:966,SB:677,SC:248,SD:249,SE:46,SG:65,SH:290,SI:386,SJ:47,SK:421,SL:232,SM:378,SN:221,SO:252,SR:597,SS:211,ST:239,SV:503,SX:1,SY:963,SZ:268,TA:290,TC:1,TD:235,TG:228,TH:66,TJ:992,TK:690,TL:670,TM:993,TN:216,TO:676,TR:90,TT:1,TV:688,TW:886,TZ:255,UA:380,UG:256,US:1,UY:598,UZ:998,VA:39,VC:1,VE:58,VG:1,VI:1,VN:84,VU:678,WF:681,WS:685,XK:383,YE:967,YT:262,ZA:27,ZM:260,ZW:263'.split(',').map(x => x.split(':')));
+let reg = true, byEmail = true, sex = '', iso = '', finish = false, page = '', lastMailCheck = 0;
+
+const names = (() => { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch(e) { return null; } })();
+function cname(c) { try { return (names && names.of(c)) || c; } catch(e) { return c; } }
+function flag(c) { return c && c.length == 2 ? String.fromCodePoint(...[...c].map(x => 127397 + x.charCodeAt(0))) : ''; }
+function $(id) { return document.getElementById(id); }
+function val(id) { return $(id).value.trim(); }
+function show(id) { $(id).classList.remove('hide'); }
+
+function fillDial(sel, pick)
+{
+  const all = Object.keys(DIAL).sort((a, b) => cname(a).localeCompare(cname(b)));
+  sel.innerHTML = all.map(c => '<option value="' + c + '">' + flag(c) + ' +' + DIAL[c] + ' ' + cname(c) + '</option>').join('');
+  if(pick) sel.value = pick;
+  // the closed box shows only the flag and the code
+  const short = () => { for(const o of sel.options) o.textContent = o.selected ? flag(o.value) + ' +' + DIAL[o.value] : flag(o.value) + ' +' + DIAL[o.value] + ' ' + cname(o.value); };
+  sel.onchange = short; sel.onfocus = () => { for(const o of sel.options) o.textContent = flag(o.value) + ' +' + DIAL[o.value] + ' ' + cname(o.value); }; sel.onblur = short;
+  short();
+}
+
+// "+44" + "07700 900123" -> "+447700900123"
+function e164(sel, inp)
+{
+  const raw = $(inp).value.trim();
+  let n = raw.replace(/[^0-9]/g, '');
+  if(raw.startsWith('+')) return '+' + n;                 // typed with its own code
+  if(n.startsWith('00')) return '+' + n.substring(2);
+  return '+' + (DIAL[$(sel).value] || '') + n.replace(/^0+/, '');
+}
+
+function avatar(s)
+{
+  const hair = s == 'f'
+    ? '<path d="M18 46 Q14 14 50 12 Q86 14 82 46 Q86 70 78 86 L70 60 Q50 70 30 60 L22 86 Q14 70 18 46Z" fill="#3a2414"/>'
+    : '<path d="M24 40 Q26 14 50 14 Q74 14 76 40 Q66 26 50 28 Q34 26 24 40Z" fill="#2a1a10"/>';
+  return '<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="#16304f"/>' + (s == 'f' ? hair : '') +
+    '<circle cx="50" cy="44" r="22" fill="#e0b48a"/>' + (s == 'f' ? '' : hair) +
+    '<path d="M10 100 Q14 72 50 72 Q86 72 90 100Z" fill="' + (s == 'f' ? '#c2457a' : '#1e7bff') + '"/></svg>';
+}
+
+function drawPic(id)
+{
+  const el = $(id);
+  if(APP && APP.hasProfile && APP.hasProfile()) { el.innerHTML = ''; el.style.backgroundImage = 'url(/photo/profile.jpg?' + Date.now() + ')'; }
+  else { el.style.backgroundImage = ''; el.innerHTML = avatar(sex); }
+}
+
+function photo(camera) { if(APP && APP.profilePhoto) APP.profilePhoto(camera); setTimeout(watchPic, 1500); }
+function photoAsk() { photo(true); }
+let picWait = 0;
+function watchPic() { drawPic('regPic'); if(++picWait < 40) setTimeout(watchPic, 1500); else picWait = 0; }
+
+function setSex(s) { sex = s; for(const d of $('sex').children) d.className = d.dataset.v == s ? 'on' : ''; drawPic('regPic'); }
 
 function mode(r)
 {
   reg = r;
-  document.getElementById('tReg').className = r ? 'on' : '';
-  document.getElementById('tLog').className = r ? '' : 'on';
-  document.getElementById('agreeRow').style.display = r ? '' : 'none';
-  document.getElementById('go').textContent = r ? 'REGISTER' : 'LOG IN';
-  document.getElementById('pass').autocomplete = r ? 'new-password' : 'current-password';
+  $('tReg').className = r ? 'on' : '';
+  $('tLog').className = r ? '' : 'on';
+  $('reg').classList.toggle('hide', !r);
+  $('log').classList.toggle('hide', r);
   say('');
 }
 
-function say(t, c)
+function logBy(e)
 {
-  const m = document.getElementById('msg');
-  m.innerHTML = t;
-  m.style.color = c || '#8ea6c8';
+  byEmail = e;
+  $('lseg').children[0].className = e ? 'on' : '';
+  $('lseg').children[1].className = e ? '' : 'on';
+  $('logE').classList.toggle('hide', !e);
+  $('logP').classList.toggle('hide', e);
+  say('');
 }
 
-function go()
+function say(t, c, id) { const m = $(id || 'msg'); m.innerHTML = t || ''; m.style.color = c || '#8ea6c8'; }
+const WARN = '#ffba52', BAD = '#ff4d5e';
+
+function age(d)
 {
-  if(busy) return;
-  const u = document.getElementById('user').value.trim();
-  const p = document.getElementById('pass').value;
-
-  if(!/^[A-Za-z0-9_.-]{3,20}$/.test(u)) return say('Username: 3-20 letters, numbers, _ . -', '#ffba52');
-  if(p.length < 6) return say('Password: at least 6 characters', '#ffba52');
-  if(reg && !document.getElementById('agree').checked) return say('Please tick the box to share your strikes', '#ffba52');
-
-  busy = true;
-  document.getElementById('go').disabled = true;
-  say(reg ? 'Registering&hellip;' : 'Logging in&hellip;');
-
-  if(!APP) { setTimeout(() => done('ok'), 600); return; }
-  APP.accountStart(reg, u, p);
-  wait();
+  const p = d.split('-').map(Number); if(p.length != 3 || !p[0]) return -1;
+  const n = new Date(); let a = n.getFullYear() - p[0];
+  if(n.getMonth() + 1 < p[1] || (n.getMonth() + 1 == p[1] && n.getDate() < p[2])) a--;
+  return a;
 }
 
-function wait()
+function register()
 {
-  const r = APP.accountResult();
-  if(r == 'working' || r == '') { setTimeout(wait, 400); return; }
-  done(r);
-}
-
-function done(r)
-{
-  busy = false;
-  document.getElementById('go').disabled = false;
-
-  if(r == 'ok')
+  if(!val('first') || !val('last')) return say('Please write your first and last name.', WARN);
+  if(!iso) return say('Finding your country&hellip; turn on Location if this takes long.', WARN);
+  if(!val('city')) return say('Please write your city.', WARN);
+  if(age($('dob').value) < 13) return say(age($('dob').value) < 0 ? 'Please enter your date of birth.' : 'You must be 13 or older to make an account.', WARN);
+  if(!sex) return say('Please choose Male or Female.', WARN);
+  const ph = e164('dial', 'phone');
+  if(!/^\+[1-9][0-9]{6,14}$/.test(ph) || val('phone').replace(/[^0-9]/g, '').length < 6) return say('Please check your phone number.', WARN);
+  if(!finish)
   {
-    say('&#10003; Welcome, ' + document.getElementById('user').value.trim() + '!', '#3ddc84');
-    setTimeout(() => { if(APP) APP.accountDone(false); }, 900);
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val('email'))) return say('Please check your email.', WARN);
+    if($('pass').value.length < 8) return say('Password: at least 8 characters.', WARN);
+    if($('pass').value != $('pass2').value) return say('The two passwords are not the same.', WARN);
   }
-  else
-  {
-    say(r.replace(/^error:/, ''), '#ff4d5e');
-  }
+  if(!$('agree').checked) return say('Please tick the box to agree.', WARN);
+
+  const form = { first: val('first'), last: val('last'), nick: val('nick'), city: val('city'), dob: $('dob').value,
+                 sex: sex, phone: ph, email: finish ? lastState.email : val('email'), licence: val('licence'), agree: true };
+  if(!APP) { fake.step = 'sms'; fake.smsTo = ph; fake.email = form.email; return; }
+  APP.cloudRegister(JSON.stringify(form), finish ? '' : $('pass').value, finish);
 }
 
-function later()
+function loginEmail()
 {
-  if(APP) APP.accountDone(true);
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(val('lemail'))) return say('Please check your email.', WARN);
+  if(!$('lpass').value) return say('Please write your password.', WARN);
+  if(APP) APP.cloudLoginEmail(val('lemail'), $('lpass').value); else { fake.step = 'done'; }
 }
 
+function loginPhone()
+{
+  const ph = e164('ldial', 'lphone');
+  if(!/^\+[1-9][0-9]{6,14}$/.test(ph)) return say('Please check your phone number.', WARN);
+  if(APP) APP.cloudLoginPhone(ph); else { fake.step = 'sms'; fake.login = true; fake.smsTo = ph; }
+}
+
+function forgot() { if(APP) APP.cloudForgot(val('lemail')); }
+
+function codeIn() { const c = $('code'); c.value = c.value.replace(/[^0-9]/g, ''); if(c.value.length == 6) sendCode(); }
+function sendCode()
+{
+  const c = val('code');
+  if(c.length != 6) return say('The code has 6 digits.', WARN, 'msg2');
+  if(APP) APP.cloudSmsCode(c); else { fake.step = fake.login ? 'done' : 'email'; }
+}
+function newNumber() { const ph = e164('ndial', 'nphone'); if(APP) APP.cloudSmsAgain(ph); $('newNum').classList.add('hide'); }
+function backToForm() { if(APP) APP.cloudCancel(); else fake.step = 'form'; }
+
+function emailCheck() { if(APP) APP.cloudEmailCheck(false); else fake.step = 'done'; }
+
+function finished() { if(APP) APP.accountDone(false); }
+function later() { if(APP) APP.accountDone(true); }
+
+function goPage(p)
+{
+  for(const [k, id] of [['form','pForm'],['sms','pSms'],['email','pEmail'],['done','pDone']]) $(id).classList.toggle('hide', k != p);
+  window.scrollTo(0, 0);
+}
+
+// ---------- the state from the app ----------
+
+let lastState = {};
+const fake = { step: 'form', busy: false, msg: '', err: '', smsTo: '', email: '', hasUser: false, profile: {} };
+
+function tick()
+{
+  let s;
+  try { s = APP ? JSON.parse(APP.cloudState()) : fake; } catch(e) { s = {}; }
+  lastState = s;
+
+  // the country, from where the phone is
+  if(!iso)
+  {
+    let c = {};
+    try { c = APP ? JSON.parse(APP.cloudCountry() || '{}') : { iso: 'GB', from: 'gps', city: 'London' }; } catch(e) {}
+    if(c.iso)
+    {
+      iso = c.iso;
+      $('country').textContent = flag(iso) + ' ' + cname(iso);
+      for(const id of ['dial', 'ldial', 'ndial']) fillDial($(id), iso);
+      if(c.city && !val('city')) $('city').value = c.city;
+    }
+    else if(c.from === '') $('country').textContent = 'turn on Location';
+  }
+
+  const step = s.step || 'form';
+  if(step != page) { page = step; goPage(step); if(step == 'done') drawDone(s); }
+
+  finish = s.step == 'form' && s.hasUser && !s.login;
+  $('finishNote').classList.toggle('hide', !finish);
+  $('cred').classList.toggle('hide', finish);
+  $('tabs').classList.toggle('hide', finish);
+  if(finish && !reg) mode(true);
+
+  const text = s.err ? s.err : (s.busy ? (s.msg || 'Working&hellip;') : s.msg);
+  const color = s.err ? BAD : (s.busy ? '#8ea6c8' : '#3ddc84');
+  say(text, color, step == 'sms' ? 'msg2' : step == 'email' ? 'msg3' : 'msg');
+  for(const id of ['goReg', 'goLogE', 'goLogP', 'goCode']) $(id).disabled = !!s.busy;
+
+  if(step == 'sms')
+  {
+    $('smsTo').textContent = s.smsTo || '';
+    $('smsStep').classList.toggle('hide', !!s.login);
+    $('again').innerHTML = s.resendIn > 0 ? 'No SMS? Send again in 0:' + String(s.resendIn).padStart(2, '0')
+                                          : 'No SMS? <span class="link" onclick="APP && APP.cloudSmsAgain(\'\')">Send again</span>';
+  }
+  if(step == 'email')
+  {
+    $('emailTo').textContent = s.email || '';
+    if(APP && !s.busy && Date.now() - lastMailCheck > 6000) { lastMailCheck = Date.now(); APP.cloudEmailCheck(true); }
+  }
+
+  setTimeout(tick, 400);
+}
+
+function drawDone(s)
+{
+  const p = s.profile || {};
+  sex = p.sex || sex;
+  $('welcome').textContent = 'Welcome, ' + (p.name || p.first || '') + '!';
+  $('dName').textContent = p.name || '';
+  $('dSub').textContent = (p.first || '') + ' ' + (p.last || '') + ' · ' + (p.city || '') + ', ' + flag(p.country) + ' ' + cname(p.country || '');
+  const at = p.at ? new Date(p.at) : new Date();
+  $('dSince').textContent = at.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  $('dAt').textContent = at.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' (' + (p.tz || '') + ')';
+  $('dPlace').textContent = (p.city || '') + ', ' + cname(p.country || '') + (p.lat != null ? ' (GPS ' + Number(p.lat).toFixed(3) + ', ' + Number(p.lon).toFixed(3) + ')' : '');
+  const el = $('donePic');
+  if(p.photo) { el.innerHTML = ''; el.style.backgroundImage = 'url(' + p.photo + ')'; } else drawPic('donePic');
+}
+
+setSex('');
 mode(true);
+tick();
 </script>
 </body></html>

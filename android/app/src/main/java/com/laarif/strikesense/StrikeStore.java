@@ -575,7 +575,7 @@ final class StrikeStore
     }
 
     @SuppressLint("MissingPermission")
-    private Location bestFix()
+    Location bestFix()
     {
         if(!canLocate())
             return null;
