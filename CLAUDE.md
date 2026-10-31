@@ -32,3 +32,11 @@
 - Approximate users see everyone as circles. Exact spots are shared only between users who both chose exact.
 - Visible stays on for at least 50 minutes. Exact -> approximate is allowed any time. Hiding early only with "I feel unsafe: report + hide now".
 - Auto-offline: rod off 30 min, or after 12 h.
+
+## Emergency SOS and help requests (opt-in)
+- Off until the user turns each one on (Send SOS, Receive SOS, Help requests, optional emergency contact).
+- SOS: hold 3 s, choose what happened, 5 s countdown to cancel. Always offer the local emergency number (999/112) first.
+- SOS makes the sender visible (exact) and alerts every opted-in surfcaster within 5 km, even hidden or on silent, with name, phone and exact place, only during the SOS.
+- Ending: "real" or "mistake". A mistake, or helpers reporting it fake, switches SOS off for that account until the admin turns it on again.
+- "I need..." requests: fishing things only (bait, hooks, line, sinkers, power bank, starlights, head torch, knife, rod/reel part, other). 3 km, 2 hours, no selling.
+- Helper stars: only the person helped can confirm; 1 star per help; same pair at most 1 star a week. Helper 1+, Trusted helper 10+, Guardian 3+ SOS.
