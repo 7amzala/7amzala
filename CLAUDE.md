@@ -40,3 +40,8 @@
 - Ending: "real" or "mistake". A mistake, or helpers reporting it fake, switches SOS off for that account until the admin turns it on again.
 - "I need..." requests: fishing things only (bait, hooks, line, sinkers, power bank, starlights, head torch, knife, rod/reel part, other). 3 km, 2 hours, no selling.
 - Helper stars: only the person helped can confirm; 1 star per help; same pair at most 1 star a week. Helper 1+, Trusted helper 10+, Guardian 3+ SOS.
+- Emergency contacts: up to 3, chosen by the user; SMS from the user's phone with the place on SOS and again when safe.
+- Every visible surfcaster shows their phone battery % (map + profile).
+- SOS live board: everyone alerted watches who is going, who arrived, batteries, checks.
+- Helpers confirm "I'm going"; a safety check every 15 min (2 min to answer) for the person and each helper. The SOS closes only when the person and every helper confirm safe.
+- No answer to a check: alarm to everyone watching, both people's emergency contacts, and all within 5 km, with "call 999/112".

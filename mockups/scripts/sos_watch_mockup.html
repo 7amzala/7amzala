@@ -1,0 +1,142 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:34px;background:#dde2ea;font-family:Arial,Helvetica,sans-serif;width:2120px;color:#0b1428}
+h1{font-size:34px;margin:0 0 6px}
+.cap{font-size:19px;color:#38465f;margin-bottom:22px;line-height:1.5}
+.row{display:flex;gap:26px;align-items:flex-start}
+.col{width:400px}
+.step{font-size:20px;font-weight:800;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+.n{display:inline-flex;width:32px;height:32px;border-radius:50%;background:#1e7bff;color:#fff;align-items:center;justify-content:center;font-size:17px}
+.note{font-size:15.5px;color:#38465f;line-height:1.5;margin-top:12px}
+.phone{width:400px;height:800px;border-radius:42px;border:12px solid #05070c;background:#050b18;color:#eaf3ff;position:relative;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.bar{position:absolute;left:0;right:0;top:0;padding:16px 16px 10px;background:linear-gradient(#071433ee,#07143300);z-index:5}
+.ttl{font-size:21px;font-weight:900}
+.sub{font-size:13px;color:#8fa0bf;margin-top:3px}
+.toggle{position:absolute;right:16px;top:16px;background:#3ddc84;color:#05210f;border-radius:20px;padding:7px 12px;font-weight:900;font-size:13px}
+.map{position:absolute;inset:0;background:
+ radial-gradient(ellipse at 70% 80%,#0d3a66 0 30%,transparent 31%),
+ linear-gradient(160deg,#20324d 0 38%,#2b4466 38% 40%,#0f4d7d 40% 100%)}
+.coast{position:absolute;left:0;top:0;width:100%;height:100%}
+.pin{position:absolute;width:46px;height:46px;border-radius:50%;border:3px solid #fff;background:#334 center/cover;box-shadow:0 2px 8px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:20px}
+.fuzz{position:absolute;border-radius:50%;background:rgba(34,211,255,.13);border:1px dashed rgba(34,211,255,.5)}
+.bite{box-shadow:0 0 0 6px rgba(255,138,61,.45),0 0 22px 8px rgba(255,138,61,.6)}
+.me{border-color:#22d3ff}
+.lab{position:absolute;font-size:11px;font-weight:800;background:#0b1428cc;border-radius:8px;padding:2px 6px;white-space:nowrap}
+.legend{position:absolute;left:12px;right:12px;bottom:74px;background:#0b1428e6;border-radius:12px;padding:9px 12px;font-size:12px;line-height:1.7;color:#c9d6ee}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:62px;background:#070c18;display:flex;justify-content:space-around;align-items:center;font-size:12px;color:#5f7799;font-weight:800}
+.tabs .on{color:#22d3ff}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#0b1730;border-radius:22px 22px 0 0;padding:18px;border-top:1px solid #24324f}
+.av{width:74px;height:74px;border-radius:50%;border:3px solid #22d3ff;background:#2c4d6b;display:flex;align-items:center;justify-content:center;font-size:34px}
+.stats{display:flex;gap:8px;margin-top:14px}
+.st{flex:1;background:#0f1c36;border:1px solid #233457;border-radius:12px;padding:9px;text-align:center}
+.st b{display:block;font-size:20px}
+.st small{color:#8fa0bf;font-size:11px}
+.btn{border-radius:14px;padding:14px;text-align:center;font-weight:900;font-size:16px;margin-top:12px}
+.b1{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#001a33}
+.b2{background:transparent;border:1px solid #3a4a66;color:#a9bbd6;font-size:13px;padding:10px}
+.badge{display:inline-block;font-size:11px;font-weight:900;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:2px}
+.msgs{position:absolute;top:84px;left:0;right:0;bottom:80px;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.m{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.35}
+.them{background:#16233f;align-self:flex-start;border-bottom-left-radius:4px}
+.mine{background:#1e7bff;align-self:flex-end;border-bottom-right-radius:4px}
+.who{font-size:11px;color:#8fa0bf;margin-bottom:2px;font-weight:800}
+.inp{position:absolute;left:12px;right:12px;bottom:14px;background:#0f1c36;border:1px solid #24324f;border-radius:22px;padding:12px 16px;color:#5f7799;font-size:14px}
+.req{background:#0f1c36;border:1px solid #ffc928;border-radius:14px;padding:12px;font-size:14px;margin:4px 0}
+.sys{align-self:center;font-size:12px;color:#8fa0bf;background:#0b1428;border-radius:10px;padding:4px 10px}
+.rule{background:#fff;border-radius:14px;padding:14px 18px;font-size:15px;line-height:1.6;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+
+.form{position:absolute;inset:0;padding:22px 20px;overflow:hidden}
+.logo{text-align:center;font-size:22px;font-weight:900;margin:8px 0 14px}
+.logo b{color:#22d3ff}
+.tb{display:flex;background:#0f1c36;border-radius:12px;padding:4px;margin-bottom:14px}
+.tb div{flex:1;text-align:center;padding:9px;border-radius:9px;font-weight:900;font-size:13px;color:#8fa0bf}
+.tb .on{background:#1e7bff;color:#fff}
+.fl{font-size:12px;color:#8fa0bf;font-weight:800;margin:9px 0 4px}
+.fl i{color:#5f7799;font-weight:600;font-style:normal}
+.in{background:#0f1c36;border:1px solid #24324f;border-radius:11px;padding:11px 12px;font-size:14px;color:#eaf3ff}
+.in.ph{color:#5f7799}
+.two{display:flex;gap:8px}.two>div{flex:1}
+.tick{display:flex;gap:9px;font-size:12.5px;line-height:1.4;color:#c9d6ee;margin-top:12px}
+.tick span.box{flex:none;width:20px;height:20px;border-radius:5px;background:#3ddc84;color:#05210f;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:14px}
+.auto{background:#0b1428;border:1px dashed #2f4470;border-radius:11px;padding:9px 11px;font-size:12px;color:#8fa0bf;line-height:1.55;margin-top:10px}
+.auto b{color:#3ddc84}
+.big{font-size:60px;text-align:center;margin:60px 0 10px}
+.center{text-align:center;font-size:15px;line-height:1.55;color:#c9d6ee}
+.pic{width:92px;height:92px;border-radius:50%;border:3px dashed #22d3ff;margin:4px auto 2px;display:flex;align-items:center;justify-content:center;font-size:36px;background:#0f1c36;position:relative}
+.pic small{position:absolute;bottom:-4px;right:-4px;background:#1e7bff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #050b18}
+.lock{display:flex;justify-content:space-between;align-items:center}
+.lock span{font-size:11px;color:#8fa0bf}
+.seg{display:flex;gap:6px}.seg div{flex:1;text-align:center;padding:10px;border-radius:11px;border:1px solid #24324f;font-size:13px;font-weight:800;color:#8fa0bf;background:#0f1c36}
+.seg .on{border-color:#22d3ff;color:#22d3ff;background:#0b2440}
+.code{display:flex;gap:7px;justify-content:center;margin:18px 0}
+.code div{width:42px;height:52px;border-radius:10px;background:#0f1c36;border:1px solid #2f4470;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.menu{position:absolute;right:12px;top:70px;width:210px;background:#13213f;border:1px solid #2f4470;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.6);z-index:9;overflow:hidden}
+.menu div{padding:13px 15px;font-size:14px;font-weight:800;border-bottom:1px solid #22314f}
+.rr{display:flex;align-items:center;gap:10px;background:#0f1c36;border:1px solid #24324f;border-radius:11px;padding:11px;margin-top:7px;font-size:14px}
+.rr i{width:18px;height:18px;border-radius:50%;border:2px solid #5f7799;flex:none}
+.rr.on{border-color:#ff8a3d}.rr.on i{border:5px solid #ff8a3d}
+.card{background:#0f1c36;border:1px solid #24324f;border-radius:12px;padding:10px;margin-top:8px;font-size:12.5px;line-height:1.5}
+.card b{font-size:13.5px}
+.pill{display:inline-block;border-radius:8px;padding:5px 8px;font-size:11px;font-weight:900;margin:6px 4px 0 0}
+.pop{position:absolute;left:14px;right:14px;top:150px;background:#0b1730;border:1px solid #2f4470;border-radius:20px;padding:18px;z-index:9;box-shadow:0 10px 30px rgba(0,0,0,.7)}
+.dim{filter:brightness(.35) blur(1px)}
+.chip{position:absolute;left:12px;right:12px;top:84px;z-index:6;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:800}
+.dot{position:absolute;width:16px;height:16px;border-radius:50%;background:#22d3ff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(34,211,255,.25)}
+.opt{border:1px solid #2f4470;border-radius:14px;padding:11px 12px;margin-top:9px;font-size:13px;color:#c9d6ee;line-height:1.4}
+.opt b{font-size:15px;color:#eaf3ff}
+.opt.on{border-color:#3ddc84;background:#0d2a1c}
+.tg{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#0f1c36;border:1px solid #24324f;border-radius:12px;padding:10px 12px;margin-top:8px;font-size:12.5px;color:#8fa0bf;line-height:1.4}
+.tg b{color:#eaf3ff;font-size:14px}
+.sw{flex:none;width:44px;height:26px;border-radius:13px;background:#3ddc84;position:relative}
+.sw:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff}
+.sw.off{background:#3a4a66}.sw.off:after{right:auto;left:3px}
+.sos{width:190px;height:190px;border-radius:50%;margin:16px auto 6px;background:radial-gradient(#ff5d6c,#c3172b);display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-weight:900;font-size:40px;box-shadow:0 0 0 14px rgba(255,93,108,.18),0 0 0 30px rgba(255,93,108,.08)}
+.sos small{font-size:13px;font-weight:800}
+.red{background:#2a0b12!important}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:8px}
+.grid div{background:#0f1c36;border:1px solid #24324f;border-radius:12px;padding:10px 4px;text-align:center;font-size:11.5px;font-weight:800;color:#c9d6ee}
+.grid div span{display:block;font-size:24px;margin-bottom:3px}
+.grid .on{border-color:#ffc928;background:#2a2410}
+.star{color:#ffc928}
+.bat{display:inline-block;font-size:10.5px;font-weight:900;border-radius:6px;padding:1px 5px;margin-left:4px}
+.bg{background:#0d2a1c;color:#3ddc84}.by{background:#2a2410;color:#ffc928}.br{background:#2a0b12;color:#ff8a94}
+.tl{border-left:2px solid #2f4470;margin:8px 0 0 6px;padding-left:12px;font-size:12.5px;line-height:1.75;color:#c9d6ee}
+.ok{color:#3ddc84;font-weight:900}
+</style></head><body><h1>SOS: contacts, battery, everyone watches until all are safe (mockup, app)</h1>
+<div class="cap">Emergency contacts are chosen by the user. Every visible surfcaster shows their phone battery. During an SOS all alerted people watch one live board; helpers confirm &ldquo;I'm going&rdquo;, then a safety check every 15 minutes; the SOS ends only when the person and all helpers say they are safe.</div>
+<div class="row"><div class="col"><div class="step"><span class="n">1</span>Your emergency contacts</div><div class="phone"><div class="form" style="padding-top:16px"><div style="font-size:20px;font-weight:900">&#128106; Emergency contacts</div><div class="sub">Up to 3. They get an SMS with your place when you send an SOS, and again when you are safe.</div>
+<div class="card"><b>Mum</b> &middot; +44 7700 900456<br><span style="color:#8fa0bf">SMS on SOS + on safe</span> <span style="float:right;color:#ff8a94">remove</span></div>
+<div class="card"><b>Brother Youssef</b> &middot; +212 6 12 34 56 78<br><span style="color:#8fa0bf">SMS on SOS + on safe</span> <span style="float:right;color:#ff8a94">remove</span></div>
+<div class="btn b2" style="color:#22d3ff;border-color:#22d3ff">+ Add from my contacts</div>
+<div class="card" style="color:#8fa0bf">The SMS is sent from your own phone: &ldquo;SOS from Ali (StrikeSense): person in the water. Place: maps.google.com/?q=51.47,-0.45. Call 999.&rdquo;</div></div></div><div class="note">Chosen by the user in Settings &rarr; Safety &amp; help. Any number, any country.</div></div><div class="col"><div class="step"><span class="n">2</span>Battery on the map</div><div class="phone"><div class="map"><svg class="coast" viewBox="0 0 400 800"><path d="M0 300 Q90 280 150 330 T300 360 T400 330" stroke="#e8d7a8" stroke-width="5" fill="none" opacity=".55"/></svg>
+<div class="fuzz" style="left:60px;top:300px;width:110px;height:110px"></div><div class="pin" style="left:92px;top:332px">&#129333;</div><div class="lab" style="left:66px;top:384px">Ali Asilah <span class="bat bg">&#128267; 82%</span></div>
+<div class="fuzz" style="left:200px;top:330px;width:120px;height:120px"></div><div class="pin" style="left:236px;top:366px">&#128104;</div><div class="lab" style="left:206px;top:418px">Marco <span class="bat by">&#128267; 31%</span></div>
+<div class="fuzz" style="left:262px;top:200px;width:110px;height:110px"></div><div class="pin" style="left:294px;top:232px">&#128105;</div><div class="lab" style="left:270px;top:284px">Sara <span class="bat br">&#129707; 9%</span></div>
+<div class="pin me" style="left:168px;top:478px">&#128526;</div><div class="lab" style="left:150px;top:530px;color:#22d3ff">You <span class="bat bg">&#128267; 64%</span></div></div>
+<div class="bar"><div class="ttl">Fishing now</div><div class="sub">12 visible &middot; 8 hidden</div><div class="toggle">&#128065; VISIBLE</div></div>
+<div class="legend"><span class="bat bg">&gt;50%</span> fine &nbsp;<span class="bat by">20&ndash;50%</span> &nbsp;<span class="bat br">&lt;20%</span> low: maybe offer a power bank</div><div class="tabs"><span>&#9673;<br>Rod</span><span>&#9776;<br>My strikes</span><span class="on">&#9873;<br>Map</span><span>&#9993;<br>Chat</span><span>&#9881;<br>Settings</span></div></div><div class="note">Phone battery of every visible surfcaster, updated every few minutes. Also shown on their profile.</div></div><div class="col"><div class="step"><span class="n">3</span>SOS: everyone watches live</div><div class="phone"><div class="map" style="filter:brightness(.6)"><svg class="coast" viewBox="0 0 400 800"><path d="M0 300 Q90 280 150 330 T300 360 T400 330" stroke="#e8d7a8" stroke-width="5" fill="none" opacity=".55"/></svg><div class="dot" style="left:200px;top:300px;background:#ff5d6c;box-shadow:0 0 0 14px rgba(255,93,108,.35)"></div><div class="dot" style="left:250px;top:360px;background:#3ddc84"></div><div class="dot" style="left:150px;top:390px;background:#3ddc84"></div></div>
+<div class="sheet" style="bottom:62px;border-color:#ff5d6c"><div style="font-size:18px;font-weight:900;color:#ff8a94">&#128680; SOS &middot; Ali Laarif <span class="bat bg">&#128267; 74%</span></div>
+<div class="sub">&#127754; Person in the water &middot; started 10:58 &middot; 7 watching</div>
+<div class="tl">
+<div><b>10:58</b> Ali sent SOS &middot; Mum + Youssef got SMS</div>
+<div><b>10:59</b> <span class="ok">Marco: I'm going</span> <span class="bat by">31%</span> &middot; 400 m</div>
+<div><b>11:00</b> <span class="ok">Sara: I'm going</span> <span class="bat br">9%</span> &middot; 1.2 km</div>
+<div><b>11:03</b> Marco arrived (GPS, 20 m from Ali)</div>
+<div style="color:#ffc928"><b>11:14</b> Safety check in 0:45&hellip;</div></div>
+<div class="btn" style="background:#fff;color:#c3172b;padding:10px">&#128222; CALL 999</div>
+<div style="display:flex;gap:8px"><div class="btn b1" style="flex:1;padding:10px;font-size:14px">I'M GOING</div><div class="btn b2" style="flex:1;margin-top:12px">&#128222; Call Ali</div></div></div><div class="tabs"><span>&#9673;<br>Rod</span><span>&#9776;<br>My strikes</span><span class="on">&#9873;<br>Map</span><span>&#9993;<br>Chat</span><span>&#9881;<br>Settings</span></div></div><div class="note">Everyone alerted sees the same live board: who is going, who arrived, batteries, and the safety checks.</div></div></div><div class="row" style="margin-top:26px"><div class="col"><div class="step"><span class="n">4</span>15-min safety check</div><div class="phone"><div class="form"><div class="big" style="margin-top:30px">&#9201;</div>
+<div class="center" style="font-size:19px;font-weight:900;color:#eaf3ff">Safety check</div>
+<div class="center" style="margin-top:6px">15 minutes since you said &ldquo;I'm going&rdquo;.<br>Please confirm within <b style="color:#ffc928">2:00</b></div>
+<div class="card" style="margin-top:14px"><b>Marco (helper) confirms:</b></div>
+<div class="btn" style="background:#3ddc84;color:#05210f">&#10003; I'M SAFE &middot; ALI IS SAFE</div>
+<div class="btn b2" style="border-color:#ffc928;color:#ffc928">Still helping: 15 more min</div>
+<div class="btn b2" style="border-color:#ff5d6c;color:#ff8a94">&#9888; We need more help</div>
+<div class="card" style="color:#8fa0bf">Ali gets his own check: <b style="color:#eaf3ff">&ldquo;I'm safe&rdquo;</b>. The SOS closes only when <b style="color:#eaf3ff">Ali and every helper</b> have confirmed.</div></div></div><div class="note">The phone rings loudly for this check, even on silent.</div></div><div class="col"><div class="step"><span class="n">5</span>Nobody confirmed: alarm</div><div class="phone"><div class="form red"><div class="big" style="margin-top:24px">&#9888;&#65039;</div>
+<div class="center" style="font-size:19px;font-weight:900;color:#ff8a94">No answer from Marco</div>
+<div class="center" style="margin-top:6px">He did not confirm the safety check.<br>Last place: next to Ali, 11:13<br>Battery <span class="bat by">28%</span></div>
+<div class="btn" style="background:#fff;color:#c3172b">&#128222; CALL 999 NOW</div>
+<div class="btn b2" style="color:#eaf3ff">&#128222; Call Marco &middot; &#128222; Call Ali</div>
+<div class="btn b1" style="background:#3ddc84;color:#05210f">I'M GOING THERE</div>
+<div class="card" style="color:#8fa0bf">Sent to <b style="color:#eaf3ff">everyone watching</b>, to Ali's and Marco's emergency contacts, and again to all surfcasters within 5 km.</div></div></div><div class="note">If a helper or the person in danger stops answering, everyone knows straight away.</div></div></div></body></html>
