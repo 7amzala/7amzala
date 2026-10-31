@@ -116,7 +116,7 @@ input[type=date]{color-scheme:dark}
 <div id="pSms" class="hide">
  <div class="big">&#128241;</div>
  <div class="title">Check your phone</div>
- <div class="text">We sent a 6-digit code by SMS to<br><b id="smsTo"></b></div>
+ <div class="text"><span id="smsWord">We sent a 6-digit code by SMS to</span><br><b id="smsTo"></b></div>
  <input id="code" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" oninput="codeIn()">
  <button class="btn" id="goCode" onclick="sendCode()">CONFIRM</button>
  <div class="small" id="again"></div>
@@ -346,6 +346,7 @@ function tick()
   if(step == 'sms')
   {
     $('smsTo').textContent = s.smsTo || '';
+    $('smsWord').textContent = s.codeSent ? 'We sent a 6-digit code by SMS to' : (s.err ? 'The SMS could not be sent to' : 'Sending a 6-digit code by SMS to');
     $('smsStep').classList.toggle('hide', !!s.login);
     $('again').innerHTML = s.resendIn > 0 ? 'No SMS? Send again in 0:' + String(s.resendIn).padStart(2, '0')
                                           : 'No SMS? <span class="link" onclick="APP && APP.cloudSmsAgain(\'\')">Send again</span>';

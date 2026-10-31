@@ -142,6 +142,7 @@ class Cloud
             s.put("err", err);
             s.put("login", login);
             s.put("smsTo", smsTo);
+            s.put("codeSent", !verificationId.isEmpty());
             s.put("resendIn", Math.max(0, 60 - (System.currentTimeMillis() - smsSentAt) / 1000));
             s.put("email", u != null && u.getEmail() != null ? u.getEmail() : prefs().getString("email", ""));
             s.put("hasUser", u != null);
@@ -243,6 +244,10 @@ class Cloud
             return "Wrong email or password.";
         }
         String m = e.getMessage();
+        if(m != null && m.contains("region enabled"))
+            return "SMS to this country is not switched on yet. The app owner has to allow it in Firebase (Authentication > Settings > SMS region policy).";
+        if(m != null && (m.contains("BILLING") || m.contains("billing")))
+            return "SMS needs the Firebase Blaze plan. The app owner has to switch it on.";
         return m == null || m.isEmpty() ? "Not possible right now. Try again." : m;
     }
 
@@ -455,6 +460,7 @@ class Cloud
         if(activity == null) { fail("Open StrikeSense and try again."); return; }
 
         smsTo = phone;
+        verificationId = "";
         msg = "Sending the SMS…";
         busy = true;
 
