@@ -24,3 +24,11 @@
 ## Safety
 - Report on every profile, chat and message. End chat and Block at any time.
 - The admin sees all reports and can restrict an account: hide it from the map, block it from chat, or ban it.
+
+## Online map: visible or hidden
+- On going online the app shows how many surfcasters are around (about 20 km), names hidden.
+- Choices: Visible approximate (300-500 m circle), Visible exact, Stay hidden.
+- Only visible users see each other and can chat. Hidden users see only the number.
+- Approximate users see everyone as circles. Exact spots are shared only between users who both chose exact.
+- Visible stays on for at least 50 minutes. Exact -> approximate is allowed any time. Hiding early only with "I feel unsafe: report + hide now".
+- Auto-offline: rod off 30 min, or after 12 h.
