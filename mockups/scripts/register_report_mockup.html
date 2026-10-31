@@ -1,0 +1,133 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:34px;background:#dde2ea;font-family:Arial,Helvetica,sans-serif;width:2120px;color:#0b1428}
+h1{font-size:34px;margin:0 0 6px}
+.cap{font-size:19px;color:#38465f;margin-bottom:22px;line-height:1.5}
+.row{display:flex;gap:26px;align-items:flex-start}
+.col{width:400px}
+.step{font-size:20px;font-weight:800;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+.n{display:inline-flex;width:32px;height:32px;border-radius:50%;background:#1e7bff;color:#fff;align-items:center;justify-content:center;font-size:17px}
+.note{font-size:15.5px;color:#38465f;line-height:1.5;margin-top:12px}
+.phone{width:400px;height:800px;border-radius:42px;border:12px solid #05070c;background:#050b18;color:#eaf3ff;position:relative;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.bar{position:absolute;left:0;right:0;top:0;padding:16px 16px 10px;background:linear-gradient(#071433ee,#07143300);z-index:5}
+.ttl{font-size:21px;font-weight:900}
+.sub{font-size:13px;color:#8fa0bf;margin-top:3px}
+.toggle{position:absolute;right:16px;top:16px;background:#3ddc84;color:#05210f;border-radius:20px;padding:7px 12px;font-weight:900;font-size:13px}
+.map{position:absolute;inset:0;background:
+ radial-gradient(ellipse at 70% 80%,#0d3a66 0 30%,transparent 31%),
+ linear-gradient(160deg,#20324d 0 38%,#2b4466 38% 40%,#0f4d7d 40% 100%)}
+.coast{position:absolute;left:0;top:0;width:100%;height:100%}
+.pin{position:absolute;width:46px;height:46px;border-radius:50%;border:3px solid #fff;background:#334 center/cover;box-shadow:0 2px 8px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:20px}
+.fuzz{position:absolute;border-radius:50%;background:rgba(34,211,255,.13);border:1px dashed rgba(34,211,255,.5)}
+.bite{box-shadow:0 0 0 6px rgba(255,138,61,.45),0 0 22px 8px rgba(255,138,61,.6)}
+.me{border-color:#22d3ff}
+.lab{position:absolute;font-size:11px;font-weight:800;background:#0b1428cc;border-radius:8px;padding:2px 6px;white-space:nowrap}
+.legend{position:absolute;left:12px;right:12px;bottom:74px;background:#0b1428e6;border-radius:12px;padding:9px 12px;font-size:12px;line-height:1.7;color:#c9d6ee}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:62px;background:#070c18;display:flex;justify-content:space-around;align-items:center;font-size:12px;color:#5f7799;font-weight:800}
+.tabs .on{color:#22d3ff}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#0b1730;border-radius:22px 22px 0 0;padding:18px;border-top:1px solid #24324f}
+.av{width:74px;height:74px;border-radius:50%;border:3px solid #22d3ff;background:#2c4d6b;display:flex;align-items:center;justify-content:center;font-size:34px}
+.stats{display:flex;gap:8px;margin-top:14px}
+.st{flex:1;background:#0f1c36;border:1px solid #233457;border-radius:12px;padding:9px;text-align:center}
+.st b{display:block;font-size:20px}
+.st small{color:#8fa0bf;font-size:11px}
+.btn{border-radius:14px;padding:14px;text-align:center;font-weight:900;font-size:16px;margin-top:12px}
+.b1{background:linear-gradient(90deg,#1e7bff,#22d3ff);color:#001a33}
+.b2{background:transparent;border:1px solid #3a4a66;color:#a9bbd6;font-size:13px;padding:10px}
+.badge{display:inline-block;font-size:11px;font-weight:900;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:2px}
+.msgs{position:absolute;top:84px;left:0;right:0;bottom:80px;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.m{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.35}
+.them{background:#16233f;align-self:flex-start;border-bottom-left-radius:4px}
+.mine{background:#1e7bff;align-self:flex-end;border-bottom-right-radius:4px}
+.who{font-size:11px;color:#8fa0bf;margin-bottom:2px;font-weight:800}
+.inp{position:absolute;left:12px;right:12px;bottom:14px;background:#0f1c36;border:1px solid #24324f;border-radius:22px;padding:12px 16px;color:#5f7799;font-size:14px}
+.req{background:#0f1c36;border:1px solid #ffc928;border-radius:14px;padding:12px;font-size:14px;margin:4px 0}
+.sys{align-self:center;font-size:12px;color:#8fa0bf;background:#0b1428;border-radius:10px;padding:4px 10px}
+.rule{background:#fff;border-radius:14px;padding:14px 18px;font-size:15px;line-height:1.6;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+
+.form{position:absolute;inset:0;padding:22px 20px;overflow:hidden}
+.logo{text-align:center;font-size:22px;font-weight:900;margin:8px 0 14px}
+.logo b{color:#22d3ff}
+.tb{display:flex;background:#0f1c36;border-radius:12px;padding:4px;margin-bottom:14px}
+.tb div{flex:1;text-align:center;padding:9px;border-radius:9px;font-weight:900;font-size:13px;color:#8fa0bf}
+.tb .on{background:#1e7bff;color:#fff}
+.fl{font-size:12px;color:#8fa0bf;font-weight:800;margin:9px 0 4px}
+.fl i{color:#5f7799;font-weight:600;font-style:normal}
+.in{background:#0f1c36;border:1px solid #24324f;border-radius:11px;padding:11px 12px;font-size:14px;color:#eaf3ff}
+.in.ph{color:#5f7799}
+.two{display:flex;gap:8px}.two>div{flex:1}
+.tick{display:flex;gap:9px;font-size:12.5px;line-height:1.4;color:#c9d6ee;margin-top:12px}
+.tick span.box{flex:none;width:20px;height:20px;border-radius:5px;background:#3ddc84;color:#05210f;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:14px}
+.auto{background:#0b1428;border:1px dashed #2f4470;border-radius:11px;padding:9px 11px;font-size:12px;color:#8fa0bf;line-height:1.55;margin-top:10px}
+.auto b{color:#3ddc84}
+.big{font-size:60px;text-align:center;margin:60px 0 10px}
+.center{text-align:center;font-size:15px;line-height:1.55;color:#c9d6ee}
+.pic{width:92px;height:92px;border-radius:50%;border:3px dashed #22d3ff;margin:4px auto 2px;display:flex;align-items:center;justify-content:center;font-size:36px;background:#0f1c36;position:relative}
+.pic small{position:absolute;bottom:-4px;right:-4px;background:#1e7bff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #050b18}
+.lock{display:flex;justify-content:space-between;align-items:center}
+.lock span{font-size:11px;color:#8fa0bf}
+.seg{display:flex;gap:6px}.seg div{flex:1;text-align:center;padding:10px;border-radius:11px;border:1px solid #24324f;font-size:13px;font-weight:800;color:#8fa0bf;background:#0f1c36}
+.seg .on{border-color:#22d3ff;color:#22d3ff;background:#0b2440}
+.code{display:flex;gap:7px;justify-content:center;margin:18px 0}
+.code div{width:42px;height:52px;border-radius:10px;background:#0f1c36;border:1px solid #2f4470;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.menu{position:absolute;right:12px;top:70px;width:210px;background:#13213f;border:1px solid #2f4470;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.6);z-index:9;overflow:hidden}
+.menu div{padding:13px 15px;font-size:14px;font-weight:800;border-bottom:1px solid #22314f}
+.rr{display:flex;align-items:center;gap:10px;background:#0f1c36;border:1px solid #24324f;border-radius:11px;padding:11px;margin-top:7px;font-size:14px}
+.rr i{width:18px;height:18px;border-radius:50%;border:2px solid #5f7799;flex:none}
+.rr.on{border-color:#ff8a3d}.rr.on i{border:5px solid #ff8a3d}
+.card{background:#0f1c36;border:1px solid #24324f;border-radius:12px;padding:10px;margin-top:8px;font-size:12.5px;line-height:1.5}
+.card b{font-size:13.5px}
+.pill{display:inline-block;border-radius:8px;padding:5px 8px;font-size:11px;font-weight:900;margin:6px 4px 0 0}
+.ok{color:#3ddc84;font-weight:900}
+</style></head><body><h1>Register + report (mockup, app) &middot; surfcasting only</h1>
+<div class="cap">Sign up needs <b>both</b> an SMS code and an email link. Country is set from the phone location and locked. Every chat has End chat, Block and Report; you, the admin, see every report and can hide, mute or ban an account.</div>
+<div class="row"><div class="col"><div class="step"><span class="n">1</span>Register (surfcasting)</div><div class="phone"><div class="form" style="padding-top:14px">
+<div class="logo" style="margin:0 0 8px;font-size:19px">Laarif <b>StrikeSense</b> <span style="font-size:12px;color:#8fa0bf">&middot; surfcasting</span></div>
+<div class="two"><div><div class="fl">First name *</div><div class="in">Ali</div></div><div><div class="fl">Last name *</div><div class="in">Laarif</div></div></div>
+<div class="fl">Nickname <i>(what people call you, optional)</i></div><div class="in">Ali Asilah</div>
+<div class="two"><div><div class="lock"><div class="fl">Country</div><span>&#128205; auto &#128274;</span></div><div class="in" style="color:#8fa0bf">&#127468;&#127463; United Kingdom</div></div><div><div class="fl">City *</div><div class="in">London</div></div></div>
+<div class="two"><div><div class="fl">Date of birth *</div><div class="in">12 / 05 / 1988</div></div><div><div class="fl">Sex *</div><div class="seg"><div class="on">Male</div><div>Female</div></div></div></div>
+<div class="fl">Phone *</div><div class="two"><div style="flex:0 0 98px"><div class="in">&#127468;&#127463; +44 &#9662;</div></div><div><div class="in">7700 900123</div></div></div>
+<div class="fl">Email *</div><div class="in">ali.laarif@gmail.com</div>
+<div class="fl">Password *</div><div class="in">&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;</div>
+<div class="tick" style="margin-top:9px"><span class="box">&#10003;</span><span>I agree to the rules and to share my strikes and approximate fishing place.</span></div>
+<div class="btn b1" style="margin-top:9px;padding:11px">REGISTER</div></div></div><div class="note">Country comes from the phone location and is locked &#128274;. The phone code (+44) is set from it; you can change the code if your number is from another country.</div></div><div class="col"><div class="step"><span class="n">2</span>Check your phone</div><div class="phone"><div class="form"><div class="big">&#128241;</div>
+<div class="center" style="font-size:20px;font-weight:900;color:#eaf3ff">Check your phone</div>
+<div class="center" style="margin-top:8px">We sent a 6-digit code by SMS to<br><b style="color:#22d3ff">+44 7700 900123</b></div>
+<div class="code"><div>4</div><div>8</div><div>1</div><div>9</div><div style="color:#5f7799">_</div><div style="color:#5f7799">_</div></div>
+<div class="btn b1">CONFIRM</div>
+<div class="center" style="font-size:13px;margin-top:14px;color:#8fa0bf">No SMS? <span style="color:#22d3ff;font-weight:800">Send again</span> (in 0:45)</div>
+<div class="center" style="font-size:12px;margin-top:40px"><span class="ok">Step 1 of 2</span> &middot; then your email</div></div></div><div class="note">Many phones fill the code in by themselves.</div></div><div class="col"><div class="step"><span class="n">3</span>Check your email</div><div class="phone"><div class="form"><div class="big">&#9993;&#65039;</div>
+<div class="center" style="font-size:20px;font-weight:900;color:#eaf3ff">Check your email</div>
+<div class="center" style="margin-top:8px">Phone confirmed <span class="ok">&#10003;</span><br><br>Now tap the link we sent to<br><b style="color:#22d3ff">ali.laarif@gmail.com</b></div>
+<div class="btn b1" style="margin-top:26px">I TAPPED THE LINK</div>
+<div class="btn b2">Send the email again</div>
+<div class="center" style="font-size:12px;margin-top:14px;color:#5f7799">Not there? Look in Spam / Junk.</div>
+<div class="center" style="font-size:12px;margin-top:26px"><span class="ok">Step 2 of 2</span></div></div></div><div class="note">Both checks are needed before the map, chat or ranking.</div></div><div class="col"><div class="step"><span class="n">4</span>Done: your profile</div><div class="phone"><div class="form"><div style="display:flex;gap:14px;align-items:center;margin-top:10px">
+<div class="av" style="font-size:40px;background:#16304f">&#128104;</div>
+<div><div style="font-size:20px;font-weight:900">Ali Asilah</div><div class="sub">Ali Laarif &middot; London, &#127468;&#127463; UK</div><div class="sub">Surfcaster &middot; member since Oct 2026</div></div></div>
+<div class="center" style="font-size:12px;color:#8fa0bf;margin-top:6px">Default avatar (male) &middot; <span style="color:#22d3ff;font-weight:800">add a photo</span></div>
+<div class="card"><b>Fishing licence</b> <i style="color:#5f7799;font-style:normal">(optional)</i><br>Add number + photo &rarr; badge <b style="color:#3ddc84">LICENSED &#10003;</b></div>
+<div class="auto"><b>Saved by itself at REGISTER:</b><br>&#128197; 31 Oct 2026, 10:42 (London time)<br>&#128205; London, United Kingdom (GPS)<br>&#128241; +44 phone verified <span class="ok">&#10003;</span> &middot; &#9993;&#65039; email verified <span class="ok">&#10003;</span></div>
+<div class="card" style="color:#8fa0bf">&#128274; Country and email can't be changed. Need a change? <span style="color:#22d3ff;font-weight:800">Contact the admin</span></div>
+<div class="btn b1" style="margin-top:12px">START FISHING</div></div></div><div class="note">Others see: nickname, photo/avatar, city, country, rank, badges. Never: phone, email, birth date, exact place.</div></div></div><div class="row" style="margin-top:26px"><div class="col"><div class="step"><span class="n">5</span>Chat: end, block, report</div><div class="phone"><div class="bar" style="background:#0b1730"><div class="ttl">&#128104; Marco <span style="float:right;font-size:24px;line-height:18px">&#8942;</span></div><div class="sub">online &middot; Pescador beach</div></div>
+<div class="menu"><div>&#128172; End chat</div><div>&#128683; Block Marco</div><div style="color:#ff8a94;border:0">&#9888; Report Marco</div></div>
+<div class="msgs"><div class="sys">You said hi &middot; Marco accepted</div>
+<div class="m them"><div class="who">Marco</div>Where exactly is your spot?</div>
+<div class="m mine">Around the rocks end</div>
+<div class="m them"><div class="who">Marco</div>Send me your number and your address</div>
+<div class="sys">Hold a message to report just that message</div></div>
+<div class="inp">Message&hellip;</div></div><div class="note"><b>End chat</b> closes it (they can't write again without a new "Say hi"). <b>Block</b> also hides you from them on the map.</div></div><div class="col"><div class="step"><span class="n">6</span>Report</div><div class="phone"><div class="form"><div style="font-size:20px;font-weight:900;margin-top:6px">&#9888; Report Marco</div>
+<div class="sub" style="margin-bottom:6px">What is wrong? Only the admin sees this.</div>
+<div class="rr"><i></i>Rude or insulting</div><div class="rr on"><i></i>Asks for private details</div><div class="rr"><i></i>Spam or selling</div><div class="rr"><i></i>Fake profile</div><div class="rr"><i></i>Cheating (fake catch)</div><div class="rr"><i></i>Something else</div>
+<div class="fl">Tell us more <i>(optional)</i></div><div class="in" style="height:60px">He keeps asking for my address</div>
+<div class="tick" style="margin-top:8px"><span class="box">&#10003;</span><span>Also block Marco</span></div>
+<div class="btn b1" style="background:#ff5d6c;color:#fff;margin-top:10px">SEND REPORT</div></div></div><div class="note">The last messages of the chat are attached to the report automatically, so the admin can check.</div></div><div class="col"><div class="step"><span class="n">7</span>Admin: reports</div><div class="phone"><div class="form" style="padding-top:14px"><div style="font-size:19px;font-weight:900">&#128737; Admin &middot; Reports <span class="badge" style="background:#ff5d6c;color:#fff">3 new</span></div>
+<div class="card"><b>Marco R.</b> &middot; &#127466;&#127480; Spain &middot; 2 reports<br><span style="color:#ffb070">Asks for private details</span> &middot; by Ali, 10:55<br><span style="color:#8fa0bf">"Send me your number and your address"</span>
+<div><span class="pill" style="background:#22314f">See chat</span><span class="pill" style="background:#3a2a10;color:#ffc928">Hide from map</span><span class="pill" style="background:#3a1a1f;color:#ff8a94">No chat</span><span class="pill" style="background:#ff5d6c;color:#fff">Ban</span><span class="pill" style="background:#22314f">Dismiss</span></div></div>
+<div class="card"><b>Sam K.</b> &middot; &#127468;&#127463; UK &middot; 1 report<br><span style="color:#ffb070">Cheating (fake catch)</span> &middot; by Tom, yesterday
+<div><span class="pill" style="background:#22314f">See catch</span><span class="pill" style="background:#3a2a10;color:#ffc928">Hide from map</span><span class="pill" style="background:#3a1a1f;color:#ff8a94">No chat</span><span class="pill" style="background:#ff5d6c;color:#fff">Ban</span></div></div>
+<div class="card" style="color:#8fa0bf"><b style="color:#eaf3ff">Restrictions</b>: for 7 days, 30 days or forever &middot; the user is told why &middot; you can undo any time</div>
+<div class="card" style="color:#8fa0bf"><b style="color:#eaf3ff">Change requests</b>: country / email changes asked by users</div></div></div><div class="note">Only your account sees this page.</div></div></div></body></html>
